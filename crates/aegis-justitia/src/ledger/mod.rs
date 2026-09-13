@@ -158,7 +158,10 @@ impl IoDeadline {
 }
 
 /// A monotonically increasing record sequence number, starting at one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(transparent)]
 pub struct Sequence(u64);
 
 impl Sequence {
@@ -191,9 +194,8 @@ impl Sequence {
 ///
 /// `Blocked` and `Halted` extend the three-value vocabulary of the imported
 /// oversight sketch; M14 must take the superset into the versioned schema.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "jsonl", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "jsonl", serde(rename_all = "kebab-case"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum RecordStatus {
     /// Held for a checker decision.
     PendingApproval,

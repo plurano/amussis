@@ -82,13 +82,28 @@
 //! of its own validated prefix. The last two convert a non-zero constant into a
 //! non-zero-typed value, where the only alternative would be `expect`.
 //!
-//! Deliberately out of scope for milestone M02: the consumer and hardened-unit
-//! contracts, eBPF compilation and verifier load, TPM2 signing, D-Bus transport
-//! and any file-backed ledger sink.
+//! # What milestone M14 added, and what it deliberately did not
+//!
+//! [`contracts`] holds the three versioned consumer schemas P06 speaks over --
+//! the action proposal from P09 Minerva, the decision request to P05 Forum and
+//! the signed audit record to P16 Athena -- together with the reviewed
+//! hardened-unit contract. Every schema is a typed Rust struct with an explicit
+//! contract version, a stable field encoding and a decoder that lands every
+//! field in a fixed inline buffer. See [`contracts`] for what that does and
+//! does not say about heap: an escape-free payload is decoded without one, an
+//! admissible JSON escape costs the decoder a bounded scratch copy, and the
+//! decoded value owns nothing either way.
+//!
+//! **No transport is implemented anywhere in this crate.** There is no D-Bus
+//! connection, no socket, no eBPF program and no TPM2 signing: a signature
+//! field is a field encoding, not a signer. eBPF compilation and verifier load
+//! are M19 and M10, TPM2 sealing is M20, the Forum consumer is M16, and a
+//! file-backed ledger sink is still absent.
 
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+pub mod contracts;
 pub mod effects;
 pub mod engine;
 pub mod error;
@@ -151,11 +166,32 @@ pub const DEFAULT_APPROVAL_TTL_SECS: u32 = 300;
 /// rather than allowed to block past its own deadline.
 pub const DEFAULT_SINK_SERVICE_MILLIS: u32 = 1;
 
+pub use crate::contracts::audit::{AuditRecordVersion, PLD_EFFECTIVE_AT, SignedAuditRecord};
+pub use crate::contracts::decision_request::{
+    DecisionRequest, DecisionRequestVersion, MAX_DECISION_WINDOW_SECS, MIN_DECISION_WINDOW_SECS,
+};
+pub use crate::contracts::encoding::{
+    DIGEST_HEX_CHARS, MAX_SIGNATURE_HEX_CHARS, OversightSignature, SignatureAlgorithm,
+    SignatureBytes,
+};
+pub use crate::contracts::graph::{
+    D03_ACTION_GATE, D03_ACTION_GATE_DIRECTION, D03_ACTION_GATE_TRANSPORT, D04_SANDBOX_GATE,
+    DecisionRecord, DecisionState, EdgeId, GateDirection, MAX_ADMISSION_HOPS, SandboxAdmissionPath,
+    contract_edges,
+};
+pub use crate::contracts::proposal::{ActionProposal, ActionProposalVersion};
+pub use crate::contracts::unit::{
+    CONTRACT_MARKER, INSTALL_DIRECTORIES, MAX_UNIT_BYTES, MAX_UNIT_LINES, REQUIRED_DIRECTIVES,
+    UnitContractError, is_installed_path, review,
+};
+pub use crate::contracts::{
+    ContractError, Correlation, MAX_CONTRACT_PAYLOAD_BYTES, PayloadBuffer, SchemaId,
+};
 pub use crate::engine::{EngineConfig, JustitiaEngine};
 pub use crate::error::JustitiaError;
 pub use crate::identity::{
-    AgentId, CheckerId, Identity, IdentityError, IntentId, MakerId, RequestId, SignerKeyId,
-    TargetResource,
+    AgentId, CheckerId, EventId, Identity, IdentityError, IntentId, MakerId, RequestId,
+    SignerKeyId, TargetResource,
 };
 pub use crate::intent::{ActionIntent, IntentError, IntentSpec};
 pub use crate::killswitch::{HaltReason, Killswitch, KillswitchState};

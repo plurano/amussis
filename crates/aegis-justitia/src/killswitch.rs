@@ -11,7 +11,8 @@
 use crate::time::UnixSeconds;
 
 /// Why the system was halted.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub enum HaltReason {
     /// A human operator stopped the system.

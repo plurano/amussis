@@ -112,7 +112,8 @@ impl fmt::Display for Identity {
 macro_rules! role_id {
     ($name:ident, $doc:literal) => {
         #[doc = $doc]
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+        #[serde(transparent)]
         pub struct $name(Identity);
 
         impl $name {
@@ -163,6 +164,10 @@ role_id!(RequestId, "Stable identifier of one approval request.");
 role_id!(
     SignerKeyId,
     "Identifier of the key that sealed an audit record."
+);
+role_id!(
+    EventId,
+    "Stable identifier of one audit event handed to P16 Athena."
 );
 
 impl MakerId {

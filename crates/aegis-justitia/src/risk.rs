@@ -14,7 +14,10 @@
 //! fallback from two checkers to one.
 
 /// Severity of a proposed action, ascending.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "kebab-case")]
 pub enum RiskTier {
     /// Routine and bounded; reversible without operator involvement.
     TierCRoutineBounded,
@@ -25,7 +28,8 @@ pub enum RiskTier {
 }
 
 /// Regulatory oversight class of a proposed action.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum OversightClass {
     /// No sector-specific oversight obligation.
     Standard,
@@ -34,7 +38,8 @@ pub enum OversightClass {
 }
 
 /// The kinds of action the engine classifies.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum ActionType {
     /// Modifying the contents of an existing file.
     FileModification,
@@ -79,7 +84,8 @@ impl ActionType {
 }
 
 /// The human oversight a classified action demands.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum RequiredApproval {
     /// No approval; the action may proceed.
     None,

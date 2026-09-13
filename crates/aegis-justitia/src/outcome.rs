@@ -38,7 +38,8 @@ pub enum WarningCode {
 }
 
 /// Why an action was refused.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub enum BlockReason {
     /// The halt latch was engaged.

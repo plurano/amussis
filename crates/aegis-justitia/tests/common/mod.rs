@@ -15,10 +15,13 @@
 #![allow(dead_code)]
 
 use aegis_justitia::{
-    ActionIntent, ActionType, AgentId, ClockError, Digest32, EngineConfig, FixedClock,
-    InMemorySink, IntentId, IntentSpec, IoDeadline, JustitiaEngine, JustitiaError,
-    MAX_SIGNATURE_BYTES, MakerId, OversightClass, RecordSigner, RiskTier, Sha256Hasher, SignError,
-    Signature, SignerBinding, SignerKeyId, TargetResource, Ttl, UnixSeconds,
+    ActionIntent, ActionProposal, ActionProposalVersion, ActionType, AgentId, AuditRecordVersion,
+    ClockError, DIGEST_LEN, DecisionRequest, DecisionRequestVersion, Digest32, EngineConfig,
+    EventId, FixedClock, HashAlgorithm, Identity, InMemorySink, IntentId, IntentSpec, IoDeadline,
+    JustitiaEngine, JustitiaError, MAX_SIGNATURE_BYTES, MakerId, OversightClass,
+    OversightSignature, PayloadBuffer, RecordSigner, RecordStatus, RequestId, RequiredApproval,
+    RiskTier, Sequence, Sha256Hasher, SignError, Signature, SignatureAlgorithm, SignedAuditRecord,
+    SignerBinding, SignerKeyId, TargetResource, Ttl, UnixSeconds,
 };
 
 /// Anything that can go wrong building or reading a fixture.
@@ -247,4 +250,190 @@ pub fn intent(
         target: TargetResource::parse("/var/lib/aegis/example")?,
     };
     Ok(ActionIntent::new(spec)?)
+}
+
+// --- Milestone M14 consumer-contract fixtures -----------------------------
+
+/// A non-empty seal, produced through the library's own signer rather than
+/// assembled from bytes, so the wire form under test is one the crate can
+/// actually emit. Nothing here is a TPM2 signature: M14 implements no signing.
+///
+/// # Errors
+///
+/// Propagates a fixture construction failure.
+pub fn seal() -> Fallible<OversightSignature> {
+    let signer = FixtureSigner::new()?;
+    let signature = signer.sign(&Digest32::from_bytes([7u8; DIGEST_LEN]))?;
+    Ok(OversightSignature::from_signature(
+        &signature,
+        SignatureAlgorithm::Tpm2RsaPss,
+    ))
+}
+
+/// The correlation identifier every contract fixture threads through.
+pub const CORRELATION: &str = "intent-0001";
+
+/// A well-formed, signed action proposal from P09 Minerva.
+///
+/// # Errors
+///
+/// Propagates a fixture construction failure.
+pub fn proposal() -> Fallible<ActionProposal> {
+    Ok(ActionProposal {
+        schema: ActionProposalVersion::V1,
+        edge: ActionProposal::EDGE,
+        direction: ActionProposal::DIRECTION,
+        correlation_id: Identity::parse(CORRELATION)?,
+        agent_id: AgentId::parse("agent-01")?,
+        maker: MakerId::parse("maker-alice")?,
+        action_type: ActionType::FileDeletion,
+        target: TargetResource::parse("/var/lib/aegis/example")?,
+        declared_tier: RiskTier::TierAConsequential,
+        oversight: OversightClass::Standard,
+        payload_hash: Digest32::from_bytes([3u8; DIGEST_LEN]),
+        proposed_at: UnixSeconds::new(1_000),
+        signature: Some(seal()?),
+    })
+}
+
+/// A well-formed decision request for P05 Forum, with a `window` second window.
+///
+/// # Errors
+///
+/// Propagates a fixture construction failure.
+pub fn decision_request(
+    tier: RiskTier,
+    class: OversightClass,
+    window: u64,
+) -> Fallible<DecisionRequest> {
+    let created = 1_000u64;
+    Ok(DecisionRequest {
+        schema: DecisionRequestVersion::V1,
+        edge: DecisionRequest::EDGE,
+        correlation_id: Identity::parse(CORRELATION)?,
+        request_id: RequestId::parse("request-0001")?,
+        agent_id: AgentId::parse("agent-01")?,
+        maker: MakerId::parse("maker-alice")?,
+        proposed_action: ActionType::FileDeletion,
+        target: TargetResource::parse("/var/lib/aegis/example")?,
+        risk_tier: tier,
+        oversight: class,
+        required_approval: RequiredApproval::for_action(tier, class),
+        created_at: UnixSeconds::new(created),
+        due_at: UnixSeconds::new(created.saturating_add(window)),
+    })
+}
+
+/// A well-formed signed audit record for P16 Athena at `sequence`.
+///
+/// The predecessor link follows the genesis rule: all zero at the head of the
+/// chain, and a real digest anywhere else.
+///
+/// # Errors
+///
+/// Propagates a fixture construction failure.
+pub fn audit_record(sequence: u64) -> Fallible<SignedAuditRecord> {
+    let previous = if sequence == 1 {
+        Digest32::GENESIS
+    } else {
+        Digest32::from_bytes([9u8; DIGEST_LEN])
+    };
+    Ok(SignedAuditRecord {
+        schema: AuditRecordVersion::V1,
+        edge: SignedAuditRecord::EDGE,
+        correlation_id: Identity::parse(CORRELATION)?,
+        event_id: EventId::parse("event-0001")?,
+        sequence: Sequence::new(sequence),
+        algorithm: HashAlgorithm::Sha256,
+        previous,
+        digest: Digest32::from_bytes([5u8; DIGEST_LEN]),
+        action_type: ActionType::FileDeletion,
+        status: RecordStatus::Approved,
+        block_reason: None,
+        actor_id: AgentId::parse("agent-01")?,
+        recorded_at: UnixSeconds::new(1_000),
+        oversight_signature: Some(seal()?),
+    })
+}
+
+/// Renders a value as one JSON payload, without the contract validation.
+///
+/// Negative tests need payloads the encoders refuse to produce, so they build
+/// the text here and hand it to the decoder under test.
+///
+/// # Errors
+///
+/// Propagates a serialisation failure.
+pub fn render<T: serde::Serialize>(value: &T) -> Fallible<String> {
+    Ok(serde_json::to_string(value)?)
+}
+
+/// Encodes a valid payload through the contract's own bounded encoder.
+///
+/// # Errors
+///
+/// Propagates the contract refusal.
+pub fn encoded<T>(value: &T) -> Fallible<String>
+where
+    T: Encodable,
+{
+    let mut buffer = PayloadBuffer::new();
+    Ok(value.encode(&mut buffer)?.to_owned())
+}
+
+/// The three contract payloads, behind one fixture-side encoding call.
+pub trait Encodable {
+    /// Encodes this payload into `buffer`.
+    ///
+    /// # Errors
+    ///
+    /// Propagates the contract refusal.
+    fn encode<'b>(
+        &self,
+        buffer: &'b mut PayloadBuffer,
+    ) -> Result<&'b str, aegis_justitia::ContractError>;
+}
+
+impl Encodable for ActionProposal {
+    fn encode<'b>(
+        &self,
+        buffer: &'b mut PayloadBuffer,
+    ) -> Result<&'b str, aegis_justitia::ContractError> {
+        self.encode_into(buffer)
+    }
+}
+
+impl Encodable for DecisionRequest {
+    fn encode<'b>(
+        &self,
+        buffer: &'b mut PayloadBuffer,
+    ) -> Result<&'b str, aegis_justitia::ContractError> {
+        self.encode_into(buffer)
+    }
+}
+
+impl Encodable for SignedAuditRecord {
+    fn encode<'b>(
+        &self,
+        buffer: &'b mut PayloadBuffer,
+    ) -> Result<&'b str, aegis_justitia::ContractError> {
+        self.encode_into(buffer)
+    }
+}
+
+/// Parses a rendered payload, edits it, and renders it again.
+///
+/// # Errors
+///
+/// Propagates a parse or render failure.
+pub fn tamper(text: &str, edit: impl FnOnce(&mut serde_json::Value)) -> Fallible<String> {
+    let mut value: serde_json::Value = serde_json::from_str(text)?;
+    edit(&mut value);
+    Ok(serde_json::to_string(&value)?)
+}
+
+/// Builds a string of `len` ASCII bytes drawn from the identifier charset.
+#[must_use]
+pub fn filler(len: usize) -> String {
+    "a".repeat(len)
 }

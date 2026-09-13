@@ -41,13 +41,12 @@ pub enum PreimageError {
 }
 
 /// The hash algorithms the ledger admits. There is no `Md5` variant.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "jsonl", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "jsonl", serde(rename_all = "kebab-case"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub enum HashAlgorithm {
     /// FIPS 180-4 SHA-256.
-    #[cfg_attr(feature = "jsonl", serde(rename = "sha-256"))]
+    #[serde(rename = "sha-256")]
     Sha256,
 }
 

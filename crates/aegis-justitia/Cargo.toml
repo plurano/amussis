@@ -17,14 +17,20 @@ path = "src/lib.rs"
 
 [dependencies]
 base16ct.workspace = true
-serde = { workspace = true, optional = true }
-serde_json = { workspace = true, optional = true }
+serde.workspace = true
+serde_json.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
 
+[dev-dependencies]
+serde_json.workspace = true
+
 [features]
 default = []
-jsonl = ["dep:serde", "dep:serde_json"]
+# The JSON Lines ledger renderer. It stays behind a feature because it is a
+# local operator convenience, not a consumer contract; the M14 consumer schemas
+# in `contracts` are unconditional, so the default gate covers them.
+jsonl = []
 
 [lints]
 workspace = true
