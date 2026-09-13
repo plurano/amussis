@@ -1,0 +1,30 @@
+# SPDX-FileCopyrightText: 2026 Lusoris <lusoris@proton.me>
+# SPDX-License-Identifier: EUPL-1.2
+
+[package]
+name = "aegis-justitia"
+description = "Aegis OS P06 decision engine: risk tiers, maker-checker oversight and a hash-linked audit ledger."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+base16ct.workspace = true
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+sha2.workspace = true
+thiserror.workspace = true
+
+[features]
+default = []
+jsonl = ["dep:serde", "dep:serde_json"]
+
+[lints]
+workspace = true
