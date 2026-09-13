@@ -102,13 +102,14 @@ fn the_toolchain_pin_is_an_exact_version() {
 ///
 /// M02 promoted `aegis-justitia`, M03 promoted `aegis-fabrica-defs`, M15
 /// promoted `aegis-janus-lifecycle`, M17 promoted `aegis-vulcan` and
-/// `aegis-hestia`, and M05 promoted `aegis-tellus` and `aegis-athena`, so the
+/// `aegis-hestia`, M05 promoted `aegis-tellus` and `aegis-athena`, and M06 promoted
+/// `aegis-minerva` and `aegis-vesta`, so the
 /// list grows by a named entry per milestone. What must not change is that it
 /// is written out: a glob would activate the reserved crate directories the
 /// moment one of them gained a manifest, with no review.
 ///
 /// The count is derived rather than written down. A literal had to be edited
-/// in three crates at once when M05 added two members, which is duplicated
+/// in three crates at once each time a milestone adds members, which is duplicated
 /// mutable state of exactly the kind the repository has a gate against. The
 /// invariant behind it -- a directory with a manifest is a member, and nothing
 /// else is -- is what is held here.
