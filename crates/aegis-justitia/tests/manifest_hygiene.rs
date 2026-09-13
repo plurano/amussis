@@ -100,16 +100,20 @@ fn the_toolchain_pin_is_an_exact_version() {
 
 /// The workspace activates exactly the crates the milestones promote.
 ///
-/// M02 promoted `aegis-justitia` and M03 promoted `aegis-fabrica-defs`, so the
-/// list grows by a named entry per milestone. What must not change is that it
-/// is written out: a glob would activate the reserved crate directories the
-/// moment one of them gained a manifest, with no review.
+/// M02 promoted `aegis-justitia`, M03 promoted `aegis-fabrica-defs` and M15
+/// promoted `aegis-janus-lifecycle`, so the list grows by a named entry per
+/// milestone. What must not change is that it is written out: a glob would
+/// activate the reserved crate directories the moment one of them gained a
+/// manifest, with no review.
 #[test]
 fn the_workspace_activates_only_the_promoted_crates() {
     let root = read("Cargo.toml").unwrap_or_default();
     assert!(!root.is_empty(), "the workspace root manifest must exist");
     assert!(
-        root.contains("members = [\"crates/aegis-fabrica-defs\", \"crates/aegis-justitia\"]"),
+        root.contains(
+            "members = [\"crates/aegis-fabrica-defs\", \"crates/aegis-janus-lifecycle\", \
+             \"crates/aegis-justitia\"]"
+        ),
         "the member list must be explicit and name only the activated crates"
     );
     assert!(
