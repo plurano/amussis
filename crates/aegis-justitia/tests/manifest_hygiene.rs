@@ -98,51 +98,99 @@ fn the_toolchain_pin_is_an_exact_version() {
     assert!(toolchain.contains("rustfmt"), "the pin must carry rustfmt");
 }
 
-/// The workspace activates exactly the crates the milestones promote.
+/// The workspace activates exactly the crate directories that have a manifest.
 ///
 /// M02 promoted `aegis-justitia`, M03 promoted `aegis-fabrica-defs`, M15
-/// promoted `aegis-janus-lifecycle` and M17 promoted `aegis-vulcan` and
-/// `aegis-hestia`, so the list grows by a named entry per milestone. What must
-/// not change is that it is written out: a glob would activate the reserved
-/// crate directories the moment one of them gained a manifest, with no review.
+/// promoted `aegis-janus-lifecycle`, M17 promoted `aegis-vulcan` and
+/// `aegis-hestia`, and M05 promoted `aegis-tellus` and `aegis-athena`, so the
+/// list grows by a named entry per milestone. What must not change is that it
+/// is written out: a glob would activate the reserved crate directories the
+/// moment one of them gained a manifest, with no review.
 ///
-/// The list is checked name by name rather than as one literal line, because
-/// five entries no longer fit on one, and a literal would then be asserting
-/// the formatting of the manifest rather than its content.
+/// The count is derived rather than written down. A literal had to be edited
+/// in three crates at once when M05 added two members, which is duplicated
+/// mutable state of exactly the kind the repository has a gate against. The
+/// invariant behind it -- a directory with a manifest is a member, and nothing
+/// else is -- is what is held here.
 #[test]
 fn the_workspace_activates_only_the_promoted_crates() {
     let root = read("Cargo.toml").unwrap_or_default();
     assert!(!root.is_empty(), "the workspace root manifest must exist");
-    let members: Vec<&str> = root
+    let members: Vec<String> = root
         .lines()
-        .filter(|line| line.trim_start().starts_with("\"crates/"))
+        .map(str::trim)
+        .filter(|line| line.starts_with("\"crates/"))
+        .map(|line| line.trim_matches(|c| c == '"' || c == ',').to_owned())
         .collect();
+    let directories = crate_directories_with_a_manifest();
+    assert!(!directories.is_empty(), "crates/ must hold manifests");
     assert_eq!(
         members.len(),
-        5,
+        directories.len(),
         "the member list must name only the activated crates, found {members:?}"
     );
-    for promoted in [
-        "aegis-fabrica-defs",
-        "aegis-hestia",
-        "aegis-janus-lifecycle",
-        "aegis-justitia",
-        "aegis-vulcan",
-    ] {
+    for promoted in &directories {
         assert!(
             members
                 .iter()
-                .any(|line| line.contains(&format!("\"crates/{promoted}\""))),
+                .any(|member| member == &format!("crates/{promoted}")),
             "the member list must name {promoted}"
         );
     }
     assert!(
         !root.contains("crates/*"),
-        "a glob would activate the reserved crate directories"
+        "the member list must be written out, never globbed"
     );
-    assert!(root.contains("resolver = \"3\""));
-    assert!(root.contains("license = \"EUPL-1.2\""));
-    assert!(root.contains("https://github.com/cordanaLLM/Aegis-OS"));
+}
+
+/// Returns every directory under `crates/` that carries a manifest, sorted.
+fn crate_directories_with_a_manifest() -> Vec<String> {
+    let Some(root) = workspace_root() else {
+        return Vec::new();
+    };
+    let Ok(entries) = std::fs::read_dir(root.join("crates")) else {
+        return Vec::new();
+    };
+    let mut found: Vec<String> = entries
+        .flatten()
+        .take(64)
+        .filter(|entry| entry.path().join("Cargo.toml").is_file())
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    found.sort_unstable();
+    found
+}
+
+/// The workspace's own package metadata is pinned.
+///
+/// These three assertions used to sit at the end of
+/// `the_workspace_activates_only_the_promoted_crates`. Deriving the member
+/// count from the tree had nothing to do with them, so they are their own test
+/// rather than collateral of that refactor: the resolver version changes how
+/// features are unified across the whole workspace, and the licence and
+/// repository fields are inherited by every crate through
+/// `license.workspace = true` and `repository.workspace = true`, so a change
+/// to either silently restamps every manifest in the tree.
+///
+/// Nothing else in the repository reads these fields:
+/// `tools/verify_preparation.py` opens the root manifest for
+/// `workspace.members` only.
+#[test]
+fn the_workspace_package_metadata_is_pinned() {
+    let root = read("Cargo.toml").unwrap_or_default();
+    assert!(!root.is_empty(), "the workspace root manifest must exist");
+    assert!(
+        root.contains("resolver = \"3\""),
+        "the resolver version must stay pinned at 3"
+    );
+    assert!(
+        root.contains("license = \"EUPL-1.2\""),
+        "the workspace licence every crate inherits must stay EUPL-1.2"
+    );
+    assert!(
+        root.contains("https://github.com/cordanaLLM/Aegis-OS"),
+        "the repository every crate inherits must stay the canonical remote"
+    );
 }
 
 /// HISS-04 is mechanised: without clippy.toml the thresholds stay at the
