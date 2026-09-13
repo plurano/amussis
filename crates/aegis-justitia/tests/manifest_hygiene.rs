@@ -100,22 +100,42 @@ fn the_toolchain_pin_is_an_exact_version() {
 
 /// The workspace activates exactly the crates the milestones promote.
 ///
-/// M02 promoted `aegis-justitia`, M03 promoted `aegis-fabrica-defs` and M15
-/// promoted `aegis-janus-lifecycle`, so the list grows by a named entry per
-/// milestone. What must not change is that it is written out: a glob would
-/// activate the reserved crate directories the moment one of them gained a
-/// manifest, with no review.
+/// M02 promoted `aegis-justitia`, M03 promoted `aegis-fabrica-defs`, M15
+/// promoted `aegis-janus-lifecycle` and M17 promoted `aegis-vulcan` and
+/// `aegis-hestia`, so the list grows by a named entry per milestone. What must
+/// not change is that it is written out: a glob would activate the reserved
+/// crate directories the moment one of them gained a manifest, with no review.
+///
+/// The list is checked name by name rather than as one literal line, because
+/// five entries no longer fit on one, and a literal would then be asserting
+/// the formatting of the manifest rather than its content.
 #[test]
 fn the_workspace_activates_only_the_promoted_crates() {
     let root = read("Cargo.toml").unwrap_or_default();
     assert!(!root.is_empty(), "the workspace root manifest must exist");
-    assert!(
-        root.contains(
-            "members = [\"crates/aegis-fabrica-defs\", \"crates/aegis-janus-lifecycle\", \
-             \"crates/aegis-justitia\"]"
-        ),
-        "the member list must be explicit and name only the activated crates"
+    let members: Vec<&str> = root
+        .lines()
+        .filter(|line| line.trim_start().starts_with("\"crates/"))
+        .collect();
+    assert_eq!(
+        members.len(),
+        5,
+        "the member list must name only the activated crates, found {members:?}"
     );
+    for promoted in [
+        "aegis-fabrica-defs",
+        "aegis-hestia",
+        "aegis-janus-lifecycle",
+        "aegis-justitia",
+        "aegis-vulcan",
+    ] {
+        assert!(
+            members
+                .iter()
+                .any(|line| line.contains(&format!("\"crates/{promoted}\""))),
+            "the member list must name {promoted}"
+        );
+    }
     assert!(
         !root.contains("crates/*"),
         "a glob would activate the reserved crate directories"
