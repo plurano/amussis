@@ -98,18 +98,23 @@ fn the_toolchain_pin_is_an_exact_version() {
     assert!(toolchain.contains("rustfmt"), "the pin must carry rustfmt");
 }
 
-/// The workspace activates exactly the one crate this milestone promotes.
+/// The workspace activates exactly the crates the milestones promote.
+///
+/// M02 promoted `aegis-justitia` and M03 promoted `aegis-fabrica-defs`, so the
+/// list grows by a named entry per milestone. What must not change is that it
+/// is written out: a glob would activate the reserved crate directories the
+/// moment one of them gained a manifest, with no review.
 #[test]
-fn the_workspace_activates_only_the_promoted_crate() {
+fn the_workspace_activates_only_the_promoted_crates() {
     let root = read("Cargo.toml").unwrap_or_default();
     assert!(!root.is_empty(), "the workspace root manifest must exist");
     assert!(
-        root.contains("members = [\"crates/aegis-justitia\"]"),
-        "the member list must be explicit and name only the activated crate"
+        root.contains("members = [\"crates/aegis-fabrica-defs\", \"crates/aegis-justitia\"]"),
+        "the member list must be explicit and name only the activated crates"
     );
     assert!(
         !root.contains("crates/*"),
-        "a glob would activate the eleven reserved crate directories"
+        "a glob would activate the reserved crate directories"
     );
     assert!(root.contains("resolver = \"3\""));
     assert!(root.contains("license = \"EUPL-1.2\""));
