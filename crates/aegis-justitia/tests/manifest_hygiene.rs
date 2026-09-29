@@ -7,7 +7,22 @@
 //! workspace activates exactly one crate. Each of those is a claim about files
 //! rather than about code, so each is asserted here rather than left as prose.
 
+#[path = "../../dependency_closure.rs"]
+mod dependency_closure;
+
 use std::path::{Path, PathBuf};
+
+/// This crate's package name, the start of its closure (D78).
+const PACKAGE: &str = "aegis-justitia";
+
+/// The MD5 implementations D02 excludes from this crate's closure. The lock-wide
+/// sweep before D78 searched for four spellings, `"md5"`, `"md-5"`,
+/// `name = "md5` and `name = "md-5`; they name these two packages, and the
+/// closure matches names exactly. The last two had no closing quote, so they
+/// also refused any package whose name merely starts with `md5` or `md-5`
+/// (`md5-asm`, say); D78's exact-name rule gives that prefix coverage up, and
+/// `a_prefixed_md5_name_is_not_a_hit` records it.
+const FORBIDDEN: [&str; 2] = ["md5", "md-5"];
 
 /// Returns the workspace root, two directories above this crate's manifest.
 fn workspace_root() -> Option<PathBuf> {
@@ -21,20 +36,55 @@ fn read(name: &str) -> Option<String> {
 }
 
 /// The resolved dependency graph contains no MD5 implementation.
+///
+/// Since M27 the graph is this crate's own dependency closure, read from
+/// `cargo metadata` (D78), rather than the whole lock; D02's SHA-256
+/// implementation must still be locked and in the closure.
 #[test]
-fn the_lock_file_contains_no_md5_implementation() {
+fn the_lock_file_contains_no_md5_implementation() -> Result<(), String> {
+    let names = dependency_closure::own_closure(PACKAGE)?;
+    let found = dependency_closure::hits(&names, &FORBIDDEN);
+    assert!(
+        found.is_empty(),
+        "the closure of {PACKAGE} must not contain {found:?}: D02 excludes MD5"
+    );
+    assert!(
+        names.contains("sha2"),
+        "the closure must contain the SHA-256 implementation"
+    );
     let lock = read("Cargo.lock").unwrap_or_default();
     assert!(!lock.is_empty(), "Cargo.lock must be committed");
-    for token in ["\"md5\"", "\"md-5\"", "name = \"md5", "name = \"md-5"] {
-        assert!(
-            !lock.contains(token),
-            "the resolved lock must not contain {token}: D02 excludes MD5"
-        );
-    }
     assert!(
         lock.contains("name = \"sha2\""),
         "the resolved lock must contain the SHA-256 implementation"
     );
+    Ok(())
+}
+
+/// Negative (D78): an MD5 implementation planted in this crate's closure, as
+/// a dev or a normal dependency, fails the sweep.
+#[test]
+fn a_planted_md5_crate_fails_the_sweep() -> Result<(), String> {
+    let mut planted = dependency_closure::metadata()?;
+    dependency_closure::plant(&mut planted, PACKAGE, "md5", Some("dev"))?;
+    dependency_closure::plant(&mut planted, PACKAGE, "md-5", None)?;
+    let names = dependency_closure::closure(&planted, PACKAGE)?;
+    assert_eq!(
+        dependency_closure::hits(&names, &FORBIDDEN),
+        vec!["md5", "md-5"]
+    );
+    Ok(())
+}
+
+/// Boundary (D78): names match exactly, so a package whose name only starts
+/// with an MD5 spelling is not a hit. The pre-D78 lock search refused it
+/// through its unterminated `name = "md5` token; that coverage is given up.
+#[test]
+fn a_prefixed_md5_name_is_not_a_hit() -> Result<(), String> {
+    let prefixed = dependency_closure::synthetic(PACKAGE, &["md5-asm", "md-5-extra"]);
+    let names = dependency_closure::closure(&prefixed, PACKAGE)?;
+    assert!(dependency_closure::hits(&names, &FORBIDDEN).is_empty());
+    Ok(())
 }
 
 /// The crate manifest declares no MD5 dependency and no unexpected one.
