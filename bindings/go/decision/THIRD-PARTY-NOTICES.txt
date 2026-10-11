@@ -376,8 +376,8 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ================================================================================
-thiserror 2.0.20
-https://crates.io/crates/thiserror/2.0.20
+thiserror 2.0.21
+https://crates.io/crates/thiserror/2.0.21
 Licence offered: MIT OR Apache-2.0; taken: MIT
 --------------------------------------------------------------------------------
 Permission is hereby granted, free of charge, to any
