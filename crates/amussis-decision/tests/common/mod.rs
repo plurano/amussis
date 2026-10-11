@@ -3,7 +3,7 @@
 
 //! Fixtures shared by the integration tests.
 //!
-//! Everything here reaches `aegis-justitia` through its public API only. That
+//! Everything here reaches `amussis-decision` through its public API only. That
 //! is the proof the milestone asks for: the risk-tier, maker-checker, Annex III,
 //! timeout and killswitch logic is library code, not a `#[cfg(test)]` module.
 //!
@@ -14,7 +14,7 @@
 
 #![allow(dead_code)]
 
-use aegis_justitia::{
+use amussis_decision::{
     ActionIntent, ActionProposal, ActionProposalVersion, ActionType, AgentId, AuditRecordVersion,
     ClockError, DIGEST_LEN, DecisionRequest, DecisionRequestVersion, Digest32, EngineConfig,
     EventId, FixedClock, HashAlgorithm, Identity, InMemorySink, IntentId, IntentSpec, IoDeadline,
@@ -113,12 +113,12 @@ impl RecordSigner for OversizedSigner {
     }
 }
 
-/// A clock whose source is broken. `aegis_justitia::Clock` is public API, so a
+/// A clock whose source is broken. `amussis_decision::Clock` is public API, so a
 /// fault injector is an ordinary implementation of it rather than a hook.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct FaultyClock;
 
-impl aegis_justitia::Clock for FaultyClock {
+impl amussis_decision::Clock for FaultyClock {
     fn now(&self) -> Result<UnixSeconds, ClockError> {
         Err(ClockError::BeforeEpoch)
     }
@@ -391,14 +391,14 @@ pub trait Encodable {
     fn encode<'b>(
         &self,
         buffer: &'b mut PayloadBuffer,
-    ) -> Result<&'b str, aegis_justitia::ContractError>;
+    ) -> Result<&'b str, amussis_decision::ContractError>;
 }
 
 impl Encodable for ActionProposal {
     fn encode<'b>(
         &self,
         buffer: &'b mut PayloadBuffer,
-    ) -> Result<&'b str, aegis_justitia::ContractError> {
+    ) -> Result<&'b str, amussis_decision::ContractError> {
         self.encode_into(buffer)
     }
 }
@@ -407,7 +407,7 @@ impl Encodable for DecisionRequest {
     fn encode<'b>(
         &self,
         buffer: &'b mut PayloadBuffer,
-    ) -> Result<&'b str, aegis_justitia::ContractError> {
+    ) -> Result<&'b str, amussis_decision::ContractError> {
         self.encode_into(buffer)
     }
 }
@@ -416,7 +416,7 @@ impl Encodable for SignedAuditRecord {
     fn encode<'b>(
         &self,
         buffer: &'b mut PayloadBuffer,
-    ) -> Result<&'b str, aegis_justitia::ContractError> {
+    ) -> Result<&'b str, amussis_decision::ContractError> {
         self.encode_into(buffer)
     }
 }

@@ -10,7 +10,7 @@
 
 mod common;
 
-use aegis_justitia::{
+use amussis_decision::{
     ActionType, AuditRecordVersion, BlockReason, ContractError, Correlation, Digest32, EdgeId,
     HaltReason, HashAlgorithm, Identity, PLD_EFFECTIVE_AT, RecordStatus, SchemaId, Sequence,
     SignedAuditRecord, UnixSeconds,
@@ -127,7 +127,7 @@ fn an_unsealed_record_is_refused() -> Fallible<()> {
 
     let mut hollow = audit_record(1)?;
     let mut empty = seal()?;
-    empty.bytes = aegis_justitia::SignatureBytes::EMPTY;
+    empty.bytes = amussis_decision::SignatureBytes::EMPTY;
     hollow.oversight_signature = Some(empty);
     assert_eq!(hollow.validate(), Err(refusal));
     Ok(())

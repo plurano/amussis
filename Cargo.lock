@@ -3,7 +3,7 @@
 version = 4
 
 [[package]]
-name = "aegis-justitia"
+name = "amussis-decision"
 version = "0.1.0"
 dependencies = [
  "base16ct",

@@ -5,7 +5,7 @@
 
 mod common;
 
-use aegis_justitia::{
+use amussis_decision::{
     ActionType, AgentId, AuditLedger, AuditRecord, BlockReason, Digest32, HaltReason,
     HashAlgorithm, InMemorySink, IntentId, JustitiaError, KillswitchState, LedgerError,
     LedgerHasher, MAX_SIGNATURE_BYTES, OversightClass, RecordDraft, RecordStatus, RiskTier,
@@ -269,7 +269,7 @@ fn an_unavailable_sink_commits_nothing() -> Fallible<()> {
         );
     assert_eq!(
         ledger.append(draft("intent-1", RecordStatus::Approved, 100)?),
-        Err(LedgerError::Sink(aegis_justitia::SinkError::Unavailable))
+        Err(LedgerError::Sink(amussis_decision::SinkError::Unavailable))
     );
     assert_eq!(ledger.len(), 0);
     assert_eq!(ledger.head(), Digest32::GENESIS);
@@ -298,7 +298,7 @@ fn empty_ledger_verifies_as_the_genesis_state() -> Fallible<()> {
 /// E02-3 boundary, second half: MD5 is absent from the crate, not merely from a
 /// list written inside this test.
 ///
-/// The assertions below are all about `aegis-justitia` itself: the algorithm
+/// The assertions below are all about `amussis-decision` itself: the algorithm
 /// the shipped hasher records, the algorithm every record the shipped ledger
 /// produces names, and the width of the digest the shipped hasher returns. MD5
 /// would fail every one of them. The file-level exclusions -- no `md5` token in

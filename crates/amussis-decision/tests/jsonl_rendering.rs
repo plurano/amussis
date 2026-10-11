@@ -10,8 +10,8 @@
 
 mod common;
 
-use aegis_justitia::ledger::jsonl::{self, LedgerLine, RenderError};
-use aegis_justitia::{
+use amussis_decision::ledger::jsonl::{self, LedgerLine, RenderError};
+use amussis_decision::{
     ActionType, AgentId, AuditLedger, BlockReason, HashAlgorithm, InMemorySink, IntentId,
     JustitiaError, KillswitchState, RecordDraft, RecordStatus, Sha256Hasher, SignerBinding,
     UnixSeconds,

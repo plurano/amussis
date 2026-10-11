@@ -6,7 +6,7 @@
 
 mod common;
 
-use aegis_justitia::{
+use amussis_decision::{
     ActionType, BlockReason, HaltReason, InterceptorOutcome, OversightClass, RiskTier, UnixSeconds,
     WarningCode,
 };

@@ -11,14 +11,16 @@
 
 mod common;
 
-use aegis_justitia::{
+use amussis_decision::{
     ActionType, BlockReason, CheckerId, CheckerSet, OversightClass, RiskTier, UnixSeconds, Vote,
 };
 
 use common::{Fallible, FixtureError, engine, intent};
 
 /// Builds the Tier A escalation used throughout, which always needs a checker.
-fn held_intent(id: &str) -> Result<aegis_justitia::ActionIntent, aegis_justitia::JustitiaError> {
+fn held_intent(
+    id: &str,
+) -> Result<amussis_decision::ActionIntent, amussis_decision::JustitiaError> {
     intent(
         id,
         "maker-alice",

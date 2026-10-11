@@ -8,7 +8,7 @@
 
 mod common;
 
-use aegis_justitia::{
+use amussis_decision::{
     ActionType, Adjudication, BlockReason, CheckerId, CheckerSet, HaltReason, InterceptorOutcome,
     JustitiaError, MakerId, OversightClass, OversightError, RequestId, RequiredApproval, RiskTier,
     UnixSeconds, Vote,

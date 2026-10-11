@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: EUPL-1.2
 
 [package]
-name = "aegis-justitia"
-description = "Aegis OS P06 decision engine: risk tiers, maker-checker oversight and a hash-linked audit ledger."
+name = "amussis-decision"
+description = "Decision engine: risk tiers, maker-checker oversight and a hash-linked audit ledger."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

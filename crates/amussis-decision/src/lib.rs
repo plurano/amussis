@@ -1,7 +1,11 @@
 // SPDX-FileCopyrightText: 2026 Lusoris <lusoris@proton.me>
 // SPDX-License-Identifier: EUPL-1.2
 
-//! Aegis OS P06 `aegis-justitia`: the decision engine.
+//! `amussis-decision`: the decision engine.
+//!
+//! It was cut from the Aegis OS repository, where it is component P06
+//! Justitia; the P-numbers and component names in this documentation are
+//! that system's.
 //!
 //! The crate carries the risk-tier, maker-checker, Annex III, timeout and
 //! killswitch logic as library code. Every rule is reachable through the public
@@ -120,7 +124,7 @@ pub mod risk;
 pub mod time;
 
 /// Contract version tag mixed into every audit pre-image.
-pub const CONTRACT_VERSION: &str = "aegis.justitia.v1";
+pub const CONTRACT_VERSION: &str = "amussis.decision.v1";
 
 /// Default scalar upper bound on the number of records in one audit chain.
 ///

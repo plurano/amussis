@@ -15,7 +15,7 @@
 //! citations -- and no payload crosses a path, nothing is admitted and nothing
 //! is refused. The behavioural contract for both paths is milestone M06's work.
 
-use aegis_justitia::{
+use amussis_decision::{
     ActionProposal, D03_ACTION_GATE, D03_ACTION_GATE_DIRECTION, D03_ACTION_GATE_TRANSPORT,
     D04_SANDBOX_GATE, DecisionRecord, DecisionRequest, DecisionState, EdgeId, GateDirection,
     MAX_ADMISSION_HOPS, SandboxAdmissionPath, SchemaId, SignedAuditRecord, contract_edges,

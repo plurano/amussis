@@ -10,7 +10,7 @@
 
 mod common;
 
-use aegis_justitia::{
+use amussis_decision::{
     ContractError, Correlation, DecisionRequest, DecisionRequestVersion, EdgeId, Identity,
     MAX_DECISION_WINDOW_SECS, MIN_DECISION_WINDOW_SECS, OversightClass, RequiredApproval, RiskTier,
     SchemaId, UnixSeconds,

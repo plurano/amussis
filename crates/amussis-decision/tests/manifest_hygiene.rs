@@ -13,7 +13,7 @@ mod dependency_closure;
 use std::path::{Path, PathBuf};
 
 /// This crate's package name, the start of its closure (D78).
-const PACKAGE: &str = "aegis-justitia";
+const PACKAGE: &str = "amussis-decision";
 
 /// The MD5 implementations D02 excludes from this crate's closure. The lock-wide
 /// sweep before D78 searched for four spellings, `"md5"`, `"md-5"`,
@@ -90,7 +90,7 @@ fn a_prefixed_md5_name_is_not_a_hit() -> Result<(), String> {
 /// The crate manifest declares no MD5 dependency and no unexpected one.
 #[test]
 fn the_crate_manifest_declares_only_the_reviewed_dependencies() {
-    let manifest = read("crates/aegis-justitia/Cargo.toml").unwrap_or_default();
+    let manifest = read("crates/amussis-decision/Cargo.toml").unwrap_or_default();
     assert!(!manifest.is_empty(), "the crate manifest must exist");
     assert!(!manifest.contains("md5"), "D02 excludes MD5");
     assert!(!manifest.contains("md-5"), "D02 excludes MD5");
@@ -150,8 +150,9 @@ fn the_toolchain_pin_is_an_exact_version() {
 
 /// The workspace activates exactly the crate directories that have a manifest.
 ///
-/// M02 promoted `aegis-justitia`, M03 promoted `aegis-fabrica-defs`, M15
-/// promoted `aegis-janus-lifecycle`, M17 promoted `aegis-vulcan` and
+/// In the source repository M02 promoted `aegis-justitia`, M03 promoted
+/// `aegis-fabrica-defs`, M15 promoted `aegis-janus-lifecycle`, M17 promoted
+/// `aegis-vulcan` and
 /// `aegis-hestia`, M05 promoted `aegis-tellus` and `aegis-athena`, and M06 promoted
 /// `aegis-minerva` and `aegis-vesta`, so the
 /// list grows by a named entry per milestone. What must not change is that it
@@ -369,7 +370,7 @@ fn crate_sources() -> Vec<(String, String)> {
 #[test]
 fn host_effects_are_confined_to_the_effects_module() {
     let root = workspace_root().unwrap_or_default();
-    let src = root.join("crates/aegis-justitia/src");
+    let src = root.join("crates/amussis-decision/src");
     let mut offenders: Vec<String> = Vec::new();
     let mut stack: Vec<PathBuf> = vec![src.clone()];
     // Bounded walk: the crate has fewer than 64 source entries.

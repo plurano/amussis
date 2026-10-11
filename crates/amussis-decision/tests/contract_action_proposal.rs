@@ -10,7 +10,7 @@
 
 mod common;
 
-use aegis_justitia::{
+use amussis_decision::{
     ActionProposal, ActionProposalVersion, ActionType, AgentId, ContractError, Correlation,
     Digest32, EdgeId, GateDirection, Identity, MAX_CONTRACT_PAYLOAD_BYTES, MAX_IDENTITY_LEN,
     MAX_TARGET_LEN, MakerId, OversightClass, PayloadBuffer, RiskTier, SchemaId, SignatureBytes,

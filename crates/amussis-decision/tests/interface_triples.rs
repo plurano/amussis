@@ -6,7 +6,7 @@
 
 mod common;
 
-use aegis_justitia::{
+use amussis_decision::{
     ActionIntent, ActionType, AgentId, ApprovalTicket, CheckerId, CheckerSet, Clock, ClockError,
     Deadline, DeadlineError, DeadlineStatus, Digest32, FixedClock, HaltReason, HashError, Identity,
     IdentityError, InMemorySink, IntentError, IntentId, IntentSpec, IoDeadline, JustitiaError,
@@ -547,18 +547,18 @@ fn registry_reclamation_positive_negative_and_boundary() -> Fallible<()> {
 /// deadline shorter than its service time, and never reallocates.
 #[test]
 fn in_memory_sink_positive_negative_and_boundary() -> Fallible<()> {
-    let mut ledger: aegis_justitia::AuditLedger<
-        aegis_justitia::Sha256Hasher,
+    let mut ledger: amussis_decision::AuditLedger<
+        amussis_decision::Sha256Hasher,
         FixtureSigner,
         InMemorySink,
-    > = aegis_justitia::AuditLedger::with_bound(
+    > = amussis_decision::AuditLedger::with_bound(
         SignerBinding::Bound(FixtureSigner::new()?),
         InMemorySink::with_bound(1),
         io_deadline(),
         FIXTURE_AUDIT_BOUND,
     );
-    let draft = |id: &str, at: u64| -> Result<aegis_justitia::RecordDraft, JustitiaError> {
-        Ok(aegis_justitia::RecordDraft {
+    let draft = |id: &str, at: u64| -> Result<amussis_decision::RecordDraft, JustitiaError> {
+        Ok(amussis_decision::RecordDraft {
             intent_id: IntentId::parse(id)?,
             agent: AgentId::parse("agent-01")?,
             action_type: ActionType::FileModification,
@@ -571,7 +571,7 @@ fn in_memory_sink_positive_negative_and_boundary() -> Fallible<()> {
     ledger.append(draft("intent-1", 100)?)?;
     assert_eq!(
         ledger.append(draft("intent-2", 101)?),
-        Err(aegis_justitia::LedgerError::Sink(SinkError::Full {
+        Err(amussis_decision::LedgerError::Sink(SinkError::Full {
             max: 1
         })),
         "a full sink refuses the record and the ledger commits nothing"
@@ -646,18 +646,18 @@ fn unavailable_sink_positive_negative_and_boundary() -> Fallible<()> {
 /// A chain longer than its scalar bound is refused before it is walked.
 #[test]
 fn verify_chain_bound_positive_negative_and_boundary() -> Fallible<()> {
-    let mut ledger: aegis_justitia::AuditLedger<
-        aegis_justitia::Sha256Hasher,
+    let mut ledger: amussis_decision::AuditLedger<
+        amussis_decision::Sha256Hasher,
         FixtureSigner,
         InMemorySink,
-    > = aegis_justitia::AuditLedger::with_bound(
+    > = amussis_decision::AuditLedger::with_bound(
         SignerBinding::Bound(FixtureSigner::new()?),
         InMemorySink::with_bound(FIXTURE_AUDIT_BOUND),
         io_deadline(),
         FIXTURE_AUDIT_BOUND,
     );
     for step in 0u64..3 {
-        ledger.append(aegis_justitia::RecordDraft {
+        ledger.append(amussis_decision::RecordDraft {
             intent_id: IntentId::parse("intent-bound")?,
             agent: AgentId::parse("agent-01")?,
             action_type: ActionType::FileModification,
@@ -668,14 +668,17 @@ fn verify_chain_bound_positive_negative_and_boundary() -> Fallible<()> {
         })?;
     }
     assert_eq!(ledger.len(), 3);
-    aegis_justitia::verify_chain_bounded::<aegis_justitia::Sha256Hasher>(ledger.records(), 3)?;
+    amussis_decision::verify_chain_bounded::<amussis_decision::Sha256Hasher>(ledger.records(), 3)?;
     assert_eq!(
-        aegis_justitia::verify_chain_bounded::<aegis_justitia::Sha256Hasher>(ledger.records(), 2),
-        Err(aegis_justitia::LedgerError::LengthBoundExceeded { max: 2 }),
+        amussis_decision::verify_chain_bounded::<amussis_decision::Sha256Hasher>(
+            ledger.records(),
+            2
+        ),
+        Err(amussis_decision::LedgerError::LengthBoundExceeded { max: 2 }),
         "the bound is checked before the walk, so an oversized chain is never traversed"
     );
     assert_eq!(
-        aegis_justitia::verify_chain_bounded::<aegis_justitia::Sha256Hasher>(&[], 0)?,
+        amussis_decision::verify_chain_bounded::<amussis_decision::Sha256Hasher>(&[], 0)?,
         Digest32::GENESIS
     );
     Ok(())
@@ -687,12 +690,12 @@ fn verify_chain_bound_positive_negative_and_boundary() -> Fallible<()> {
 /// an error rather than truncating.
 #[test]
 fn canonical_buffer_positive_negative_and_boundary() -> Fallible<()> {
-    let mut split_a = aegis_justitia::CanonicalBuffer::new();
+    let mut split_a = amussis_decision::CanonicalBuffer::new();
     assert!(split_a.is_empty());
     split_a.write_framed(b"ab")?;
     split_a.write_framed(b"c")?;
 
-    let mut split_b = aegis_justitia::CanonicalBuffer::new();
+    let mut split_b = amussis_decision::CanonicalBuffer::new();
     split_b.write_framed(b"a")?;
     split_b.write_framed(b"bc")?;
     assert_ne!(
@@ -706,33 +709,33 @@ fn canonical_buffer_positive_negative_and_boundary() -> Fallible<()> {
         "each field costs a four-byte length prefix"
     );
 
-    let mut exact = aegis_justitia::CanonicalBuffer::new();
-    exact.write_raw(&[0u8; aegis_justitia::MAX_PREIMAGE_BYTES])?;
-    assert_eq!(exact.len(), aegis_justitia::MAX_PREIMAGE_BYTES);
+    let mut exact = amussis_decision::CanonicalBuffer::new();
+    exact.write_raw(&[0u8; amussis_decision::MAX_PREIMAGE_BYTES])?;
+    assert_eq!(exact.len(), amussis_decision::MAX_PREIMAGE_BYTES);
     assert_eq!(
         exact.write_u8(0),
-        Err(aegis_justitia::PreimageError::Overflow {
-            max: aegis_justitia::MAX_PREIMAGE_BYTES
+        Err(amussis_decision::PreimageError::Overflow {
+            max: amussis_decision::MAX_PREIMAGE_BYTES
         }),
         "one byte past the bound is refused, never truncated"
     );
 
-    let mut over = aegis_justitia::CanonicalBuffer::new();
+    let mut over = amussis_decision::CanonicalBuffer::new();
     assert_eq!(
-        over.write_raw(&[0u8; aegis_justitia::MAX_PREIMAGE_BYTES + 1]),
-        Err(aegis_justitia::PreimageError::Overflow {
-            max: aegis_justitia::MAX_PREIMAGE_BYTES
+        over.write_raw(&[0u8; amussis_decision::MAX_PREIMAGE_BYTES + 1]),
+        Err(amussis_decision::PreimageError::Overflow {
+            max: amussis_decision::MAX_PREIMAGE_BYTES
         })
     );
     assert_eq!(over.len(), 0);
 
-    let mut tagged = aegis_justitia::CanonicalBuffer::new();
-    tagged.write_tag(aegis_justitia::AUDIT_DOMAIN)?;
+    let mut tagged = amussis_decision::CanonicalBuffer::new();
+    tagged.write_tag(amussis_decision::AUDIT_DOMAIN)?;
     tagged.write_u64(u64::MAX)?;
     tagged.write_digest(&Digest32::GENESIS)?;
     assert_eq!(
         tagged.len(),
-        aegis_justitia::AUDIT_DOMAIN.len() + 8 + 32,
+        amussis_decision::AUDIT_DOMAIN.len() + 8 + 32,
         "the encoding is exactly the concatenation of its fields"
     );
     Ok(())

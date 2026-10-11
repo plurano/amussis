@@ -9,7 +9,7 @@
 
 mod common;
 
-use aegis_justitia::{
+use amussis_decision::{
     Correlation, DIGEST_HEX_CHARS, DIGEST_LEN, Digest32, EdgeId, Identity, MAX_SIGNATURE_HEX_CHARS,
     OversightSignature, PayloadBuffer, RecordSigner, SchemaId, SignatureAlgorithm, SignatureBytes,
     SignerKeyId,

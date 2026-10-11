@@ -11,7 +11,7 @@
 
 mod common;
 
-use aegis_justitia::{
+use amussis_decision::{
     ActionType, BlockReason, CheckerId, CheckerSet, ClockError, HaltReason, JustitiaError,
     LedgerError, OversightClass, RecordStatus, RegistryError, RiskTier, UnixSeconds, Vote,
 };
@@ -149,7 +149,7 @@ fn a_clock_fault_fails_closed_and_halts_the_unit() -> Fallible<()> {
 #[test]
 fn adjudication_refuses_on_a_clock_fault() -> Fallible<()> {
     let mut engine = faulty_clock_engine()?;
-    let forged = aegis_justitia::RequestId::parse("intent-never-issued")?;
+    let forged = amussis_decision::RequestId::parse("intent-never-issued")?;
     let panel = CheckerSet::single(CheckerId::parse("checker-ada")?);
     let refused = engine.adjudicate(&forged, panel, Vote::Approve);
     assert_eq!(

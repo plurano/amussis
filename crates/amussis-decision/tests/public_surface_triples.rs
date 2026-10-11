@@ -17,8 +17,8 @@
 
 mod common;
 
-use aegis_justitia::effects::SystemClock;
-use aegis_justitia::{
+use amussis_decision::effects::SystemClock;
+use amussis_decision::{
     ActionType, AgentId, AuditLedger, AuditRecord, BlockReason, CONTRACT_VERSION, CheckerId,
     CheckerSet, Clock, ClockError, DEFAULT_APPROVAL_TTL_SECS, DEFAULT_SINK_SERVICE_MILLIS,
     DIGEST_LEN, Digest32, EngineConfig, HaltReason, HashAlgorithm, HashError, Identity,
@@ -225,7 +225,7 @@ fn the_host_clock_reads_and_is_still_guarded() -> Fallible<()> {
     let second = clock.now()?;
     assert!(second >= first, "two readings do not go backwards");
 
-    let mut guard = aegis_justitia::MonotonicGuard::new();
+    let mut guard = amussis_decision::MonotonicGuard::new();
     let future = UnixSeconds::new(u64::MAX);
     assert_eq!(guard.observe(future), Ok(future));
     assert_eq!(
@@ -444,7 +444,7 @@ fn a_panel_is_matched_by_shape() -> Fallible<()> {
 fn a_verified_panel_is_proof_of_separation_from_the_maker() -> Fallible<()> {
     let ada = CheckerId::parse("checker-ada")?;
     let bo = CheckerId::parse("checker-bo")?;
-    let maker = aegis_justitia::MakerId::parse("maker-alice")?;
+    let maker = amussis_decision::MakerId::parse("maker-alice")?;
     let pair = CheckerSet::dual(ada, bo)?;
 
     let verified: VerifiedCheckerSet = pair.verify_against_maker(&maker)?;

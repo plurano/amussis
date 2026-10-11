@@ -21,7 +21,7 @@
 
 mod common;
 
-use aegis_justitia::{
+use amussis_decision::{
     ActionProposal, ActionType, ApprovalTicket, AuditRecord, BlockReason, ContractError,
     Correlation, DecisionRequest, InterceptorOutcome, MAX_CONTRACT_PAYLOAD_BYTES,
     MAX_LEDGER_RECORDS, MAX_PENDING_REQUESTS, MAX_RETAINED_AUDIT_BYTES, MAX_SIGNATURE_BYTES,
