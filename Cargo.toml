@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 Lusoris <lusoris@proton.me>
+# SPDX-FileCopyrightText: 2026 Lusoris <lusoris@pm.me>
 # SPDX-License-Identifier: EUPL-1.2
 
 # The member list is written out, never globbed: a directory under crates/
@@ -18,7 +18,7 @@ edition = "2024"
 rust-version = "1.87"
 license = "EUPL-1.2"
 repository = "https://github.com/plurano/amussis"
-authors = ["Lusoris <lusoris@proton.me>"]
+authors = ["Lusoris <lusoris@pm.me>"]
 
 [workspace.dependencies]
 base16ct = { version = "1.0.0", default-features = false }

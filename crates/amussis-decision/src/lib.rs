@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2026 Lusoris <lusoris@proton.me>
+// SPDX-FileCopyrightText: 2026 Lusoris <lusoris@pm.me>
 // SPDX-License-Identifier: EUPL-1.2
 
 //! `amussis-decision`: the decision engine.
@@ -86,6 +86,19 @@
 //! of its own validated prefix. The last two convert a non-zero constant into a
 //! non-zero-typed value, where the only alternative would be `expect`.
 //!
+//! # The library's input, and the operating system's schemas
+//!
+//! [`proposal`] is the library's own text input: one proposed action as a JSON
+//! object tagged [`PROPOSAL_SCHEMA`], holding exactly the fields of an
+//! [`IntentSpec`]. Every consumer that does not link Rust uses it, the
+//! WebAssembly binding included.
+//!
+//! The schemas in [`contracts`], tagged `aegis.*`, are not the library's. They
+//! are the Aegis operating system's conversation schemas, with its subsystem
+//! graph and edge names; its adapter owns them and maps a checked proposal to
+//! [`Proposal`]. They are still in this crate only until that adapter has taken
+//! them over.
+//!
 //! # What milestone M14 added, and what it deliberately did not
 //!
 //! [`contracts`] holds the three versioned consumer schemas P06 speaks over --
@@ -119,6 +132,7 @@ pub mod killswitch;
 pub mod ledger;
 pub mod outcome;
 pub mod oversight;
+pub mod proposal;
 pub mod registry;
 pub mod risk;
 pub mod time;
@@ -210,6 +224,9 @@ pub use crate::ledger::{
 pub use crate::outcome::{BlockReason, InterceptorOutcome, WarningCode};
 pub use crate::oversight::{
     Adjudication, ApprovalTicket, CheckerSet, OversightError, VerifiedCheckerSet, Vote,
+};
+pub use crate::proposal::{
+    MAX_PROPOSAL_BYTES, PROPOSAL_SCHEMA, Proposal, ProposalError, ProposalVersion,
 };
 pub use crate::registry::{PendingRegistry, RegistryError, RequestState};
 pub use crate::risk::{ActionType, OversightClass, RequiredApproval, RiskTier};
