@@ -12,7 +12,7 @@
 mod common;
 
 use amussis_decision::{
-    ActionType, BlockReason, CheckerId, CheckerSet, ClockError, HaltReason, JustitiaError,
+    ActionType, BlockReason, CheckerId, CheckerSet, ClockError, DecisionError, HaltReason,
     LedgerError, OversightClass, RecordStatus, RegistryError, RiskTier, UnixSeconds, Vote,
 };
 
@@ -154,7 +154,7 @@ fn adjudication_refuses_on_a_clock_fault() -> Fallible<()> {
     let refused = engine.adjudicate(&forged, panel, Vote::Approve);
     assert_eq!(
         refused,
-        Err(JustitiaError::Clock(ClockError::BeforeEpoch)),
+        Err(DecisionError::Clock(ClockError::BeforeEpoch)),
         "the clock is read before the request is looked up, so no vote is timed by a caller"
     );
     assert_eq!(
@@ -256,7 +256,7 @@ fn an_unrecordable_adjudication_halts_the_unit_and_leaves_no_hold() -> Fallible<
     let refused = engine.adjudicate(ticket.request_id(), panel, Vote::Approve);
     assert_eq!(
         refused,
-        Err(JustitiaError::Ledger(LedgerError::LengthBoundExceeded {
+        Err(DecisionError::Ledger(LedgerError::LengthBoundExceeded {
             max: 1
         })),
         "the overseer is told the decision could not be recorded"

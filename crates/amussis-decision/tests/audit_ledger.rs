@@ -6,10 +6,10 @@
 mod common;
 
 use amussis_decision::{
-    ActionType, AgentId, AuditLedger, AuditRecord, BlockReason, Digest32, HaltReason,
-    HashAlgorithm, InMemorySink, IntentId, JustitiaError, KillswitchState, LedgerError,
-    LedgerHasher, MAX_SIGNATURE_BYTES, OversightClass, RecordDraft, RecordStatus, RiskTier,
-    Sha256Hasher, SignError, SignerBinding, UnavailableSink, UnixSeconds, verify_chain,
+    ActionType, AgentId, AuditLedger, AuditRecord, BlockReason, DecisionError, Digest32,
+    HaltReason, HashAlgorithm, InMemorySink, IntentId, KillswitchState, LedgerError, LedgerHasher,
+    MAX_SIGNATURE_BYTES, OversightClass, RecordDraft, RecordStatus, RiskTier, Sha256Hasher,
+    SignError, SignerBinding, UnavailableSink, UnixSeconds, verify_chain,
 };
 
 use common::{
@@ -30,7 +30,7 @@ const EMPTY_DIGEST_HEX: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934c
 type Ledger = AuditLedger<Sha256Hasher, FixtureSigner, InMemorySink>;
 
 /// Builds a fixture ledger with the fixture record bound.
-fn ledger() -> Result<Ledger, JustitiaError> {
+fn ledger() -> Result<Ledger, DecisionError> {
     Ok(AuditLedger::with_bound(
         SignerBinding::Bound(FixtureSigner::new()?),
         InMemorySink::with_bound(FIXTURE_AUDIT_BOUND),
@@ -40,7 +40,7 @@ fn ledger() -> Result<Ledger, JustitiaError> {
 }
 
 /// Builds a draft at `at` seconds with the given status.
-fn draft(id: &str, status: RecordStatus, at: u64) -> Result<RecordDraft, JustitiaError> {
+fn draft(id: &str, status: RecordStatus, at: u64) -> Result<RecordDraft, DecisionError> {
     Ok(RecordDraft {
         intent_id: IntentId::parse(id)?,
         agent: AgentId::parse("agent-01")?,

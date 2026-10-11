@@ -21,13 +21,13 @@ use amussis_decision::effects::SystemClock;
 use amussis_decision::{
     ActionType, AgentId, AuditLedger, AuditRecord, BlockReason, CONTRACT_VERSION, CheckerId,
     CheckerSet, Clock, ClockError, DEFAULT_APPROVAL_TTL_SECS, DEFAULT_SINK_SERVICE_MILLIS,
-    DIGEST_LEN, Digest32, EngineConfig, HaltReason, HashAlgorithm, HashError, Identity,
-    InMemorySink, IntentError, IntentId, InterceptorOutcome, IoDeadline, JustitiaError,
-    KillswitchState, LedgerError, LedgerHasher, LedgerSink, MAX_IDENTITY_LEN, MAX_PREIMAGE_BYTES,
-    OversightClass, OversightError, PreimageError, RecordBody, RecordDraft, RecordStatus,
-    RegistryError, RequestId, RequestState, RequiredApproval, RiskTier, Sequence, Sha256Hasher,
-    Sha256Ledger, SignError, SignerBinding, SinkError, Ttl, UnavailableSink, UnixSeconds,
-    VerifiedCheckerSet, Vote, verify_chain,
+    DIGEST_LEN, DecisionError, Digest32, EngineConfig, HaltReason, HashAlgorithm, HashError,
+    Identity, InMemorySink, IntentError, IntentId, InterceptorOutcome, IoDeadline, KillswitchState,
+    LedgerError, LedgerHasher, LedgerSink, MAX_IDENTITY_LEN, MAX_PREIMAGE_BYTES, OversightClass,
+    OversightError, PreimageError, RecordBody, RecordDraft, RecordStatus, RegistryError, RequestId,
+    RequestState, RequiredApproval, RiskTier, Sequence, Sha256Hasher, Sha256Ledger, SignError,
+    SignerBinding, SinkError, Ttl, UnavailableSink, UnixSeconds, VerifiedCheckerSet, Vote,
+    verify_chain,
 };
 
 use common::{
@@ -35,7 +35,7 @@ use common::{
 };
 
 /// Builds an empty fixture ledger through the concrete SHA-256 alias.
-fn ledger() -> Result<Sha256Ledger<FixtureSigner, InMemorySink>, JustitiaError> {
+fn ledger() -> Result<Sha256Ledger<FixtureSigner, InMemorySink>, DecisionError> {
     Ok(AuditLedger::with_bound(
         SignerBinding::Bound(FixtureSigner::new()?),
         InMemorySink::with_bound(FIXTURE_AUDIT_BOUND),
@@ -45,7 +45,7 @@ fn ledger() -> Result<Sha256Ledger<FixtureSigner, InMemorySink>, JustitiaError> 
 }
 
 /// Builds an approved draft for `id` at `at` seconds.
-fn sample_draft(id: &str, at: u64) -> Result<RecordDraft, JustitiaError> {
+fn sample_draft(id: &str, at: u64) -> Result<RecordDraft, DecisionError> {
     Ok(RecordDraft {
         intent_id: IntentId::parse(id)?,
         agent: AgentId::parse("agent-01")?,
@@ -239,7 +239,7 @@ fn the_host_clock_reads_and_is_still_guarded() -> Fallible<()> {
     Ok(())
 }
 
-/// `JustitiaEngine::last_reading`: nothing is remembered before the first
+/// `DecisionEngine::last_reading`: nothing is remembered before the first
 /// decision, the reading appears after it, and it does not move on its own.
 #[test]
 fn the_engine_remembers_only_readings_it_actually_took() -> Fallible<()> {
@@ -531,13 +531,13 @@ fn a_halted_unit_accepts_no_human_decision() -> Fallible<()> {
     let panel = CheckerSet::single(CheckerId::parse("checker-bo")?);
     assert_eq!(
         unit.adjudicate(ticket.request_id(), panel, Vote::Approve),
-        Err(JustitiaError::Oversight(OversightError::SystemHalted)),
+        Err(DecisionError::Oversight(OversightError::SystemHalted)),
         "the halt is reported as the halt, not as a missing request"
     );
     let unknown = RequestId::parse("intent-never-held")?;
     assert_eq!(
         unit.adjudicate(&unknown, panel, Vote::Approve),
-        Err(JustitiaError::Oversight(OversightError::SystemHalted)),
+        Err(DecisionError::Oversight(OversightError::SystemHalted)),
         "the latch is matched before the registry, so a halt is never masked"
     );
     Ok(())
@@ -612,7 +612,7 @@ fn the_algorithm_mismatch_refusal_names_both_algorithms() -> Fallible<()> {
     Ok(())
 }
 
-/// `JustitiaError::Intent`, `::Registry`, `::Hash` and `::Preimage`, and
+/// `DecisionError::Intent`, `::Registry`, `::Hash` and `::Preimage`, and
 /// `LedgerError::Hash` and `::Preimage`: the aggregate error keeps each
 /// boundary's error rather than flattening it, which is what lets a caller use
 /// `?` across two boundaries without reaching for `unwrap`.
@@ -623,31 +623,31 @@ fn the_aggregate_error_keeps_the_boundary_that_produced_it() {
         minimum: RiskTier::TierAConsequential,
     };
     assert_eq!(
-        JustitiaError::from(downgrade),
-        JustitiaError::Intent(downgrade)
+        DecisionError::from(downgrade),
+        DecisionError::Intent(downgrade)
     );
 
     let full = RegistryError::Full { limit: 4 };
-    assert_eq!(JustitiaError::from(full), JustitiaError::Registry(full));
-    assert_ne!(JustitiaError::from(full), JustitiaError::Intent(downgrade));
+    assert_eq!(DecisionError::from(full), DecisionError::Registry(full));
+    assert_ne!(DecisionError::from(full), DecisionError::Intent(downgrade));
 
     let width = HashError::Width {
         expected: DIGEST_LEN,
         actual: 16,
     };
-    assert_eq!(JustitiaError::from(width), JustitiaError::Hash(width));
+    assert_eq!(DecisionError::from(width), DecisionError::Hash(width));
     assert_eq!(LedgerError::from(width), LedgerError::Hash(width));
 
     let overflow = PreimageError::Overflow {
         max: MAX_PREIMAGE_BYTES,
     };
     assert_eq!(
-        JustitiaError::from(overflow),
-        JustitiaError::Preimage(overflow)
+        DecisionError::from(overflow),
+        DecisionError::Preimage(overflow)
     );
     assert_eq!(LedgerError::from(overflow), LedgerError::Preimage(overflow));
     assert!(
-        JustitiaError::from(overflow)
+        DecisionError::from(overflow)
             .to_string()
             .contains(&overflow.to_string()),
         "the wrapper carries the wrapped message rather than replacing it"

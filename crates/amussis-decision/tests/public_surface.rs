@@ -318,7 +318,7 @@ fn every_public_item_is_named_by_an_integration_test() {
 fn the_scanner_reads_public_surface_and_not_private_helpers() {
     let names = public_names();
     for expected in [
-        "JustitiaEngine",
+        "DecisionEngine",
         "adjudicate",
         "MAX_LEDGER_RECORDS",
         "RequireApproval",

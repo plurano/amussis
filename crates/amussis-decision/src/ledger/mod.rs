@@ -37,7 +37,7 @@ use crate::time::UnixSeconds;
 use crate::{CONTRACT_VERSION, DEFAULT_SINK_SERVICE_MILLIS, MAX_LEDGER_RECORDS};
 
 /// Domain-separation tag prefixed to every canonical audit pre-image.
-pub const AUDIT_DOMAIN: &[u8] = b"aegis.justitia.audit.v1\0";
+pub const AUDIT_DOMAIN: &[u8] = b"amussis.decision.audit.v1\0";
 
 /// Reasons the ledger refuses a record or a chain.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]

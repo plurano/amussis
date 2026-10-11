@@ -19,7 +19,7 @@ use crate::time::{ClockError, DeadlineError};
 
 /// Any error this crate can surface.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-pub enum JustitiaError {
+pub enum DecisionError {
     /// An identifier was refused.
     #[error("identity: {0}")]
     Identity(#[from] IdentityError),

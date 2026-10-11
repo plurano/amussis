@@ -8,12 +8,13 @@ mod common;
 
 use amussis_decision::{
     ActionIntent, ActionType, AgentId, ApprovalTicket, CheckerId, CheckerSet, Clock, ClockError,
-    Deadline, DeadlineError, DeadlineStatus, Digest32, FixedClock, HaltReason, HashError, Identity,
-    IdentityError, InMemorySink, IntentError, IntentId, IntentSpec, IoDeadline, JustitiaError,
-    Killswitch, KillswitchState, LedgerSink, MAX_IDENTITY_LEN, MAX_SIGNATURE_BYTES, MAX_TARGET_LEN,
-    MakerId, MonotonicGuard, OversightClass, OversightError, PendingRegistry, RecordStatus,
-    RegistryError, RequestId, RequestState, RequiredApproval, RiskTier, SignError, Signature,
-    SignerBinding, SignerKeyId, SinkError, TargetResource, Ttl, UnavailableSink, UnixSeconds,
+    Deadline, DeadlineError, DeadlineStatus, DecisionError, Digest32, FixedClock, HaltReason,
+    HashError, Identity, IdentityError, InMemorySink, IntentError, IntentId, IntentSpec,
+    IoDeadline, Killswitch, KillswitchState, LedgerSink, MAX_IDENTITY_LEN, MAX_SIGNATURE_BYTES,
+    MAX_TARGET_LEN, MakerId, MonotonicGuard, OversightClass, OversightError, PendingRegistry,
+    RecordStatus, RegistryError, RequestId, RequestState, RequiredApproval, RiskTier, SignError,
+    Signature, SignerBinding, SignerKeyId, SinkError, TargetResource, Ttl, UnavailableSink,
+    UnixSeconds,
 };
 
 use common::{FIXTURE_AUDIT_BOUND, Fallible, FixtureError, FixtureSigner, io_deadline};
@@ -557,7 +558,7 @@ fn in_memory_sink_positive_negative_and_boundary() -> Fallible<()> {
         io_deadline(),
         FIXTURE_AUDIT_BOUND,
     );
-    let draft = |id: &str, at: u64| -> Result<amussis_decision::RecordDraft, JustitiaError> {
+    let draft = |id: &str, at: u64| -> Result<amussis_decision::RecordDraft, DecisionError> {
         Ok(amussis_decision::RecordDraft {
             intent_id: IntentId::parse(id)?,
             agent: AgentId::parse("agent-01")?,

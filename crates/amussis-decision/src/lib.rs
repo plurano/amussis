@@ -21,7 +21,7 @@
 //!
 //! # HISS-03: what the decision path allocates
 //!
-//! [`JustitiaEngine::decide`] and [`JustitiaEngine::adjudicate`] perform **no
+//! [`DecisionEngine::decide`] and [`DecisionEngine::adjudicate`] perform **no
 //! heap allocation after construction**. That is a structural property, not a
 //! convention:
 //!
@@ -189,8 +189,8 @@ pub use crate::contracts::proposal::{ActionProposal, ActionProposalVersion};
 pub use crate::contracts::{
     ContractError, Correlation, MAX_CONTRACT_PAYLOAD_BYTES, PayloadBuffer, SchemaId,
 };
-pub use crate::engine::{EngineConfig, JustitiaEngine};
-pub use crate::error::JustitiaError;
+pub use crate::engine::{DecisionEngine, EngineConfig};
+pub use crate::error::DecisionError;
 pub use crate::identity::{
     AgentId, CheckerId, EventId, Identity, IdentityError, IntentId, MakerId, RequestId,
     SignerKeyId, TargetResource,

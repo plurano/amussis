@@ -3,13 +3,13 @@
 
 //! The decision engine.
 //!
-//! [`JustitiaEngine::decide`] is total: it returns an [`InterceptorOutcome`] for
+//! [`DecisionEngine::decide`] is total: it returns an [`InterceptorOutcome`] for
 //! every input and has no error channel. A clock fault, a deadline overflow, a
 //! saturated registry, a seal failure and a compromised ledger all map to
 //! [`InterceptorOutcome::Block`], so there is no path on which a fault degrades
 //! into an allow.
 //!
-//! [`JustitiaEngine::adjudicate`] does return a `Result`, because an expired
+//! [`DecisionEngine::adjudicate`] does return a `Result`, because an expired
 //! window, an undersized panel, an unknown or already-decided request and a
 //! halted system are conditions a human overseer must be able to distinguish.
 //!
@@ -43,7 +43,7 @@
 //!
 //! # Allocation
 //!
-//! After [`JustitiaEngine::new`] returns, neither entry point allocates. The
+//! After [`DecisionEngine::new`] returns, neither entry point allocates. The
 //! registry, the ledger's record list and the sink's record list are reserved
 //! to their scalar bounds at construction and refuse a push at the bound;
 //! reclamation compacts in place. See the crate documentation and
@@ -62,7 +62,7 @@ use crate::oversight::{
 use crate::registry::{PendingRegistry, RegistryError};
 use crate::risk::{OversightClass, RequiredApproval};
 use crate::time::{Clock, ClockError, Deadline, DeadlineStatus, MonotonicGuard, Ttl, UnixSeconds};
-use crate::{DEFAULT_APPROVAL_TTL_SECS, JustitiaError, MAX_LEDGER_RECORDS, MAX_PENDING_REQUESTS};
+use crate::{DEFAULT_APPROVAL_TTL_SECS, DecisionError, MAX_LEDGER_RECORDS, MAX_PENDING_REQUESTS};
 
 /// Tunable bounds of one engine instance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -94,7 +94,7 @@ impl Default for EngineConfig {
 
 /// The P06 decision engine.
 #[derive(Debug, Clone)]
-pub struct JustitiaEngine<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Clock> {
+pub struct DecisionEngine<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Clock> {
     config: EngineConfig,
     killswitch: Killswitch,
     registry: PendingRegistry,
@@ -103,7 +103,7 @@ pub struct JustitiaEngine<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Cl
     guard: MonotonicGuard,
 }
 
-impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Clock> JustitiaEngine<H, S, K, C> {
+impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Clock> DecisionEngine<H, S, K, C> {
     /// Builds an engine over a signer binding, a sink and a clock.
     ///
     /// Every bounded buffer is reserved here, so nothing on the decision path
@@ -374,7 +374,7 @@ impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Clock> JustitiaEngine<H
     ///
     /// # Errors
     ///
-    /// Returns [`JustitiaError`] when the system is halted, the clock is
+    /// Returns [`DecisionError`] when the system is halted, the clock is
     /// unusable, the request is unknown or already decided, the approval window
     /// has closed, the panel includes the maker or is undersized, or the
     /// decision cannot be sealed.
@@ -383,7 +383,7 @@ impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Clock> JustitiaEngine<H
         request: &RequestId,
         panel: CheckerSet,
         vote: Vote,
-    ) -> Result<Adjudication, JustitiaError> {
+    ) -> Result<Adjudication, DecisionError> {
         if self.killswitch.is_engaged() {
             return Err(OversightError::SystemHalted.into());
         }
@@ -407,7 +407,7 @@ impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Clock> JustitiaEngine<H
     fn verify_panel(
         ticket: &ApprovalTicket,
         panel: CheckerSet,
-    ) -> Result<VerifiedCheckerSet, JustitiaError> {
+    ) -> Result<VerifiedCheckerSet, DecisionError> {
         let verified = panel.verify_against_maker(ticket.maker())?;
         verified.satisfies(ticket.required())?;
         Ok(verified)
@@ -427,7 +427,7 @@ impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Clock> JustitiaEngine<H
         verified: VerifiedCheckerSet,
         vote: Vote,
         now: UnixSeconds,
-    ) -> Result<Adjudication, JustitiaError> {
+    ) -> Result<Adjudication, DecisionError> {
         let status = match vote {
             Vote::Approve => RecordStatus::Approved,
             Vote::Reject => RecordStatus::Rejected,
@@ -464,13 +464,13 @@ impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Clock> JustitiaEngine<H
         &mut self,
         request: &RequestId,
         error: &LedgerError,
-    ) -> JustitiaError {
+    ) -> DecisionError {
         let _released = self.registry.release(request);
         if let Some(halt) = halt_reason_for(block_reason_for(error)) {
             let at = self.last_known_time();
             self.killswitch.engage(at, halt);
         }
-        JustitiaError::Ledger(*error)
+        DecisionError::Ledger(*error)
     }
 }
 
@@ -538,12 +538,12 @@ const fn registry_block_reason(error: RegistryError) -> BlockReason {
 }
 
 /// Maps a registry failure onto the oversight error a human overseer sees.
-fn map_registry(error: RegistryError) -> JustitiaError {
+fn map_registry(error: RegistryError) -> DecisionError {
     match error {
         RegistryError::Unknown => OversightError::UnknownRequest.into(),
         RegistryError::AlreadyDecided => OversightError::AlreadyDecided.into(),
         RegistryError::AlreadyPending | RegistryError::Full { .. } => {
-            JustitiaError::Registry(error)
+            DecisionError::Registry(error)
         }
     }
 }

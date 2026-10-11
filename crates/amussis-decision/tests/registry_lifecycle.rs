@@ -20,7 +20,7 @@ use common::{Fallible, FixtureError, engine, intent};
 /// Builds the Tier A escalation used throughout, which always needs a checker.
 fn held_intent(
     id: &str,
-) -> Result<amussis_decision::ActionIntent, amussis_decision::JustitiaError> {
+) -> Result<amussis_decision::ActionIntent, amussis_decision::DecisionError> {
     intent(
         id,
         "maker-alice",

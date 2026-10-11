@@ -16,12 +16,12 @@
 
 use amussis_decision::{
     ActionIntent, ActionProposal, ActionProposalVersion, ActionType, AgentId, AuditRecordVersion,
-    ClockError, DIGEST_LEN, DecisionRequest, DecisionRequestVersion, Digest32, EngineConfig,
-    EventId, FixedClock, HashAlgorithm, Identity, InMemorySink, IntentId, IntentSpec, IoDeadline,
-    JustitiaEngine, JustitiaError, MAX_SIGNATURE_BYTES, MakerId, OversightClass,
-    OversightSignature, PayloadBuffer, RecordSigner, RecordStatus, RequestId, RequiredApproval,
-    RiskTier, Sequence, Sha256Hasher, SignError, Signature, SignatureAlgorithm, SignedAuditRecord,
-    SignerBinding, SignerKeyId, TargetResource, Ttl, UnixSeconds,
+    ClockError, DIGEST_LEN, DecisionEngine, DecisionError, DecisionRequest, DecisionRequestVersion,
+    Digest32, EngineConfig, EventId, FixedClock, HashAlgorithm, Identity, InMemorySink, IntentId,
+    IntentSpec, IoDeadline, MAX_SIGNATURE_BYTES, MakerId, OversightClass, OversightSignature,
+    PayloadBuffer, RecordSigner, RecordStatus, RequestId, RequiredApproval, RiskTier, Sequence,
+    Sha256Hasher, SignError, Signature, SignatureAlgorithm, SignedAuditRecord, SignerBinding,
+    SignerKeyId, TargetResource, Ttl, UnixSeconds,
 };
 
 /// Anything that can go wrong building or reading a fixture.
@@ -59,7 +59,7 @@ impl FixtureSigner {
     ///
     /// Propagates an identity parse failure, which cannot occur for the
     /// literal used here.
-    pub fn new() -> Result<Self, JustitiaError> {
+    pub fn new() -> Result<Self, DecisionError> {
         Ok(Self {
             key_id: SignerKeyId::parse("fixture-key")?,
         })
@@ -96,7 +96,7 @@ impl OversizedSigner {
     /// # Errors
     ///
     /// Propagates an identity parse failure.
-    pub fn new() -> Result<Self, JustitiaError> {
+    pub fn new() -> Result<Self, DecisionError> {
         Ok(Self {
             key_id: SignerKeyId::parse("oversized-key")?,
         })
@@ -126,10 +126,10 @@ impl amussis_decision::Clock for FaultyClock {
 
 /// The engine shape used by most tests: SHA-256, a fixture signer, an in-memory
 /// sink and a clock the test advances.
-pub type TestEngine = JustitiaEngine<Sha256Hasher, FixtureSigner, InMemorySink, FixedClock>;
+pub type TestEngine = DecisionEngine<Sha256Hasher, FixtureSigner, InMemorySink, FixedClock>;
 
 /// The engine shape used to exercise a clock fault.
-pub type FaultyClockEngine = JustitiaEngine<Sha256Hasher, FixtureSigner, InMemorySink, FaultyClock>;
+pub type FaultyClockEngine = DecisionEngine<Sha256Hasher, FixtureSigner, InMemorySink, FaultyClock>;
 
 /// The scalar audit bound the fixtures use. Small on purpose: a fixture engine
 /// should reserve kilobytes, not the crate default.
@@ -160,7 +160,7 @@ pub fn config(ttl_secs: u32, max_pending: usize) -> Fallible<EngineConfig> {
 ///
 /// Propagates a fixture construction failure.
 pub fn engine(ttl_secs: u32, max_pending: usize) -> Fallible<TestEngine> {
-    Ok(JustitiaEngine::new(
+    Ok(DecisionEngine::new(
         config(ttl_secs, max_pending)?,
         SignerBinding::Bound(FixtureSigner::new()?),
         InMemorySink::with_bound(FIXTURE_AUDIT_BOUND),
@@ -182,7 +182,7 @@ pub fn engine_with_audit_bound(
 ) -> Fallible<TestEngine> {
     let mut settings = config(ttl_secs, max_pending)?;
     settings.max_audit_records = records;
-    Ok(JustitiaEngine::new(
+    Ok(DecisionEngine::new(
         settings,
         SignerBinding::Bound(FixtureSigner::new()?),
         InMemorySink::with_bound(FIXTURE_AUDIT_BOUND),
@@ -197,7 +197,7 @@ pub fn engine_with_audit_bound(
 ///
 /// Propagates a fixture construction failure.
 pub fn unsigned_engine() -> Fallible<TestEngine> {
-    Ok(JustitiaEngine::new(
+    Ok(DecisionEngine::new(
         config(60, 8)?,
         SignerBinding::unbound(),
         InMemorySink::with_bound(FIXTURE_AUDIT_BOUND),
@@ -212,7 +212,7 @@ pub fn unsigned_engine() -> Fallible<TestEngine> {
 ///
 /// Propagates a fixture construction failure.
 pub fn faulty_clock_engine() -> Fallible<FaultyClockEngine> {
-    Ok(JustitiaEngine::new(
+    Ok(DecisionEngine::new(
         config(60, 8)?,
         SignerBinding::Bound(FixtureSigner::new()?),
         InMemorySink::with_bound(FIXTURE_AUDIT_BOUND),
@@ -239,7 +239,7 @@ pub fn intent(
     action: ActionType,
     tier: RiskTier,
     class: OversightClass,
-) -> Result<ActionIntent, JustitiaError> {
+) -> Result<ActionIntent, DecisionError> {
     let spec = IntentSpec {
         id: IntentId::parse(id)?,
         agent: AgentId::parse("agent-01")?,

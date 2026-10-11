@@ -12,9 +12,8 @@ mod common;
 
 use amussis_decision::ledger::jsonl::{self, LedgerLine, RenderError};
 use amussis_decision::{
-    ActionType, AgentId, AuditLedger, BlockReason, HashAlgorithm, InMemorySink, IntentId,
-    JustitiaError, KillswitchState, RecordDraft, RecordStatus, Sha256Hasher, SignerBinding,
-    UnixSeconds,
+    ActionType, AgentId, AuditLedger, BlockReason, DecisionError, HashAlgorithm, InMemorySink,
+    IntentId, KillswitchState, RecordDraft, RecordStatus, Sha256Hasher, SignerBinding, UnixSeconds,
 };
 
 use common::{FIXTURE_AUDIT_BOUND, Fallible, FixtureError, FixtureSigner, io_deadline};
@@ -22,7 +21,7 @@ use common::{FIXTURE_AUDIT_BOUND, Fallible, FixtureError, FixtureSigner, io_dead
 type Ledger = AuditLedger<Sha256Hasher, FixtureSigner, InMemorySink>;
 
 /// Builds a fixture ledger holding one record with `status` and `reason`.
-fn one_record(status: RecordStatus, reason: Option<BlockReason>) -> Result<Ledger, JustitiaError> {
+fn one_record(status: RecordStatus, reason: Option<BlockReason>) -> Result<Ledger, DecisionError> {
     let mut ledger: Ledger = AuditLedger::with_bound(
         SignerBinding::Bound(FixtureSigner::new()?),
         InMemorySink::with_bound(FIXTURE_AUDIT_BOUND),

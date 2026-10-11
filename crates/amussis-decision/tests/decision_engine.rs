@@ -9,9 +9,9 @@
 mod common;
 
 use amussis_decision::{
-    ActionType, Adjudication, BlockReason, CheckerId, CheckerSet, HaltReason, InterceptorOutcome,
-    JustitiaError, MakerId, OversightClass, OversightError, RequestId, RequiredApproval, RiskTier,
-    UnixSeconds, Vote,
+    ActionType, Adjudication, BlockReason, CheckerId, CheckerSet, DecisionError, HaltReason,
+    InterceptorOutcome, MakerId, OversightClass, OversightError, RequestId, RequiredApproval,
+    RiskTier, UnixSeconds, Vote,
 };
 
 use common::{Fallible, FixtureError, engine, intent};
@@ -81,7 +81,7 @@ fn maker_as_checker_is_rejected_and_duplicate_checker_is_rejected() -> Fallible<
     let refused = engine.adjudicate(ticket.request_id(), self_panel, Vote::Approve);
     assert_eq!(
         refused,
-        Err(JustitiaError::Oversight(OversightError::MakerIsChecker))
+        Err(DecisionError::Oversight(OversightError::MakerIsChecker))
     );
 
     let duplicate = CheckerSet::dual(
@@ -97,7 +97,7 @@ fn maker_as_checker_is_rejected_and_duplicate_checker_is_rejected() -> Fallible<
     let refused_second = engine.adjudicate(ticket.request_id(), second_slot, Vote::Approve);
     assert_eq!(
         refused_second,
-        Err(JustitiaError::Oversight(OversightError::MakerIsChecker)),
+        Err(DecisionError::Oversight(OversightError::MakerIsChecker)),
         "the maker must be refused in the second slot as well as the first"
     );
     Ok(())
@@ -112,13 +112,13 @@ fn due_equal_to_now_and_now_minus_one_fail_closed_and_killswitch_blocks_tier_c()
     let due_equals_now = adjudicate_at(1_001)?;
     assert_eq!(
         due_equals_now,
-        Err(JustitiaError::Oversight(OversightError::ApprovalExpired)),
+        Err(DecisionError::Oversight(OversightError::ApprovalExpired)),
         "a window whose due time equals now is closed"
     );
     let due_one_before_now = adjudicate_at(1_002)?;
     assert_eq!(
         due_one_before_now,
-        Err(JustitiaError::Oversight(OversightError::ApprovalExpired)),
+        Err(DecisionError::Oversight(OversightError::ApprovalExpired)),
         "a window whose due time is now-1 is closed"
     );
     let still_open = adjudicate_at(1_000)?;
@@ -148,7 +148,7 @@ fn due_equal_to_now_and_now_minus_one_fail_closed_and_killswitch_blocks_tier_c()
 
 /// Opens a one-second approval window at 1000, so the due time is 1001, then
 /// advances the engine's own clock to `at` and adjudicates.
-fn adjudicate_at(at: u64) -> Fallible<Result<Adjudication, JustitiaError>> {
+fn adjudicate_at(at: u64) -> Fallible<Result<Adjudication, DecisionError>> {
     let mut engine = engine(1, 8)?;
     let escalation = intent(
         "intent-window",
@@ -174,7 +174,7 @@ fn an_unknown_request_identifier_is_refused() -> Fallible<()> {
     let refused = engine.adjudicate(&forged, panel, Vote::Approve);
     assert_eq!(
         refused,
-        Err(JustitiaError::Oversight(OversightError::UnknownRequest))
+        Err(DecisionError::Oversight(OversightError::UnknownRequest))
     );
     Ok(())
 }
@@ -198,7 +198,7 @@ fn a_decided_request_cannot_be_replayed() -> Fallible<()> {
     let replay = engine.adjudicate(ticket.request_id(), panel, Vote::Approve);
     assert_eq!(
         replay,
-        Err(JustitiaError::Oversight(OversightError::AlreadyDecided)),
+        Err(DecisionError::Oversight(OversightError::AlreadyDecided)),
         "a decided entry stays queryable until it is reclaimed, so the replay \
          is named rather than merely unknown"
     );
@@ -224,7 +224,7 @@ fn a_single_checker_panel_is_refused_where_two_are_required() -> Fallible<()> {
     let refused = engine.adjudicate(ticket.request_id(), panel, Vote::Approve);
     assert_eq!(
         refused,
-        Err(JustitiaError::Oversight(
+        Err(DecisionError::Oversight(
             OversightError::AnnexIiiRequiresTwoCheckers
         ))
     );
