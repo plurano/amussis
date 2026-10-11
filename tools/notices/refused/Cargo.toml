@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: 2026 Lusoris <lusoris@pm.me>
+# SPDX-License-Identifier: EUPL-1.2
+
+# The planted case of `make verify-licences`: a crate that names a licence
+# deny.toml does not allow. The licence check has to refuse it; nothing builds
+# or ships this crate, and its own files are under EUPL-1.2 like the rest of
+# the repository.
+[package]
+name = "amussis-refused-licence"
+version = "0.0.0"
+edition = "2024"
+license = "GPL-3.0-only"
+publish = false
+
+# A workspace of its own, so the repository's workspace does not claim it.
+[workspace]

@@ -22,6 +22,10 @@ concurrency:
 
 env:
   REUSE_VERSION: "6.2.0"
+  # cargo-deny runs the licence allow-list of the gate. The digest is the one
+  # its release page publishes for the Linux archive of this version.
+  CARGO_DENY_VERSION: "0.20.2"
+  CARGO_DENY_SHA256: "9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f"
   # Published Praetor commit that builds the praetorctl this gate pins.
   PRAETOR_COMMIT: "54c6f19b647ed643d0526cbab12f6f87e349c9b3"
   CARGO_TERM_COLOR: never
@@ -99,6 +103,22 @@ jobs:
           rustup show active-toolchain
           rustup which cargo-clippy
           rustup target list --installed | grep -qx wasm32-unknown-unknown
+
+      # A changed archive fails the digest line and nothing of it is unpacked.
+      - name: Install the pinned cargo-deny
+        run: |
+          archive="cargo-deny-${CARGO_DENY_VERSION}-x86_64-unknown-linux-musl"
+          base="https://github.com/EmbarkStudios/cargo-deny/releases/download"
+          curl --fail --silent --show-error --location --max-time 120 \
+            --output "$RUNNER_TEMP/${archive}.tar.gz" \
+            "${base}/${CARGO_DENY_VERSION}/${archive}.tar.gz"
+          echo "${CARGO_DENY_SHA256}  $RUNNER_TEMP/${archive}.tar.gz" \
+            | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/${archive}.tar.gz" -C "$RUNNER_TEMP" \
+            "${archive}/cargo-deny"
+          install -m 0755 "$RUNNER_TEMP/${archive}/cargo-deny" \
+            "$RUNNER_TEMP/bin/cargo-deny"
+          cargo deny --version
 
       - name: Verification gate
         run: make verify-all REUSE="pipx run reuse==${REUSE_VERSION}"

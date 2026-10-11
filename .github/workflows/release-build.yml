@@ -60,6 +60,15 @@ jobs:
       - name: Hold the committed module to its source
         run: python3 -B tools/wasm_module.py check
 
+      # The module holds code of the crates it links and of the standard
+      # library; their notices ship beside it. This generates them from the
+      # lock file of the tagged commit and refuses committed notices that
+      # differ. The fetch unpacks the crates the generator reads.
+      - name: Hold the committed notices to the lock file
+        run: |
+          cargo fetch --locked
+          python3 -B tools/third_party_notices.py check
+
       # The crate file carries the version of the manifest in its name. A tag
       # that names another version finds no such file, and the release stops
       # here. A pre-release tag (`v0.1.0-rc.1`) names the manifest version
@@ -74,6 +83,8 @@ jobs:
           cp "target/package/amussis-decision-${version}.crate" dist/
           cp bindings/go/decision/amussis_decision.wasm \
             "dist/amussis-decision-${version}.wasm"
+          cp bindings/go/decision/THIRD-PARTY-NOTICES.txt \
+            "dist/amussis-decision-${version}.wasm.third-party-notices.txt"
 
       - name: Install Syft
         uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3

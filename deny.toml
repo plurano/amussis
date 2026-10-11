@@ -1,0 +1,22 @@
+# SPDX-FileCopyrightText: 2026 Lusoris <lusoris@pm.me>
+# SPDX-License-Identifier: EUPL-1.2
+
+# The licences a crate of the locked graph may carry: every crate, on every
+# platform, build-time crates included. `make verify-licences` runs cargo-deny
+# on this list. A licence not named here stops the gate, so a new licence is a
+# decision taken in this file and not a side effect of a dependency update.
+#
+# The notices of the compiled module are a second, narrower check:
+# tools/third_party_notices.py names the crates the module links and requires
+# MIT of each.
+
+[graph]
+all-features = true
+
+[licenses]
+allow = [
+    "EUPL-1.2",
+    "MIT",
+    # unicode-ident, a build-time crate, carries the Unicode tables under it.
+    "Unicode-3.0",
+]

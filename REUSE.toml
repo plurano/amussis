@@ -16,11 +16,40 @@ path = [
     "settings-source.json",
     ".gitignore",
     "bindings/go/go.sum",
-    "bindings/go/decision/amussis_decision.wasm",
+    "tools/notices/refused/Cargo.lock",
 ]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Lusoris <lusoris@pm.me>"
 SPDX-License-Identifier = "EUPL-1.2"
+
+# The compiled module holds code of the crates it links and of the Rust
+# standard library; the notices beside it name each of them with its licence
+# text. `tools/third_party_notices.py check` refuses another expression here.
+[[annotations]]
+path = [
+    "bindings/go/decision/amussis_decision.wasm",
+    "bindings/go/decision/THIRD-PARTY-NOTICES.txt",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = [
+    "2026 Lusoris <lusoris@pm.me>",
+    "The Rust Project Contributors",
+    "1991-2024 Unicode, Inc.",
+    "The authors named in bindings/go/decision/THIRD-PARTY-NOTICES.txt",
+]
+SPDX-License-Identifier = "EUPL-1.2 AND MIT AND Unicode-3.0"
+
+# The standard library part of those notices, as the pinned toolchain's own
+# notice documents give it.
+[[annotations]]
+path = ["tools/notices/standard-library-*.txt"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = [
+    "The Rust Project Contributors",
+    "1991-2024 Unicode, Inc.",
+    "2014 Alex Crichton",
+]
+SPDX-License-Identifier = "MIT AND Unicode-3.0"
 
 # Written by `praetorctl adopt` and held in step by `praetorctl audit`.
 # "closest" keeps the terms a generated file states itself, as the bundled

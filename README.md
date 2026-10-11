@@ -50,6 +50,8 @@ kill switch) that moves here from the operating-system repository.
 | `exceptions.toml`, `tools/exceptions_check.py` | The workspace's exceptions to its own rules, each with one rule, one file, a reason and an end date, and the check that holds every entry to what it names. |
 | `tools/wasm_module.py` | Builds the WebAssembly module and compares it byte for byte with the one `bindings/go` embeds. |
 | `tools/settings_sync.py` | Holds the shared toolchain and lint settings to their recorded source. |
+| `tools/third_party_notices.py`, `tools/notices/` | Writes the notices of the WebAssembly module from the lock file and holds the committed ones to it; the standard library part per toolchain, and the planted crate of the licence check. See [Licence](#licence). |
+| `deny.toml` | The licences a crate of the locked graph may carry. |
 | `tools/origin_names.py` | Counts the operating system's component numbers and `aegis.` schema tags in the crates' sources. They may stand only in the line that says where the crate came from. |
 | `docs/handover/` | What left this repository for the operating-system repository, each with paths, hashes and the steps to switch: the service unit, and the conversation schemas with the subsystem graph. |
 | `tools/apicompat/`, `.github/workflows/praetor-api.yml` | Written by the Praetor engine: on a pull request, compares the exported API of the Go module with the base commit. |
@@ -70,13 +72,18 @@ builds, tests (default and all features), lints with warnings refused and
 builds the documentation on the toolchain `rust-toolchain.toml` pins. It then
 lints the export crate for `wasm32-unknown-unknown`, builds the WebAssembly
 module and compares it with the committed one, formats, vets and tests the Go
-binding, and checks the licence headers with `reuse lint`. Its second half is
+binding, holds the third-party notices of the module to the lock file, holds
+every locked crate to the licences `deny.toml` allows, and checks the licence
+headers with `reuse lint`. Its second half is
 the Praetor standards audit, which needs `praetorctl`; CI builds it from the
 commit pinned in the workflow.
 
 The gate needs the `wasm32-unknown-unknown` target of the pinned toolchain
-(`rustup target add wasm32-unknown-unknown`) and Go at the version
-`bindings/go/go.mod` names. It installs neither, and fails when one is missing.
+(`rustup target add wasm32-unknown-unknown`), Go at the version
+`bindings/go/go.mod` names and
+[cargo-deny](https://github.com/EmbarkStudios/cargo-deny) at the version
+`.github/workflows/ci.yml` pins. It installs none of them, and fails when one
+is missing.
 
 `make fetch` is the only step that reaches a third-party host: `cargo fetch
 --locked` reads the crates.io registry and `go mod download` the Go module
@@ -390,8 +397,9 @@ release on the forge, which a person reads and publishes.
 | :--- | :--- |
 | `amussis-decision-<version>.crate` | The library as `cargo package` packs it, compiled once more from the packed sources. |
 | `amussis-decision-<version>.wasm` | The module the Go binding embeds, rebuilt from the tag and compared byte for byte (`tools/wasm_module.py check`). |
+| `amussis-decision-<version>.wasm.third-party-notices.txt` | The notices that travel with the module: every crate it links and the Rust standard library, each with its licence text. See [Licence](#licence). |
 | `amussis-decision-<version>.cyclonedx.json`, `.spdx.json` | The dependencies of the packed crate, read from its lock file. |
-| `checksums.txt` | The SHA-256 of the four files above. |
+| `checksums.txt` | The SHA-256 of the five files above. |
 | `checksums.txt.sigstore.json` | The signature over `checksums.txt`. |
 
 The files are built in `.github/workflows/release-build.yml`, which only the
@@ -401,8 +409,10 @@ A tag that names another version than the manifest finds no crate file of its
 name, and the run stops before anything is signed.
 
 A tag with a hyphen after the version (`v0.1.0-rc.1`) runs the same path to
-prove it. Its files carry the manifest version, its draft is marked as a
-pre-release, and the draft is deleted after reading, not published.
+prove it. Its files carry the manifest version and its draft is marked as a
+pre-release. A person publishes that draft as a pre-release, so the checks
+below can be run on it the way a consumer runs them; it stays visible and
+marked as a pre-release.
 
 To check a release after downloading its files:
 
@@ -441,3 +451,36 @@ at the earliest; releases of this workspace's own crates are taken up at once.
 
 EUPL-1.2, see [LICENSE](LICENSE). Source files carry an SPDX header; the gate
 fails on a file that has neither a header nor an entry in `REUSE.toml`.
+It also fails when `LICENSE` is not the text of `LICENSES/EUPL-1.2.txt`.
+
+The WebAssembly module is a compiled file and holds more than this
+repository's code: the registry crates it links and the Rust standard library
+are part of it. Its licence is `EUPL-1.2 AND MIT AND Unicode-3.0`: MIT for
+the crates and the standard library, where MIT is taken wherever a choice is
+offered, and Unicode-3.0 for the Unicode tables of the standard library.
+[`bindings/go/decision/THIRD-PARTY-NOTICES.txt`](bindings/go/decision/THIRD-PARTY-NOTICES.txt)
+names each of them with its licence text, and a release ships it beside the
+module. Whoever passes the module or the Go package on passes the notices on
+with it.
+
+The notices are generated, not written:
+
+```sh
+python3 tools/third_party_notices.py check    # what the gate runs; no network
+python3 tools/third_party_notices.py update   # after a dependency change
+```
+
+The crates come from `cargo metadata` for the module's target: what the
+module crate reaches through normal dependencies. Crates that only run at
+build time, procedural macros among them, leave no code in the module and
+are not listed. A linked crate that offers no MIT, or ships no `LICENSE-MIT`,
+is refused, and so is a `REUSE.toml` that names another licence for the
+module. The standard library part is one file per toolchain under
+`tools/notices/`, written from the notice documents that toolchain ships
+(`share/doc/rust/COPYRIGHT-library.html`); a toolchain update without its
+file is refused.
+
+A second check covers the whole locked graph, build-time crates included:
+`cargo deny check licenses` on the list in `deny.toml`. The gate runs it once
+more on `tools/notices/refused/`, a crate under a licence the list does not
+name, and fails when that crate passes.

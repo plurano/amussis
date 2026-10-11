@@ -4,13 +4,15 @@
 
 SHELL := /bin/sh
 REUSE ?= reuse
+CARGO_DENY ?= cargo deny
 
 GO_BINDING := bindings/go
 WASM_TARGET := wasm32-unknown-unknown
 # The Go steps use the installed Go, change no go.mod and build without cgo.
 GO_LOCAL := GOTOOLCHAIN=local GOFLAGS=-mod=readonly CGO_ENABLED=0
 
-.PHONY: verify verify-settings verify-exceptions verify-origin verify-rust verify-wasm verify-go verify-reuse fetch
+.PHONY: verify verify-settings verify-exceptions verify-origin verify-rust verify-wasm verify-go
+.PHONY: verify-notices verify-licences verify-reuse fetch
 
 # The one gate is `make verify-all`: CI runs exactly that target, so a local
 # green run and a green status check mean the same thing. Its recipe, at the
@@ -19,8 +21,10 @@ GO_LOCAL := GOTOOLCHAIN=local GOFLAGS=-mod=readonly CGO_ENABLED=0
 verify-all: verify
 
 # This workspace's own checks; they need no engine.
-verify: verify-settings verify-exceptions verify-origin verify-rust verify-wasm verify-go verify-reuse
-	@printf '%s\n' 'PASS: settings, exceptions, origin names, crate gate, module, Go binding and licence headers.'
+verify: verify-settings verify-exceptions verify-origin verify-rust verify-wasm verify-go \
+		verify-notices verify-licences verify-reuse
+	@printf '%s\n' 'PASS: settings, exceptions, origin names, crate gate, module, Go binding,' \
+		'third-party notices, dependency licences and licence headers.'
 
 # The shared toolchain and lint settings equal the record in
 # settings-source.json; the selftest plants one defect per setting first, so a
@@ -83,9 +87,42 @@ verify-go: fetch verify-wasm
 	cd $(GO_BINDING) && $(GO_LOCAL) GOPROXY=off go vet ./...
 	cd $(GO_BINDING) && $(GO_LOCAL) GOPROXY=off go test -count=1 ./...
 
-# Every file carries its licence header or is named in REUSE.toml.
+# The compiled module holds code of the crates it links and of the Rust
+# standard library. The notices beside it are generated from the lock file;
+# a notices file that differs from what the lock file yields fails, and so
+# does a linked crate that offers no MIT. No network: the crates are read
+# where `fetch` unpacked them.
+verify-notices: fetch
+	python3 -B tools/third_party_notices.py selftest
+	python3 -B tools/third_party_notices.py check
+
+# Every crate of the locked graph, build-time crates included, carries a
+# licence deny.toml allows. The second run is the planted case: a crate
+# under a licence the list does not name. cargo-deny exits 4 when the licence
+# check refuses and with another status when it could not run, so only 4
+# counts as a refusal.
+verify-licences: fetch
+	$(CARGO_DENY) --version
+	$(CARGO_DENY) --offline --locked --config $(CURDIR)/deny.toml check licenses
+	@status=0; $(CARGO_DENY) --manifest-path tools/notices/refused/Cargo.toml \
+		--offline --locked --config $(CURDIR)/deny.toml check licenses \
+		>/dev/null 2>&1 || status=$$?; test "$$status" -eq 4 \
+		|| { printf 'FAIL: the planted licence was not refused: cargo-deny exited %s, not 4\n' \
+		"$$status" >&2; exit 1; }
+	@printf '%s\n' 'PASS: the planted licence is refused.'
+
+# Every file carries its licence header or is named in REUSE.toml, and LICENSE
+# at the root is the text of the repository's own licence. The engine's audit
+# compares the two only while LICENSES/ holds one text; it holds the texts of
+# the module's notices too, so the comparison stands here. The last line is
+# its planted case: another licence text has to compare as different, and cmp
+# exits 1 for a difference and 2 when it could not read a file.
 verify-reuse:
 	$(REUSE) lint
+	cmp LICENSE LICENSES/EUPL-1.2.txt
+	@status=0; cmp -s LICENSE LICENSES/MIT.txt || status=$$?; test "$$status" -eq 1 \
+		|| { printf 'FAIL: another licence text was not told apart: cmp exited %s, not 1\n' \
+		"$$status" >&2; exit 1; }
 
 # Praetor declared verification; existing project recipes remain unchanged.
 # Praetor ships one binary under two names; resolve whichever is installed.
