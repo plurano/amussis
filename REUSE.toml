@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 Lusoris <lusoris@proton.me>
+# SPDX-FileCopyrightText: 2026 Lusoris <lusoris@pm.me>
 # SPDX-License-Identifier: EUPL-1.2
 #
 # Only files that cannot carry a header are named here, and the files the
@@ -17,7 +17,7 @@ path = [
     ".gitignore",
 ]
 precedence = "aggregate"
-SPDX-FileCopyrightText = "2026 Lusoris <lusoris@proton.me>"
+SPDX-FileCopyrightText = "2026 Lusoris <lusoris@pm.me>"
 SPDX-License-Identifier = "EUPL-1.2"
 
 # Written by `praetorctl adopt` and held in step by `praetorctl audit`.
@@ -64,5 +64,5 @@ path = [
     "standards.sublime-project",
 ]
 precedence = "closest"
-SPDX-FileCopyrightText = "2026 Lusoris <lusoris@proton.me>"
+SPDX-FileCopyrightText = "2026 Lusoris <lusoris@pm.me>"
 SPDX-License-Identifier = "EUPL-1.2"

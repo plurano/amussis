@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2026 Lusoris <lusoris@proton.me>
+// SPDX-FileCopyrightText: 2026 Lusoris <lusoris@pm.me>
 // SPDX-License-Identifier: EUPL-1.2
 
 //! The only part of the crate permitted to touch the host environment.

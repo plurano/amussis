@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2026 Lusoris <lusoris@proton.me>
+// SPDX-FileCopyrightText: 2026 Lusoris <lusoris@pm.me>
 // SPDX-License-Identifier: EUPL-1.2
 
 //! Epic E14-2: the decision request P06 Justitia sends to P05 Forum.

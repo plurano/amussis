@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2026 Lusoris <lusoris@proton.me>
+// SPDX-FileCopyrightText: 2026 Lusoris <lusoris@pm.me>
 // SPDX-License-Identifier: EUPL-1.2
 
 //! The bounded registry of approval requests the engine still holds.
