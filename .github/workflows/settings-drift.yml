@@ -1,0 +1,37 @@
+# SPDX-FileCopyrightText: 2026 Lusoris <lusoris@proton.me>
+# SPDX-License-Identifier: EUPL-1.2
+---
+# The gate proves this workspace equals the record in settings-source.json.
+# This job proves the record still equals the source repository's main branch,
+# so a toolchain or lint change made there turns up here within a week instead
+# of never. A red run is cured by `tools/settings_sync.py update --source`.
+name: Settings drift
+
+on:
+  schedule:
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  drift:
+    name: Settings equal the source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check out the settings source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: cordanaLLM/Aegis-OS
+          path: settings-source
+          persist-credentials: false
+
+      - name: Compare the record with the source
+        run: python3 -B tools/settings_sync.py check --source settings-source

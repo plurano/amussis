@@ -1,0 +1,11 @@
+# SPDX-FileCopyrightText: 2026 Lusoris <lusoris@proton.me>
+# SPDX-License-Identifier: EUPL-1.2
+#
+# HISS-04 enforcement. Without these keys clippy defaults to 100 lines and a
+# cognitive complexity of 25, which leaves the invariant unenforced. Clippy
+# measures cognitive complexity, not McCabe; it is used here as a strictly
+# conservative proxy for the McCabe bound of 10.
+too-many-lines-threshold = 60
+cognitive-complexity-threshold = 10
+too-many-arguments-threshold = 6
+excessive-nesting-threshold = 4

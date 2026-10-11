@@ -1,0 +1,49 @@
+{
+  "name": "plurano/amussis",
+  "build": {
+    "dockerfile": "Dockerfile.praetor",
+    "context": "."
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "installZsh": false,
+      "upgradePackages": true
+    },
+    "ghcr.io/devcontainers/features/go:1": {}
+  },
+  "customizations": {
+    "praetor": {
+      "bootstrap": {
+        "version": 1,
+        "state": "source-bundle",
+        "builderImage": "docker.io/library/golang@sha256:f92b6ef800e499660581efdabdf25d9d817a9d124eaf900924f0504e7e27e12d",
+        "baseImage": "mcr.microsoft.com/devcontainers/base@sha256:91eff046d5c12318fc98e59258982b87ba896c467427ed8b5dab5a02107a5db7",
+        "sourceSHA256": "sha256:c55bd466e5b1e81c9d82fced2e507238928244d3a8fdb0f74fc1305ab858b8de",
+        "archiveSHA256": "sha256:e1179c61c817f1d7aec91a3c8658c94da535f4014faec27d06259813dddca227",
+        "archiveParts": 6,
+        "dockerfileSHA256": "sha256:3d5fb390e3f0d75ed5fd4a270d9f5c0f9454ea60d9f026c1fe36d011325f03dd"
+      }
+    },
+    "vscode": {
+      "extensions": [
+        "GitHub.vscode-pull-request-github",
+        "aquasecurity.trivy-vulnerability-scanner",
+        "eamodio.gitlens",
+        "github.copilot",
+        "golang.go",
+        "ms-azuretools.vscode-docker",
+        "redhat.vscode-yaml"
+      ],
+      "settings": {
+        "editor.formatOnSave": true,
+        "go.lintOnSave": "package",
+        "go.lintTool": "golangci-lint",
+        "go.toolsManagement.autoUpdate": false,
+        "go.useLanguageServer": true,
+        "security.workspace.trust.enabled": true
+      }
+    }
+  },
+  "remoteUser": "vscode",
+  "postCreateCommand": "export PATH=\"/usr/local/bin:$PATH\"; /usr/local/bin/praetorctl compile-context && /usr/bin/make verify-all"
+}

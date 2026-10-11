@@ -1,0 +1,8 @@
+# Rust formatting for the Aegis workspace. Defaults are kept deliberately: the
+# gate runs `cargo fmt --check`, so any setting here becomes a rule every
+# contributor and every agent must match, and a narrower rule set is easier to
+# hold than a wide one.
+edition = "2024"
+max_width = 100
+newline_style = "Unix"
+use_field_init_shorthand = true

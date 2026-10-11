@@ -1,0 +1,40 @@
+---
+version: 1
+repository:
+  owner: plurano
+  name: amussis
+  visibility: private
+  description: "Shared Rust crates of the Plurano framework family, kept in one workspace."
+  homepage: ""
+  topics: []
+profiles:
+  - framework
+facets:
+  - security:high
+  - api:public-contract
+  - agent:sandboxed
+# The engine has no library flavor yet (cordanaLLM/praetor#67); until it
+# does, the workspace is audited as rust-systems.
+flavors:
+  - name: rust-systems
+register:
+  sources:
+    expected: 13
+    sha256:
+      sha256:aab1f460acdcc3304d765472eda2bd31368b6af0a05d2c91dbbd8a1dfda0df3b
+    inputs:
+      - path: .paperclip/harness.json
+        surface: prompts
+        kind: message
+        format: json
+        selector: operating_contract.*
+      - path: .paperclip/harness.json
+        surface: prompts
+        kind: message
+        format: json
+        selector: invariants.*
+exceptions:
+  - rule: HISS-11
+    path: .github/workflows/release.yml
+    reason: adoption found the release workflows short of the declared supply chain (SLSA Build Level 3 declared, Level 0 measured; enforce_cosign without a cosign signing step; require_sbom without an SBOM step); raise them as docs/guides/releasing.md in Praetor describes, then remove this entry
+    expires: "2027-01-09"
