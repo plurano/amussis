@@ -187,6 +187,16 @@ impl MonotonicGuard {
         Self { last: None }
     }
 
+    /// Builds a guard that has already accepted `last`.
+    ///
+    /// An engine that continues a chain starts its guard at the time of the
+    /// chain's last record, so a clock that reads earlier than that record is
+    /// a fault from the first reading on.
+    #[must_use]
+    pub const fn after(last: UnixSeconds) -> Self {
+        Self { last: Some(last) }
+    }
+
     /// Returns the most recent accepted reading, if there is one.
     #[must_use]
     pub const fn last(&self) -> Option<UnixSeconds> {

@@ -3,10 +3,14 @@
 
 //! A one-way halt latch.
 //!
-//! There is no `disengage` in milestone M02: once engaged, the latch stays
-//! engaged for the life of the value, and re-engaging preserves the first
-//! reason and time. The observed state is written into every audit record, so a
-//! block is auditable after the fact.
+//! There is no `disengage`: once engaged, the latch stays engaged for the life
+//! of the value, and re-engaging preserves the first reason and time. The
+//! observed state is written into every audit record, so a block is auditable
+//! after the fact.
+//!
+//! A latch is released in one place only, and not on a live value: on the
+//! anchor a chain is continued from. See [`crate::ledger::anchor`] for the
+//! rule.
 
 use crate::time::UnixSeconds;
 
@@ -34,6 +38,19 @@ impl HaltReason {
             Self::AuditUnavailable => 2,
             Self::LedgerCompromised => 3,
             Self::ClockUnavailable => 4,
+        }
+    }
+
+    /// Returns the reason a stable tag stands for, or `None` for a tag no
+    /// reason has. The inverse of [`Self::tag`].
+    #[must_use]
+    pub const fn from_tag(tag: u8) -> Option<Self> {
+        match tag {
+            1 => Some(Self::OperatorStop),
+            2 => Some(Self::AuditUnavailable),
+            3 => Some(Self::LedgerCompromised),
+            4 => Some(Self::ClockUnavailable),
+            _ => None,
         }
     }
 }
@@ -97,6 +114,16 @@ impl Killswitch {
         Self {
             state: KillswitchState::Armed,
         }
+    }
+
+    /// Builds a latch in the state a chain was left in.
+    ///
+    /// This is how an engine that continues a chain starts halted when the
+    /// chain ends halted; it is not a release, because `state` comes from the
+    /// anchor of the chain.
+    #[must_use]
+    pub const fn from_state(state: KillswitchState) -> Self {
+        Self { state }
     }
 
     /// Engages the latch. Idempotent: a second call keeps the first reason and

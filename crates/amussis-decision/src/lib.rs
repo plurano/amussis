@@ -140,13 +140,15 @@ pub mod time;
 /// Contract version tag mixed into every audit pre-image.
 pub const CONTRACT_VERSION: &str = "amussis.decision.v1";
 
-/// Default scalar upper bound on the number of records in one audit chain.
+/// Default scalar upper bound on the number of records one ledger holds in
+/// memory: its window on the chain.
 ///
-/// Chosen so that two retained copies of a full chain stay inside the
+/// Chosen so that two retained copies of a full window stay inside the
 /// [`MAX_RETAINED_AUDIT_BYTES`] budget; `tests/allocation_bounds.rs` computes
-/// the product from `size_of` and fails if it ever stops holding. The in-memory
-/// chain is a staging window, not the archive; the durable sink that drains it
-/// is M14 work.
+/// the product from `size_of` and fails if it ever stops holding. The window
+/// is not the archive and does not bound the chain: the store behind the sink
+/// holds the chain, [`DecisionEngine::rotate_ledger`] frees a full window, and
+/// [`DecisionEngine::continue_from`] continues a stored chain in a new value.
 pub const MAX_LEDGER_RECORDS: usize = 4096;
 
 /// Scalar budget, in bytes, for every audit record the default bounds retain.
@@ -211,6 +213,7 @@ pub use crate::identity::{
 };
 pub use crate::intent::{ActionIntent, IntentError, IntentSpec};
 pub use crate::killswitch::{HaltReason, Killswitch, KillswitchState};
+pub use crate::ledger::anchor::{AnchorError, ChainAnchor};
 pub use crate::ledger::hash::{
     CanonicalBuffer, Digest32, HashAlgorithm, HashError, LedgerHasher, PreimageError,
 };
@@ -219,7 +222,7 @@ pub use crate::ledger::signer::{RecordSigner, SignError, Signature, SignerBindin
 pub use crate::ledger::{
     AUDIT_DOMAIN, AuditLedger, AuditRecord, InMemorySink, IoDeadline, LedgerError, LedgerSink,
     RecordBody, RecordDraft, RecordStatus, Sequence, Sha256Ledger, SinkError, UnavailableSink,
-    verify_chain, verify_chain_bounded,
+    verify_chain, verify_chain_bounded, verify_continuation,
 };
 pub use crate::outcome::{BlockReason, InterceptorOutcome, WarningCode};
 pub use crate::oversight::{

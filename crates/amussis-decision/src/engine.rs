@@ -48,10 +48,52 @@
 //! to their scalar bounds at construction and refuse a push at the bound;
 //! reclamation compacts in place. See the crate documentation and
 //! `tests/allocation_bounds.rs`.
+//!
+//! # Running past the audit window
+//!
+//! The ledger holds a bounded window of the chain, and a decision that finds
+//! the window full cannot be recorded: it blocks and engages the halt latch,
+//! as every unrecordable decision does. An engine that runs longer than one
+//! window rotates before that point. [`DecisionEngine::audit_room`] is the
+//! number of decisions the window still takes; each call of `decide` or
+//! `adjudicate` uses at most one. [`DecisionEngine::rotate_ledger`] re-walks
+//! the window, has the sink flush, and drops the window. The chain goes on
+//! unbroken: the next record links onto the last one dropped.
+//!
+//! # Continuing a chain in a new engine
+//!
+//! [`DecisionEngine::continue_from`] builds an engine on a chain an earlier
+//! engine value wrote, from the [`ChainAnchor`] of its last stored record.
+//! Three things carry over, all read from that record:
+//!
+//! * the chain position: the first record links to the head digest and
+//!   carries the next sequence number;
+//! * the time: a clock reading earlier than the head record is a clock fault,
+//!   from the first reading on;
+//! * the halt latch: an engine that continues a chain that ends halted starts
+//!   halted, with the first reason and time.
+//!
+//! Open holds do not carry over. A held action of the earlier engine cannot
+//! be adjudicated in the new one; it stays unreleased.
+//!
+//! # Releasing the halt latch
+//!
+//! No call releases the latch of an engine value, and rotating the window
+//! does not either. The one release is [`ChainAnchor::release_latch`], on the
+//! anchor a new engine is continued from: a named step, taken outside the
+//! halted engine, which the chain shows as a record with the latch engaged
+//! followed by one with the latch armed. A chain halted as compromised is not
+//! released.
+//!
+//! A halt is in the chain from the first decision refused under it. A halt
+//! after which nothing was decided left no record, so the anchor of that
+//! chain is armed: the latch is a property of the engine value, and the chain
+//! records what was observed at each decision.
 
 use crate::identity::{IntentId, RequestId};
 use crate::intent::ActionIntent;
 use crate::killswitch::{HaltReason, Killswitch, KillswitchState};
+use crate::ledger::anchor::ChainAnchor;
 use crate::ledger::hash::LedgerHasher;
 use crate::ledger::signer::{RecordSigner, SignerBinding};
 use crate::ledger::{AuditLedger, IoDeadline, LedgerError, LedgerSink, RecordDraft, RecordStatus};
@@ -126,6 +168,37 @@ impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Clock> DecisionEngine<H
         }
     }
 
+    /// Builds an engine that continues the chain whose last stored record
+    /// `anchor` names.
+    ///
+    /// The engine starts in the halt-latch state the anchor carries, its
+    /// clock guard starts at the time of the head record, and its registry
+    /// starts empty. See the module documentation.
+    #[must_use]
+    pub fn continue_from(
+        config: EngineConfig,
+        signer: SignerBinding<S>,
+        sink: K,
+        io_deadline: IoDeadline,
+        clock: C,
+        anchor: &ChainAnchor,
+    ) -> Self {
+        Self {
+            registry: PendingRegistry::with_bound(config.max_pending),
+            ledger: AuditLedger::continue_from(
+                signer,
+                sink,
+                io_deadline,
+                config.max_audit_records,
+                anchor,
+            ),
+            config,
+            killswitch: Killswitch::from_state(anchor.killswitch()),
+            clock,
+            guard: MonotonicGuard::after(anchor.at()),
+        }
+    }
+
     /// Returns the engine configuration.
     #[must_use]
     pub const fn config(&self) -> EngineConfig {
@@ -192,6 +265,38 @@ impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Clock> DecisionEngine<H
                 Err(error)
             }
         }
+    }
+
+    /// Returns how many more decisions the audit window takes.
+    ///
+    /// At zero the next decision cannot be recorded: it blocks and engages
+    /// the halt latch. A caller that calls [`Self::rotate_ledger`] while this
+    /// is above zero never reaches that point.
+    #[must_use]
+    pub fn audit_room(&self) -> usize {
+        self.ledger.remaining()
+    }
+
+    /// Drops the audit window once it has been re-walked and the sink has
+    /// flushed, and returns the number of records dropped.
+    ///
+    /// The halt latch is not touched by a rotation that succeeds: a halted
+    /// engine stays halted.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first broken link of the window, having first engaged the
+    /// halt latch with [`HaltReason::LedgerCompromised`], or
+    /// [`LedgerError::Sink`] when the sink cannot flush. A failed flush keeps
+    /// the window and does not halt: no decision is lost by it, and a
+    /// decision that then finds the window full halts as before.
+    pub fn rotate_ledger(&mut self) -> Result<usize, LedgerError> {
+        self.ledger.rotate().inspect_err(|error| {
+            if block_reason_for(error) == BlockReason::LedgerCompromised {
+                let at = self.last_known_time();
+                self.killswitch.engage(at, HaltReason::LedgerCompromised);
+            }
+        })
     }
 
     /// Reads the clock through the monotonic guard.

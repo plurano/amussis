@@ -15,7 +15,21 @@
 //! [`InMemorySink`]'s -- are reserved to their scalar bound at construction and
 //! refuse a push at that bound, so neither reallocates on the decision path.
 //! See the crate documentation for the memory arithmetic behind the bounds.
+//!
+//! # The window and the chain
+//!
+//! The ledger's record list is a window on the chain, not the chain. The sink
+//! holds every record; the ledger holds those sealed since the window was
+//! last dropped, at most `bound` of them, and refuses the next one at the
+//! bound. [`AuditLedger::remaining`] is the room left, and
+//! [`AuditLedger::rotate`] drops the window once it has been re-walked and the
+//! sink has flushed. The head digest, the next sequence number and the last
+//! time stay, so the next record links onto the dropped one.
+//!
+//! A new ledger value continues a stored chain through
+//! [`AuditLedger::continue_from`] and a [`ChainAnchor`]; see [`anchor`].
 
+pub mod anchor;
 pub mod hash;
 #[cfg(feature = "jsonl")]
 pub mod jsonl;
@@ -26,6 +40,7 @@ use core::num::NonZeroU32;
 
 use crate::identity::{AgentId, IntentId};
 use crate::killswitch::KillswitchState;
+use crate::ledger::anchor::ChainAnchor;
 use crate::ledger::hash::{
     CanonicalBuffer, Digest32, HashAlgorithm, HashError, LedgerHasher, PreimageError,
 };
@@ -186,6 +201,41 @@ impl Sequence {
         match self.0.checked_add(1) {
             Some(value) => Some(Self(value)),
             None => None,
+        }
+    }
+}
+
+/// Returns the sequence number after `sequence`.
+///
+/// Saturating, not wrapping: at the `u64` ceiling a chain stops moving on
+/// instead of restarting at one, and the walk refuses what follows.
+const fn successor(sequence: Sequence) -> Sequence {
+    Sequence::new(sequence.get().saturating_add(1))
+}
+
+/// Where a chain stands: what the next record must link to, the sequence
+/// number it must carry, and the time it must not precede.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Position {
+    previous: Digest32,
+    expected: Sequence,
+    last_at: Option<UnixSeconds>,
+}
+
+impl Position {
+    /// Before the first record of a chain.
+    const GENESIS: Self = Self {
+        previous: Digest32::GENESIS,
+        expected: Sequence::FIRST,
+        last_at: None,
+    };
+
+    /// Directly after the head record `anchor` names.
+    const fn after(anchor: &ChainAnchor) -> Self {
+        Self {
+            previous: anchor.head(),
+            expected: successor(anchor.sequence()),
+            last_at: Some(anchor.at()),
         }
     }
 }
@@ -605,9 +655,8 @@ impl LedgerSink for InMemorySink {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuditLedger<H: LedgerHasher, S: RecordSigner, K: LedgerSink> {
     records: Vec<AuditRecord>,
-    head: Digest32,
-    next_sequence: Sequence,
-    last_at: Option<UnixSeconds>,
+    origin: Position,
+    tip: Position,
     bound: usize,
     signer: SignerBinding<S>,
     sink: K,
@@ -638,11 +687,39 @@ impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink> AuditLedger<H, S, K> {
         io_deadline: IoDeadline,
         bound: usize,
     ) -> Self {
+        Self::at_position(signer, sink, io_deadline, bound, Position::GENESIS)
+    }
+
+    /// Builds a ledger that continues the chain whose last stored record
+    /// `anchor` names, with an explicit scalar record bound.
+    ///
+    /// The first record sealed links to the anchor's head digest, carries the
+    /// next sequence number and may not precede the head record in time. The
+    /// window starts empty: [`Self::verify`] walks from the anchor, and the
+    /// records before it are the store's to verify.
+    #[must_use]
+    pub fn continue_from(
+        signer: SignerBinding<S>,
+        sink: K,
+        io_deadline: IoDeadline,
+        bound: usize,
+        anchor: &ChainAnchor,
+    ) -> Self {
+        Self::at_position(signer, sink, io_deadline, bound, Position::after(anchor))
+    }
+
+    /// Builds a ledger with an empty window at `position`.
+    fn at_position(
+        signer: SignerBinding<S>,
+        sink: K,
+        io_deadline: IoDeadline,
+        bound: usize,
+        position: Position,
+    ) -> Self {
         Self {
             records: Vec::with_capacity(bound),
-            head: Digest32::GENESIS,
-            next_sequence: Sequence::FIRST,
-            last_at: None,
+            origin: position,
+            tip: position,
             bound,
             signer,
             sink,
@@ -668,7 +745,23 @@ impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink> AuditLedger<H, S, K> {
     /// Returns the digest of the most recent record, or the genesis link.
     #[must_use]
     pub const fn head(&self) -> Digest32 {
-        self.head
+        self.tip.previous
+    }
+
+    /// Returns the sequence number the next record will carry.
+    #[must_use]
+    pub const fn next_sequence(&self) -> Sequence {
+        self.tip.expected
+    }
+
+    /// Returns how many more records the window takes before
+    /// [`Self::append`] refuses with [`LedgerError::LengthBoundExceeded`].
+    ///
+    /// A caller that rotates while this is above zero is never refused at the
+    /// bound.
+    #[must_use]
+    pub fn remaining(&self) -> usize {
+        self.bound.saturating_sub(self.records.len())
     }
 
     /// Returns the number of records held.
@@ -707,7 +800,7 @@ impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink> AuditLedger<H, S, K> {
         if self.records.len() >= self.bound {
             return Err(LedgerError::LengthBoundExceeded { max: self.bound });
         }
-        if let Some(last) = self.last_at
+        if let Some(last) = self.tip.last_at
             && draft.at < last
         {
             return Err(LedgerError::NonMonotonicTimestamp {
@@ -715,7 +808,8 @@ impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink> AuditLedger<H, S, K> {
                 observed: draft.at.get(),
             });
         }
-        let body = RecordBody::from_parts(self.next_sequence, self.head, H::ALGORITHM, draft);
+        let body =
+            RecordBody::from_parts(self.tip.expected, self.tip.previous, H::ALGORITHM, draft);
         let digest = body.digest::<H>()?;
         let signature = self.signer.sign(&digest)?;
         let record = AuditRecord::from_parts(body, signature, digest);
@@ -726,21 +820,46 @@ impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink> AuditLedger<H, S, K> {
 
     /// Commits a sealed record. Called only after every fallible step passed.
     fn commit(&mut self, record: &AuditRecord, at: UnixSeconds) {
-        self.head = record.digest();
-        // Saturating, not wrapping: at the u64 ceiling the next append fails with
-        // a sequence gap rather than silently restarting the chain at one.
-        self.next_sequence = Sequence::new(record.body().sequence().get().saturating_add(1));
-        self.last_at = Some(at);
+        self.tip = Position {
+            previous: record.digest(),
+            expected: successor(record.body().sequence()),
+            last_at: Some(at),
+        };
         self.records.push(*record);
     }
 
-    /// Re-walks the ledger's own records.
+    /// Re-walks the records in the window, from the position the window
+    /// starts at: genesis, the anchor the ledger continued from, or the head
+    /// at the last rotation.
     ///
     /// # Errors
     ///
-    /// Returns [`LedgerError`] from [`verify_chain_bounded`].
+    /// Returns [`LedgerError::LengthBoundExceeded`] when the window is longer
+    /// than the bound, and otherwise the first broken link.
     pub fn verify(&self) -> Result<Digest32, LedgerError> {
-        verify_chain_bounded::<H>(&self.records, self.bound)
+        walk::<H>(self.origin, &self.records, self.bound)
+    }
+
+    /// Drops the window, so that [`Self::remaining`] is the bound again.
+    ///
+    /// The window is re-walked first and the sink is flushed second; only when
+    /// both pass are the records dropped, and the window then starts at the
+    /// head. Nothing is reallocated, and the chain position does not move: the
+    /// next record links onto the last one dropped. Returns the number of
+    /// records dropped.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first broken link of the window, or [`LedgerError::Sink`]
+    /// when the sink cannot flush within the deadline. The window is kept in
+    /// both cases.
+    pub fn rotate(&mut self) -> Result<usize, LedgerError> {
+        self.verify()?;
+        self.sink.sync(self.io_deadline)?;
+        let dropped = self.records.len();
+        self.records.clear();
+        self.origin = self.tip;
+        Ok(dropped)
     }
 }
 
@@ -800,28 +919,60 @@ pub fn verify_chain_bounded<H: LedgerHasher>(
     records: &[AuditRecord],
     max: usize,
 ) -> Result<Digest32, LedgerError> {
+    walk::<H>(Position::GENESIS, records, max)
+}
+
+/// Re-walks `records` as the part of a chain that follows `anchor`, under an
+/// explicit scalar bound.
+///
+/// This is the walk across a continuation: the first record must link to the
+/// anchor's head digest, carry the next sequence number and not precede the
+/// head record in time. No record after the anchor verifies as the anchor's
+/// head digest.
+///
+/// # Errors
+///
+/// Returns [`LedgerError::LengthBoundExceeded`] when there are more than `max`
+/// records, and otherwise the first broken link.
+pub fn verify_continuation<H: LedgerHasher>(
+    anchor: &ChainAnchor,
+    records: &[AuditRecord],
+    max: usize,
+) -> Result<Digest32, LedgerError> {
+    walk::<H>(Position::after(anchor), records, max)
+}
+
+/// Walks `records` from `from` and returns the digest the chain then ends on.
+///
+/// The walk is iterative; the bound is checked before it starts.
+fn walk<H: LedgerHasher>(
+    from: Position,
+    records: &[AuditRecord],
+    max: usize,
+) -> Result<Digest32, LedgerError> {
     if records.len() > max {
         return Err(LedgerError::LengthBoundExceeded { max });
     }
-    let mut previous = Digest32::GENESIS;
-    let mut expected = Sequence::FIRST;
-    let mut last_at: Option<UnixSeconds> = None;
+    let mut at = from;
     for record in records.iter().take(max) {
-        verify_link::<H>(previous, expected, record)?;
-        let at = record.body().draft().at;
-        if let Some(last) = last_at
-            && at < last
+        verify_link::<H>(at.previous, at.expected, record)?;
+        let observed = record.body().draft().at;
+        if let Some(last) = at.last_at
+            && observed < last
         {
             return Err(LedgerError::NonMonotonicTimestamp {
                 last: last.get(),
-                observed: at.get(),
+                observed: observed.get(),
             });
         }
-        previous = record.digest();
-        expected = expected
-            .next()
-            .ok_or(LedgerError::LengthBoundExceeded { max })?;
-        last_at = Some(at);
+        at = Position {
+            previous: record.digest(),
+            expected: at
+                .expected
+                .next()
+                .ok_or(LedgerError::LengthBoundExceeded { max })?,
+            last_at: Some(observed),
+        };
     }
-    Ok(previous)
+    Ok(at.previous)
 }
