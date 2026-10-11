@@ -345,7 +345,27 @@ fn code_only(body: &str) -> String {
         .join("\n")
 }
 
-/// Reads every `.rs` file under the crate's `src/`, relative path and body.
+/// Spells `path` with `/` between its parts on every platform, so one
+/// expected path matches a checkout on Windows as well.
+fn slash_separated(path: &Path) -> String {
+    let parts: Vec<String> = path
+        .components()
+        .map(|part| part.as_os_str().to_string_lossy().into_owned())
+        .collect();
+    parts.join("/")
+}
+
+/// The spelling is the same whichever separator the platform reads.
+#[test]
+fn a_relative_path_is_spelt_with_slashes_on_every_platform() {
+    let native: PathBuf = ["ledger", "hash.rs"].iter().collect();
+    assert_eq!(slash_separated(&native), "ledger/hash.rs");
+    assert_eq!(slash_separated(Path::new("identity.rs")), "identity.rs");
+    assert_eq!(slash_separated(Path::new("")), "");
+}
+
+/// Reads every `.rs` file under the crate's `src/`, relative path and body,
+/// the path spelt with `/` on every platform.
 ///
 /// The walk is iterative and doubly bounded: at most 64 directories and at most
 /// 64 entries per directory.
@@ -367,11 +387,7 @@ fn crate_sources() -> Vec<(String, String)> {
             if path.extension().is_none_or(|ext| ext != "rs") {
                 continue;
             }
-            let relative = path
-                .strip_prefix(&src)
-                .unwrap_or(&path)
-                .display()
-                .to_string();
+            let relative = slash_separated(path.strip_prefix(&src).unwrap_or(&path));
             out.push((relative, std::fs::read_to_string(&path).unwrap_or_default()));
         }
     }
