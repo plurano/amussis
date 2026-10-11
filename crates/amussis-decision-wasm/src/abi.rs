@@ -18,7 +18,7 @@ use std::sync::Mutex;
 
 use amussis_decision::{DIGEST_LEN, MAX_PROPOSAL_BYTES, MAX_SIGNATURE_BYTES};
 
-use crate::binding::{Binding, Continuation, InitError, OutcomeCode, Refusal};
+use crate::binding::{Binding, Continuation, HaltStatus, InitError, OutcomeCode, Refusal};
 use crate::host::{HostClock, HostSigner, HostSink};
 use crate::wire::MAX_FRAME_BYTES;
 use crate::{ABI_VERSION, HOST_UNAVAILABLE};
@@ -112,7 +112,7 @@ pub extern "C" fn amussis_abi_version() -> u32 {
 }
 
 /// The address the host writes the key identifier, the head frame of a chain,
-/// the release of its halt and the proposal text to.
+/// the release of its halt, the proposal text and an adjudication to.
 // SAFETY: as for `amussis_abi_version`.
 #[unsafe(no_mangle)]
 pub extern "C" fn amussis_input() -> u32 {
@@ -216,10 +216,42 @@ fn cut(bytes: &[u8], at: u32) -> Option<(&[u8], &[u8])> {
 // SAFETY: as for `amussis_abi_version`.
 #[unsafe(no_mangle)]
 pub extern "C" fn amussis_decide(len: u32) -> u32 {
-    decide(len).to_u32()
+    call(len, Binding::decide).to_u32()
 }
 
-fn decide(len: u32) -> OutcomeCode {
+/// Brings the decision of a held action to the engine. The adjudication
+/// ([`crate::wire::AdjudicationParts`]) is the first `len` bytes of the input
+/// buffer. Returns the outcome code (see the crate documentation).
+// SAFETY: as for `amussis_abi_version`.
+#[unsafe(no_mangle)]
+pub extern "C" fn amussis_adjudicate(len: u32) -> u32 {
+    call(len, Binding::adjudicate).to_u32()
+}
+
+/// Halts the engine as an operator stop at the risk level `level` is the tag
+/// of; every other value halts at the highest level. Returns zero, or a
+/// [`HaltStatus`] number.
+// SAFETY: as for `amussis_abi_version`.
+#[unsafe(no_mangle)]
+pub extern "C" fn amussis_halt(level: u32) -> u32 {
+    halt(level) as u32
+}
+
+fn halt(level: u32) -> HaltStatus {
+    let Ok(mut guard) = BINDING.try_lock() else {
+        return HaltStatus::Busy;
+    };
+    match guard.as_mut() {
+        Some(binding) => binding.halt(level),
+        None => HaltStatus::NotInitialised,
+    }
+}
+
+/// One call of the engine over the bytes of the input buffer.
+type Call = fn(&mut Binding<Imports, Imports, Imports>, &[u8]) -> OutcomeCode;
+
+/// Hands the first `len` bytes of the input buffer to `run`.
+fn call(len: u32, run: Call) -> OutcomeCode {
     let Ok(mut guard) = BINDING.try_lock() else {
         return OutcomeCode::refused(Refusal::Busy);
     };
@@ -228,7 +260,7 @@ fn decide(len: u32) -> OutcomeCode {
     };
     let mut text = [0u8; MAX_PROPOSAL_BYTES];
     match input(len, &mut text) {
-        Some(bytes) => binding.decide(bytes),
+        Some(bytes) => run(binding, bytes),
         None => OutcomeCode::refused(Refusal::TooLong),
     }
 }

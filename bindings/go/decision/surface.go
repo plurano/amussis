@@ -12,7 +12,7 @@ import (
 )
 
 // abiVersion is the interface version this loader speaks.
-const abiVersion = 3
+const abiVersion = 4
 
 const (
 	exportMemory        = "memory"
@@ -22,6 +22,8 @@ const (
 	exportInit          = "amussis_init"
 	exportContinue      = "amussis_continue"
 	exportDecide        = "amussis_decide"
+	exportAdjudicate    = "amussis_adjudicate"
+	exportHalt          = "amussis_halt"
 )
 
 // signature is the type of one function of the interface.
@@ -42,6 +44,8 @@ func moduleExports() map[string]signature {
 		exportInit:          {[]api.ValueType{i32, i32}, []api.ValueType{i32}},
 		exportContinue:      {[]api.ValueType{i32, i32, i32, i32}, []api.ValueType{i32}},
 		exportDecide:        {[]api.ValueType{i32}, []api.ValueType{i32}},
+		exportAdjudicate:    {[]api.ValueType{i32}, []api.ValueType{i32}},
+		exportHalt:          {[]api.ValueType{i32}, []api.ValueType{i32}},
 	}
 }
 
@@ -54,7 +58,7 @@ func moduleImports() map[string]signature {
 }
 
 // checkSurface holds a module to the interface before any of its code runs:
-// it imports the three host functions and nothing else, and exports the six
+// it imports the three host functions and nothing else, and exports the eight
 // functions and its memory and nothing else. A module that asks for more than
 // a clock, a signer and a sink is not this library's module.
 func checkSurface(module wazero.CompiledModule) error {

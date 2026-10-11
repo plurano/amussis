@@ -368,7 +368,7 @@ func TestTheZeroOutcomePermitsNothing(t *testing.T) {
 	if zero.Class != Blocked || zero.Permits() || loaderFault.Permits() {
 		t.Fatal("the zero outcome or the loader fault permits an action")
 	}
-	for class := Blocked; class <= Allowed+3; class++ {
+	for class := Blocked; class <= NotAdjudicated+1; class++ {
 		permits := Outcome{Class: class}.Permits()
 		if permits != (class == Allowed || class == Warned) {
 			t.Fatalf("class %d permits: %v", class, permits)

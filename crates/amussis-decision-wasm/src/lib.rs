@@ -33,6 +33,8 @@
 //! | `amussis_init` | `(key_id_len: i32, io_deadline_ms: i32) -> i32` | Sets up the engine; the signer key identifier is in the input buffer. `0`, or an [`InitError`] number. |
 //! | `amussis_continue` | `(key_id_len: i32, head_len: i32, release_len: i32, io_deadline_ms: i32) -> i32` | Sets up the engine as the continuation of a stored chain; the input buffer holds the signer key identifier, the frame ([`wire`]) of the chain's last stored record and the release of its halt ([`ReleaseParts`]; `release_len` zero keeps the halt). `0`, or an [`InitError`] number. |
 //! | `amussis_decide` | `(len: i32) -> i32` | Decides the proposal text in the input buffer; returns the outcome code. |
+//! | `amussis_adjudicate` | `(len: i32) -> i32` | Brings the checkers' decision of a held action to the engine; the input buffer holds the adjudication ([`AdjudicationParts`]). Returns the outcome code. |
+//! | `amussis_halt` | `(level: i32) -> i32` | Halts the engine as an operator stop at the risk level `level` is the tag of (`1` to `6`); every other value halts at the highest level. `0`, or a [`HaltStatus`] number. |
 //!
 //! # Outcome code
 //!
@@ -47,6 +49,30 @@
 //! | `2` require approval | `0` | `0` |
 //! | `3` block | block-reason tag of the engine | halt-reason tag when the halt latch caused the block |
 //! | `4` refused by the binding | [`Refusal`] number | `0` |
+//! | `5` rejected by the checkers | `0` | `0` |
+//! | `6` not adjudicated | [`Unadjudicated`] number | halt-reason tag when the engine is halted after the call |
+//!
+//! `amussis_decide` answers with the classes `0` to `4`. `amussis_adjudicate`
+//! answers with `0` (approved, and the held action may proceed), `4`, `5` and
+//! `6`. An approval and a rejection are each a record of the chain; the
+//! classes `4` and `6` record no vote.
+//!
+//! # Held actions
+//!
+//! An action the engine holds (class `2`) is named by the `id` of the
+//! proposal it was decided for; that intent id is all an adjudication needs
+//! to name it, and no handle crosses the interface. The hold stands until the
+//! checkers decide, its approval window closes or the engine halts.
+//!
+//! Who may approve is the host's decision. The host names one or two
+//! checkers; the engine holds them to the approval rule of the action (one
+//! checker, or two distinct ones for an Annex III action, none of them the
+//! maker of the proposal) and records the vote. The record names no checker.
+//!
+//! An adjudication never passes for want of a working effect. A vote that
+//! cannot be signed or stored is no vote: the hold is released without a
+//! decision and the engine halts. An unreadable clock halts the engine as
+//! well. A halted engine takes no adjudication.
 //!
 //! # The audit chain
 //!
@@ -72,6 +98,12 @@
 //! level when it had none. A chain that ends halted continues halted; a
 //! restart is no release.
 //!
+//! The host halts the engine with `amussis_halt`, an operator stop at the
+//! risk level it names. The halt holds whatever the call answers: a halt
+//! whose record cannot be signed or stored is still a halt of this engine,
+//! and the answer says that the stored chain does not show it. A module
+//! instance has no call that lifts a halt.
+//!
 //! The one release of a halt is part of a continuation. The host names the
 //! person who releases and the checkers who approve ([`ReleaseParts`]), and
 //! the engine holds the release to the approval rule it holds actions of the
@@ -89,9 +121,9 @@
 //!
 //! # Limits
 //!
-//! - A held action (class `2`) cannot be adjudicated through this interface
-//!   yet; the hold lapses with its approval window. Holds are not carried
-//!   over a continuation.
+//! - Holds are not carried over a continuation: an action held by the engine
+//!   that wrote the head record stays unreleased, and an adjudication for it
+//!   finds no held action.
 //! - The head handed to `amussis_continue` is checked for integrity, not for
 //!   origin: this library verifies no signature. That the frame is the last
 //!   record of the host's own store is the host's statement.
@@ -114,17 +146,21 @@ pub mod wire;
 #[cfg(target_family = "wasm")]
 mod abi;
 
-pub use crate::binding::{Binding, Class, Continuation, Engine, InitError, OutcomeCode, Refusal};
+pub use crate::binding::{
+    Binding, Class, Continuation, Engine, HaltStatus, InitError, OutcomeCode, Refusal,
+    Unadjudicated,
+};
 pub use crate::host::{
     ClockAdapter, HostClock, HostSigner, HostSink, SINK_STORED, SignerAdapter, SinkAdapter,
 };
 pub use crate::wire::{
-    FRAME_VERSION, Frame, FrameParts, MAX_FRAME_BYTES, MAX_RELEASE_BYTES, MAX_RELEASE_PERSONS,
-    ReleaseParts,
+    AdjudicationParts, FRAME_VERSION, Frame, FrameParts, MAX_ADJUDICATION_BYTES,
+    MAX_ADJUDICATION_CHECKERS, MAX_FRAME_BYTES, MAX_RELEASE_BYTES, MAX_RELEASE_PERSONS,
+    ReleaseParts, VOTE_APPROVE, VOTE_REJECT,
 };
 
 /// Version of the import and export interface described above.
-pub const ABI_VERSION: u32 = 3;
+pub const ABI_VERSION: u32 = 4;
 
 /// Name of the import module the host functions live in.
 pub const HOST_MODULE: &str = "amussis_host_v1";

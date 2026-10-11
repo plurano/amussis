@@ -25,6 +25,15 @@
 // checkers that level demands of an action. The release is a record of its
 // own in the chain. That record names no person; a host that has to show who
 // released a halt keeps that itself.
+//
+// An action the engine holds (RequireApproval) is decided with Adjudicate. It
+// is named by the id of its proposal, and the engine holds the checkers the
+// caller names to the approval rule of the action. Who may approve is the
+// caller's decision; the record of the vote names no checker.
+//
+// Halt stops a running engine as an operator stop at a risk level. No call
+// lifts that halt on the engine it was set on: the chain is continued with a
+// Release.
 package decision
 
 import (
@@ -120,9 +129,11 @@ type Release struct {
 }
 
 const (
-	// MaxPersonBytes is the longest name of a person in a Release.
+	// MaxPersonBytes is the longest name of a person in a Release or an
+	// Adjudication, and the longest intent id an Adjudication names.
 	MaxPersonBytes = 64
-	// MaxCheckers is the largest number of checkers a Release names.
+	// MaxCheckers is the largest number of checkers a Release or an
+	// Adjudication names.
 	MaxCheckers = 2
 )
 
@@ -148,6 +159,90 @@ var (
 	// is as it was and still ends halted.
 	ErrReleaseFailed = errors.New("decision: the release could not be recorded")
 )
+
+// Vote is the checkers' decision of a held action. The zero value is no vote
+// and is refused.
+type Vote uint8
+
+const (
+	voteUnset Vote = iota
+	// Approve: the held action may run.
+	Approve
+	// Reject: the held action must not run.
+	Reject
+)
+
+// Adjudication is the checkers' decision of one held action.
+type Adjudication struct {
+	// IntentID names the held action: the "id" of the proposal Decide
+	// answered with RequireApproval.
+	IntentID string
+	// Vote is Approve or Reject.
+	Vote Vote
+	// Checkers are the persons who decide, one or two, each 1 to
+	// MaxPersonBytes bytes of the engine's identity alphabet. The engine
+	// holds them to the approval rule of the action: one checker, or two
+	// distinct ones for an action under Annex III oversight, none of them
+	// the maker of the proposal.
+	Checkers []string
+}
+
+// Level is a risk level a halt stands at; its release is held to the
+// approval rule of an action of that level. The zero value names no level,
+// and a halt at no level stands at the highest.
+type Level uint8
+
+const (
+	// LevelRoutine: a routine action under standard oversight.
+	LevelRoutine Level = 1
+	// LevelMaterial: a material action under standard oversight.
+	LevelMaterial Level = 2
+	// LevelConsequential: a consequential action under standard oversight.
+	LevelConsequential Level = 3
+	// LevelAnnexIIIRoutine: a routine action under Annex III oversight.
+	LevelAnnexIIIRoutine Level = 4
+	// LevelAnnexIIIMaterial: a material action under Annex III oversight.
+	LevelAnnexIIIMaterial Level = 5
+	// LevelAnnexIIIConsequential: a consequential action under Annex III
+	// oversight, the highest level.
+	LevelAnnexIIIConsequential Level = 6
+)
+
+// ErrHaltUnrecorded: the engine is halted, and the record of the halt could
+// not be signed or stored. The stored chain does not show the halt until the
+// engine writes its next record. Test for it with errors.Is.
+var ErrHaltUnrecorded = errors.New("decision: the engine is halted and the halt could not be recorded")
+
+// The halt statuses of the module's interface.
+const (
+	haltRecorded   = 0
+	haltUnrecorded = 3
+)
+
+// encodeAdjudication writes an Adjudication as the module reads it: the vote,
+// the intent id as a length byte and its text, the number of checkers, then
+// each checker as the intent id is written. What the vote and a name may
+// spell is the module's to judge; the lengths are checked here, because each
+// has to fit its prefix. It reports false for an adjudication that cannot be
+// written.
+func encodeAdjudication(adjudication Adjudication) ([]byte, bool) {
+	if len(adjudication.Checkers) == 0 || len(adjudication.Checkers) > MaxCheckers {
+		return nil, false
+	}
+	encoded := []byte{byte(adjudication.Vote)}
+	names := append([]string{adjudication.IntentID}, adjudication.Checkers...)
+	for index, name := range names {
+		if len(name) == 0 || len(name) > MaxPersonBytes {
+			return nil, false
+		}
+		if index == 1 {
+			encoded = append(encoded, byte(len(adjudication.Checkers)))
+		}
+		encoded = append(encoded, byte(len(name)))
+		encoded = append(encoded, name...)
+	}
+	return encoded, true
+}
 
 // chain is a Continuation as the module takes it: the frame of the head
 // record and the bytes of the release, none for a chain that keeps its
@@ -203,7 +298,7 @@ func encodeRelease(release *Release) ([]byte, error) {
 }
 
 // Engine is one decision engine with its own chain of audit records. It is
-// safe for use by several goroutines; decisions run one at a time. An effect
+// safe for use by several goroutines; its calls run one at a time. An effect
 // must not call the Engine it serves.
 type Engine struct {
 	mu            sync.Mutex
@@ -212,6 +307,8 @@ type Engine struct {
 	instance      api.Module
 	memory        api.Memory
 	decide        api.Function
+	adjudicate    api.Function
+	halt          api.Function
 	inputAt       uint32
 	inputCapacity uint32
 	fault         error
@@ -329,9 +426,14 @@ func link(ctx context.Context, mode Mode, settings wazero.RuntimeConfig, module 
 	if err != nil {
 		return nil, fmt.Errorf("decision: the module cannot be linked to its host functions: %w", err)
 	}
-	engine = &Engine{mode: mode, runtime: runtime, instance: instance, memory: instance.Memory(), decide: instance.ExportedFunction(exportDecide)}
-	if engine.memory == nil || engine.decide == nil {
-		return nil, errors.New("decision: the module lost its memory or its decide function")
+	engine = &Engine{
+		mode: mode, runtime: runtime, instance: instance, memory: instance.Memory(),
+		decide:     instance.ExportedFunction(exportDecide),
+		adjudicate: instance.ExportedFunction(exportAdjudicate),
+		halt:       instance.ExportedFunction(exportHalt),
+	}
+	if engine.memory == nil || engine.decide == nil || engine.adjudicate == nil || engine.halt == nil {
+		return nil, errors.New("decision: the module lost its memory or a function of its interface")
 	}
 	return engine, nil
 }
@@ -420,24 +522,85 @@ func (e *Engine) Mode() Mode {
 func (e *Engine) Decide(ctx context.Context, proposal []byte) (Outcome, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	return e.ask(ctx, e.decide, proposal, decode)
+}
+
+// Adjudicate brings the checkers' decision of a held action to the engine.
+//
+// Allowed says the checkers approved and the action may run; Rejected says
+// they rejected it. Each is a record of the chain. NotAdjudicated says the
+// engine took no decision and recorded no vote, and Outcome.Detail says why;
+// Refused with RefusedAdjudication says the Adjudication cannot be read. Only
+// Allowed permits.
+//
+// A vote that cannot be signed or stored is no vote: the outcome is
+// NotAdjudicated with UnadjudicatedUnrecorded, the action is no longer held
+// and the engine is halted. The error is as for Decide.
+func (e *Engine) Adjudicate(ctx context.Context, adjudication Adjudication) (Outcome, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	input, written := encodeAdjudication(adjudication)
+	if e.fault == nil && !written {
+		// The module refuses these bytes the same way; they are not sent
+		// because a length that does not fit its prefix cannot be written.
+		return Outcome{Class: Refused, Detail: RefusedAdjudication}, nil
+	}
+	return e.ask(ctx, e.adjudicate, input, decodeAdjudication)
+}
+
+// ask hands input to one of the module's two deciding functions and reads
+// the outcome code with read. The caller holds the lock.
+func (e *Engine) ask(ctx context.Context, function api.Function, input []byte, read func(uint32) (Outcome, error)) (Outcome, error) {
 	if e.fault != nil {
 		return loaderFault, e.fault
 	}
-	// A proposal longer than the buffer is not written; the module is told
-	// its true length and refuses it.
-	length := min(uint64(len(proposal)), math.MaxUint32)
-	if length <= uint64(e.inputCapacity) && !e.memory.Write(e.inputAt, proposal) {
-		return e.poison(errors.New("decision: the proposal cannot be written to the module"))
+	// Input longer than the buffer is not written; the module is told its
+	// true length and refuses it.
+	length := min(uint64(len(input)), math.MaxUint32)
+	if length <= uint64(e.inputCapacity) && !e.memory.Write(e.inputAt, input) {
+		return e.poison(errors.New("decision: the input cannot be written to the module"))
 	}
-	code, err := call(ctx, e.decide, length)
+	code, err := call(ctx, function, length)
 	if err != nil {
 		return e.poison(err)
 	}
-	outcome, err := decode(code)
+	outcome, err := read(code)
 	if err != nil {
 		return e.poison(fmt.Errorf("decision: %w", err))
 	}
 	return outcome, nil
+}
+
+// Halt halts the engine as an operator stop at the risk level the caller
+// names; a Level that is none of the six halts at the highest. Every decision
+// is Blocked from then on and no adjudication is taken. A halt that stands
+// already is never made weaker: it keeps its reason, and takes the stricter
+// of the two levels.
+//
+// The engine permits nothing after Halt, whatever Halt returns. Nil says the
+// halt is a record of the chain. ErrHaltUnrecorded says the engine is halted
+// and the record could not be signed or stored. Every other error says the
+// module could not be run or gave an answer the loader cannot read: the
+// engine then answers Blocked with BlockLoaderFault from then on.
+//
+// No call lifts the halt on this Engine. The program continues the stored
+// chain with Continue and a Release.
+func (e *Engine) Halt(ctx context.Context, level Level) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.fault != nil {
+		return e.fault
+	}
+	status, err := call(ctx, e.halt, uint64(level))
+	switch {
+	case err != nil:
+		_, err = e.poison(err)
+	case status == haltUnrecorded:
+		err = ErrHaltUnrecorded
+	case status != haltRecorded:
+		_, err = e.poison(fmt.Errorf("decision: the module answered the halt with status %d", status))
+	}
+	return err
 }
 
 var (
@@ -452,7 +615,7 @@ func (e *Engine) poison(fault error) (Outcome, error) {
 	return loaderFault, fault
 }
 
-// Close releases the module. Decide answers Blocked afterwards.
+// Close releases the module. Decide and Adjudicate answer Blocked afterwards.
 func (e *Engine) Close(ctx context.Context) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()

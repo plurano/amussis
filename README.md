@@ -166,21 +166,83 @@ The cases are replayed both ways in `bindings/go/decision/continue_test.go`
 (`TestTheLowestLevelIsReleasedByOnePerson`,
 `TestAReleaseWithoutTheNeededApprovalIsRefused`).
 
+An action the engine holds (`RequireApproval`) is named by the `id` of its
+proposal. The program brings the checkers' decision to the engine with
+`Adjudicate`:
+
+```go
+outcome, err := engine.Adjudicate(ctx, decision.Adjudication{
+	IntentID: "intent-0042",
+	Vote:     decision.Approve,
+	Checkers: []string{"carol"},
+})
+if outcome.Permits() { /* approved: the held action runs */ }
+```
+
+Who may approve is the program's decision. The engine holds the checkers it is
+given to the approval rule of the action (one checker, or two distinct ones
+under Annex III oversight, none of them the maker of the proposal) and writes
+the vote into the chain. Only an approval permits:
+
+| Outcome class | Meaning | Record of the vote |
+| :--- | :--- | :--- |
+| `Allowed` | The checkers approved; the held action may run. | the approval |
+| `Rejected` | The checkers rejected the action. | the rejection |
+| `NotAdjudicated` | The engine took no vote; `Detail` says why. | none |
+| `Refused` | The adjudication cannot be read (`RefusedAdjudication`). | none |
+
+| `Detail` of `NotAdjudicated` | The engine took no vote because |
+| :--- | :--- |
+| `UnadjudicatedUnknownRequest` | no action is held under the intent id |
+| `UnadjudicatedAlreadyDecided` | the action was decided before |
+| `UnadjudicatedExpired` | its approval window of 300 seconds has closed |
+| `UnadjudicatedApproval` | the checkers do not satisfy the approval rule |
+| `UnadjudicatedHalted` | the engine is halted |
+| `UnadjudicatedClockUnavailable` | the clock could not be read; the engine halts |
+| `UnadjudicatedUnrecorded` | the vote could not be signed or stored; the hold ends undecided and the engine halts |
+| `UnadjudicatedEngine` | the engine refused for a reason this list does not name |
+
+`Halt` is the operator stop. It names the risk level the halt stands at, which
+is the level its release is held to:
+
+```go
+err := engine.Halt(ctx, decision.LevelConsequential)
+```
+
+The engine permits nothing after `Halt`, whatever it returns. `nil` says the
+halt is a record of the chain; `decision.ErrHaltUnrecorded` says the engine is
+halted and the record could not be signed or stored. A `Level` that is none of
+the six, the zero value included, halts at the highest level, and a second
+halt never lowers the level a halt stands at
+(`TestAHaltAtNoLevelStandsAtTheHighest`, `TestASecondHaltNeverLowersTheLevel`).
+
+The cases that must not permit are replayed in
+`bindings/go/decision/adjudicate_test.go`: a vote for an action that is not
+held (`TestAnAdjudicationForAnActionThatIsNotHeldIsNotTaken`), a vote that
+cannot be signed or stored
+(`TestAVoteThatCannotBeSignedOrStoredIsNoVoteAndHalts`) and a halt that cannot
+be recorded (`TestAHaltThatCannotBeRecordedIsStillAHalt`). The byte layout of
+an adjudication and the outcome code are in the documentation of
+`crates/amussis-decision-wasm/src/lib.rs` and `src/wire.rs`.
+
 Limits as of this state:
 
-- A held action cannot be approved or rejected through the binding, and an
-  operator cannot halt a running engine through it. Actions an earlier engine
-  held are not carried over a continuation and stay unreleased.
+- Actions an earlier engine held are not carried over a continuation and stay
+  unreleased: an adjudication for one finds no held action.
+- A running engine has no call that lifts a halt. A halt set with `Halt` is
+  released as every halt is, by a continuation of the stored chain with a
+  `Release` (`TestAnOperatorHaltIsReleasedWithTheApprovalOfItsLevel`).
 - The head record is checked for integrity, not for origin. The module verifies
   no signature, and it cannot know that the record is the last one stored. A
   continuation from another record leaves two records with one sequence number
   in the store, which a walk over the store shows
   (`TestAContinuationFromAnotherRecordThanTheHeadShowsInTheStore`); the module
   does not prevent it.
-- No record names a person. The chain shows that a halt was released, and the
-  halted records before the release show at which level it stood; it does not
-  show who released it or who approved. A host that has to show that keeps it
-  itself.
+- No record names a person. The chain shows that a held action was approved
+  or rejected and that a halt was released, and the halted records before the
+  release show at which level it stood; it does not show which checkers voted,
+  who released the halt or who approved the release. A host that has to show
+  that keeps it itself.
 - A halt whose record never reached the sink (a signer or a sink that failed) is
   not in the stored chain, so a continuation from the stored head starts without
   it. The halted engine writes the halt with the next record the sink stores.

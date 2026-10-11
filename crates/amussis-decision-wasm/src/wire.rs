@@ -34,9 +34,23 @@
 //!
 //! The first person releases the halt; the others are the checkers who
 //! approve the release.
+//!
+//! A host that brings the decision of a held action names the action, the
+//! vote and the checkers in bytes of their own, which
+//! [`AdjudicationParts::split`] reads:
+//!
+//! ```text
+//! u8        vote, VOTE_APPROVE or VOTE_REJECT
+//! u8        length of the intent id of the held action, 1 to the identity bound
+//! bytes     intent id: the `id` of the proposal the action was held for
+//! u8        number of checkers, 1 to MAX_ADJUDICATION_CHECKERS
+//! per checker:
+//!   u8      length of the identity, 1 to the identity bound
+//!   bytes   identity
+//! ```
 
 use amussis_decision::{
-    AuditRecord, DIGEST_LEN, MAX_IDENTITY_LEN, MAX_PREIMAGE_BYTES, MAX_SIGNATURE_BYTES,
+    AuditRecord, DIGEST_LEN, MAX_IDENTITY_LEN, MAX_PREIMAGE_BYTES, MAX_SIGNATURE_BYTES, Vote,
 };
 
 /// Version byte every frame starts with.
@@ -51,6 +65,20 @@ pub const MAX_RELEASE_PERSONS: usize = 3;
 
 /// Largest release: the count byte and every identity at its bound.
 pub const MAX_RELEASE_BYTES: usize = 1 + MAX_RELEASE_PERSONS * (1 + MAX_IDENTITY_LEN);
+
+/// The vote byte of an approval.
+pub const VOTE_APPROVE: u8 = 1;
+
+/// The vote byte of a rejection.
+pub const VOTE_REJECT: u8 = 2;
+
+/// Most checkers an adjudication names.
+pub const MAX_ADJUDICATION_CHECKERS: usize = 2;
+
+/// Largest adjudication: the vote byte, the intent id, the count byte and
+/// every checker, each identity at its bound.
+pub const MAX_ADJUDICATION_BYTES: usize =
+    1 + (1 + MAX_IDENTITY_LEN) + 1 + MAX_ADJUDICATION_CHECKERS * (1 + MAX_IDENTITY_LEN);
 
 /// One framed record in a fixed buffer.
 #[derive(Debug, Clone, Copy)]
@@ -211,6 +239,76 @@ impl<'a> ReleaseParts<'a> {
     #[must_use]
     pub const fn checkers(&self) -> [Option<&'a [u8]>; 2] {
         self.checkers
+    }
+}
+
+/// The decision of one held action, borrowed from its bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AdjudicationParts<'a> {
+    vote: Vote,
+    request: &'a [u8],
+    first: &'a [u8],
+    second: Option<&'a [u8]>,
+}
+
+impl<'a> AdjudicationParts<'a> {
+    /// Splits `adjudication` into its parts, or returns `None` when the bytes
+    /// are not one adjudication: a vote byte that is neither
+    /// [`VOTE_APPROVE`] nor [`VOTE_REJECT`], no checker or more than
+    /// [`MAX_ADJUDICATION_CHECKERS`], an identity that is empty, runs past
+    /// the end or past its bound, or bytes after the last checker.
+    ///
+    /// Only the layout is checked. Whether the bytes of a person are an
+    /// identity, whether an action is held under the intent id and whether
+    /// the checkers satisfy its approval rule is the engine's check.
+    #[must_use]
+    pub fn split(adjudication: &'a [u8]) -> Option<Self> {
+        let mut rest = adjudication;
+        let vote = match *take(&mut rest, 1)?.first()? {
+            VOTE_APPROVE => Vote::Approve,
+            VOTE_REJECT => Vote::Reject,
+            _ => return None,
+        };
+        let request = person(&mut rest)?;
+        let checkers = usize::from(*take(&mut rest, 1)?.first()?);
+        if !(1..=MAX_ADJUDICATION_CHECKERS).contains(&checkers) {
+            return None;
+        }
+        let first = person(&mut rest)?;
+        let second = match checkers {
+            1 => None,
+            _ => Some(person(&mut rest)?),
+        };
+        rest.is_empty().then_some(Self {
+            vote,
+            request,
+            first,
+            second,
+        })
+    }
+
+    /// Returns the vote.
+    #[must_use]
+    pub const fn vote(&self) -> Vote {
+        self.vote
+    }
+
+    /// Returns the intent id of the held action.
+    #[must_use]
+    pub const fn request(&self) -> &'a [u8] {
+        self.request
+    }
+
+    /// Returns the identity of the first checker.
+    #[must_use]
+    pub const fn first(&self) -> &'a [u8] {
+        self.first
+    }
+
+    /// Returns the identity of the second checker, if two are named.
+    #[must_use]
+    pub const fn second(&self) -> Option<&'a [u8]> {
+        self.second
     }
 }
 

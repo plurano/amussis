@@ -15,14 +15,17 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use amussis_decision::{
-    AUDIT_DOMAIN, BlockReason, CONTRACT_VERSION, ChainAnchor, DIGEST_LEN, Digest32, HaltReason,
-    KillswitchState, LedgerHasher, MAX_IDENTITY_LEN, MAX_LEDGER_RECORDS, MAX_PROPOSAL_BYTES,
-    MAX_SIGNATURE_BYTES, RecordStatus, RiskLevel, Sha256Hasher,
+    AUDIT_DOMAIN, BlockReason, CONTRACT_VERSION, ChainAnchor, DEFAULT_APPROVAL_TTL_SECS,
+    DIGEST_LEN, Digest32, HaltReason, KillswitchState, LedgerHasher, MAX_IDENTITY_LEN,
+    MAX_LEDGER_RECORDS, MAX_PROPOSAL_BYTES, MAX_SIGNATURE_BYTES, RecordStatus, RiskLevel,
+    Sha256Hasher, Vote,
 };
 use amussis_decision_wasm::{
-    ABI_VERSION, Binding, Class, Continuation, FRAME_VERSION, FrameParts, HOST_MODULE,
-    HOST_UNAVAILABLE, HostClock, HostSigner, HostSink, InitError, MAX_FRAME_BYTES,
-    MAX_RELEASE_BYTES, MAX_RELEASE_PERSONS, OutcomeCode, Refusal, ReleaseParts, SINK_STORED,
+    ABI_VERSION, AdjudicationParts, Binding, Class, Continuation, FRAME_VERSION, FrameParts,
+    HOST_MODULE, HOST_UNAVAILABLE, HaltStatus, HostClock, HostSigner, HostSink, InitError,
+    MAX_ADJUDICATION_BYTES, MAX_ADJUDICATION_CHECKERS, MAX_FRAME_BYTES, MAX_RELEASE_BYTES,
+    MAX_RELEASE_PERSONS, OutcomeCode, Refusal, ReleaseParts, SINK_STORED, Unadjudicated,
+    VOTE_APPROVE, VOTE_REJECT,
 };
 
 type Fallible<T> = Result<T, String>;
@@ -281,7 +284,7 @@ fn each_tier_yields_its_class() -> Fallible<()> {
 /// Positive: the constants a host is written against.
 #[test]
 fn the_interface_names_are_fixed() {
-    assert_eq!(ABI_VERSION, 3);
+    assert_eq!(ABI_VERSION, 4);
     assert_eq!(HOST_MODULE, "amussis_host_v1");
     assert_eq!(SINK_STORED, 0);
     assert_eq!(HOST_UNAVAILABLE, -1);
@@ -1096,4 +1099,612 @@ fn a_continuation_refuses_a_bad_key_identifier_and_a_zero_deadline() -> Fallible
     let refused = Binding::continue_from(key_id, 0, from, handle(), handle(), handle());
     assert_eq!(refused.err(), Some(InitError::Deadline));
     Ok(())
+}
+
+// --- The decision of a held action ---------------------------------------------
+
+/// The intent id the held action of these tests is proposed under.
+const HELD: &str = "intent-held-1";
+
+/// The signer and the sink, each failing in turn.
+const RECORD_FAULTS: [Fault; 2] = [
+    (
+        "signer",
+        |w| w.sign_answer.set(Some(0)),
+        |w| w.sign_answer.set(None),
+    ),
+    (
+        "sink",
+        |w| w.sink_answer.set(1),
+        |w| w.sink_answer.set(SINK_STORED),
+    ),
+];
+
+/// The bytes of an adjudication, as a host writes them.
+fn adjudication(vote: u8, request: &str, checkers: &[&str]) -> Fallible<Vec<u8>> {
+    let width = |text: &str| u8::try_from(text.len()).map_err(|error| error.to_string());
+    let mut bytes = vec![vote, width(request)?];
+    bytes.extend_from_slice(request.as_bytes());
+    bytes.push(u8::try_from(checkers.len()).map_err(|error| error.to_string())?);
+    for checker in checkers {
+        bytes.push(width(checker)?);
+        bytes.extend_from_slice(checker.as_bytes());
+    }
+    Ok(bytes)
+}
+
+/// An approval of the held action by `checkers`.
+fn approval(checkers: &[&str]) -> Fallible<Vec<u8>> {
+    adjudication(VOTE_APPROVE, HELD, checkers)
+}
+
+/// The code of an adjudication the engine did not take.
+fn untaken(why: Unadjudicated, halt: Option<HaltReason>) -> (Class, u8, u8) {
+    (
+        Class::NotAdjudicated,
+        why as u8,
+        halt.map_or(0, HaltReason::tag),
+    )
+}
+
+/// A binding that holds one action: the routine proposal under [`HELD`],
+/// spelled with `change`.
+fn holding(world: &Rc<World>, change: (&str, &str)) -> Fallible<TestBinding> {
+    let mut binding = binding(world)?;
+    let proposal = routine_with(change.0, change.1)?.replacen("intent-0001", HELD, 1);
+    let code = binding.decide(proposal.as_bytes());
+    if parts(code) == (Class::RequireApproval, 0, 0) && !binding.engine().registry().is_empty() {
+        Ok(binding)
+    } else {
+        Err(format!("the fixture holds no action: {code:?}"))
+    }
+}
+
+/// The byte at `at` of the pre-image of the last stored record.
+fn stored_byte(world: &World, at: usize) -> Fallible<u8> {
+    let head = last_stored(world)?;
+    parse(&head)?
+        .preimage
+        .get(at)
+        .copied()
+        .ok_or_else(|| format!("the record has no byte {at}"))
+}
+
+/// Positive: one checker approves a held action. The approval is a record of
+/// the chain under the intent id of the proposal, the action may proceed, and
+/// the action is decided once.
+#[test]
+fn an_approval_is_a_record_and_lets_the_held_action_proceed() -> Fallible<()> {
+    let world = world();
+    let mut binding = holding(&world, TIER_A)?;
+    let code = binding.adjudicate(&approval(&["carol"])?);
+    assert_eq!(parts(code), (Class::Allow, 0, 0));
+    assert!(code.permits_execution());
+    assert_eq!(
+        stored_byte(&world, STATUS_AT)?,
+        RecordStatus::Approved.tag()
+    );
+    let record = last_stored(&world)?;
+    assert!(
+        parse(&record)?
+            .preimage
+            .windows(HELD.len())
+            .any(|window| window == HELD.as_bytes()),
+        "the record of the vote names the intent id"
+    );
+    let again = binding.adjudicate(&approval(&["carol"])?);
+    assert_eq!(parts(again), untaken(Unadjudicated::AlreadyDecided, None));
+    assert!(!again.permits_execution());
+    assert_eq!(walk_store(&world), Ok(2));
+    Ok(())
+}
+
+/// Positive: a rejection is a decision and a record, and permits nothing; an
+/// approval that follows it is not taken.
+#[test]
+fn a_rejection_is_a_record_and_permits_nothing() -> Fallible<()> {
+    let world = world();
+    let mut binding = holding(&world, TIER_A)?;
+    let code = binding.adjudicate(&adjudication(VOTE_REJECT, HELD, &["carol"])?);
+    assert_eq!(parts(code), (Class::Rejected, 0, 0));
+    assert!(!code.permits_execution());
+    assert_eq!(code.to_u32(), 5);
+    assert_eq!(
+        stored_byte(&world, STATUS_AT)?,
+        RecordStatus::Rejected.tag()
+    );
+    let after = binding.adjudicate(&approval(&["carol"])?);
+    assert_eq!(parts(after), untaken(Unadjudicated::AlreadyDecided, None));
+    assert!(!after.permits_execution());
+    assert_eq!(walk_store(&world), Ok(2));
+    Ok(())
+}
+
+/// A set of checkers, as a test names it.
+type Panel = &'static [&'static str];
+
+/// Planted, both ways: the checkers are held to the approval rule of the
+/// action. A panel that is too small, names one person twice or names the
+/// maker of the proposal is not taken and records nothing; the action stays
+/// held, and the panel its level demands is taken.
+#[test]
+fn the_checkers_are_held_to_the_approval_rule_of_the_action() -> Fallible<()> {
+    let one: [Panel; 3] = [
+        &["maker-alice"],
+        &["carol", "carol"],
+        &["carol", "maker-alice"],
+    ];
+    let two: [Panel; 4] = [
+        &["carol"],
+        &["maker-alice"],
+        &["carol", "carol"],
+        &["maker-alice", "carol"],
+    ];
+    let cases: [((&str, &str), Panel, &[Panel]); 2] = [
+        (TIER_A, &["carol"], &one),
+        (ANNEX_III, &["carol", "dave"], &two),
+    ];
+    for (change, full, short) in cases {
+        let world = world();
+        let mut binding = holding(&world, change)?;
+        for panel in short {
+            let code = binding.adjudicate(&approval(panel)?);
+            assert_eq!(
+                parts(code),
+                untaken(Unadjudicated::Approval, None),
+                "{panel:?}"
+            );
+            assert!(!code.permits_execution(), "{panel:?}");
+        }
+        assert_eq!(world.stored.borrow().len(), 1);
+        let code = binding.adjudicate(&approval(full)?);
+        assert_eq!(parts(code), (Class::Allow, 0, 0), "{full:?}");
+    }
+    Ok(())
+}
+
+/// Planted: an adjudication for an action that is not held. Nothing was
+/// proposed, the action was allowed and never held, or another action is the
+/// held one: the engine takes no vote, records nothing and permits nothing.
+#[test]
+fn an_adjudication_for_an_action_that_is_not_held_is_not_taken() -> Fallible<()> {
+    let not_held = untaken(Unadjudicated::UnknownRequest, None);
+    let world = world();
+    let mut binding = binding(&world)?;
+    for vote in [VOTE_APPROVE, VOTE_REJECT] {
+        let code = binding.adjudicate(&adjudication(vote, HELD, &["carol"])?);
+        assert_eq!(parts(code), not_held, "nothing was proposed, vote {vote}");
+        assert!(!code.permits_execution());
+    }
+    assert_eq!(world.offered.get(), 0);
+    allow(&mut binding, 1)?;
+    let code = binding.adjudicate(&adjudication(VOTE_APPROVE, "intent-0001", &["carol"])?);
+    assert_eq!(parts(code), not_held, "an allowed action is not held");
+    let mut held = holding(&world, TIER_A)?;
+    let code = held.adjudicate(&adjudication(VOTE_APPROVE, "intent-held-2", &["carol"])?);
+    assert_eq!(parts(code), not_held, "another action is the held one");
+    assert!(!code.permits_execution());
+    assert_eq!(world.stored.borrow().len(), 2);
+    Ok(())
+}
+
+/// Planted: a held action is not carried over a continuation. The engine that
+/// continues the chain holds nothing, and the action stays unreleased.
+#[test]
+fn a_held_action_stays_unreleased_after_a_continuation() -> Fallible<()> {
+    let world = world();
+    drop(holding(&world, TIER_A)?);
+    let mut binding = resumed(&world, &last_stored(&world)?, KEEP)?;
+    assert!(binding.engine().registry().is_empty());
+    let code = binding.adjudicate(&approval(&["carol"])?);
+    assert_eq!(parts(code), untaken(Unadjudicated::UnknownRequest, None));
+    assert!(!code.permits_execution());
+    assert_eq!(world.stored.borrow().len(), 1);
+    Ok(())
+}
+
+/// One vote under a host that cannot record it: no vote is taken, the hold
+/// is released without a decision, the engine halts, and a host that
+/// delivers again finds it halted.
+fn unrecorded_vote(fault: Fault, vote: u8) -> Fallible<()> {
+    let (name, plant, mend) = fault;
+    let halted = Some(HaltReason::AuditUnavailable);
+    let world = world();
+    let mut binding = holding(&world, TIER_A)?;
+    plant(&world);
+    let code = binding.adjudicate(&adjudication(vote, HELD, &["carol"])?);
+    assert_eq!(
+        parts(code),
+        untaken(Unadjudicated::Unrecorded, halted),
+        "{name}, vote {vote}"
+    );
+    assert!(!code.permits_execution(), "{name}");
+    assert_eq!(world.stored.borrow().len(), 1, "{name}");
+    assert!(binding.engine().registry().is_empty(), "{name}");
+    mend(&world);
+    let after = binding.adjudicate(&adjudication(vote, HELD, &["carol"])?);
+    assert_eq!(
+        parts(after),
+        untaken(Unadjudicated::Halted, halted),
+        "{name}"
+    );
+    assert_eq!(
+        parts(binding.decide(ROUTINE.as_bytes())),
+        block(BlockReason::KillswitchEngaged(HaltReason::AuditUnavailable)),
+        "{name}"
+    );
+    Ok(())
+}
+
+/// Planted: a host that cannot sign the record of a vote, or cannot store it.
+/// An approval that is not in the chain did not happen.
+#[test]
+fn a_vote_that_cannot_be_signed_or_stored_is_no_vote_and_halts() -> Fallible<()> {
+    for fault in RECORD_FAULTS {
+        for vote in [VOTE_APPROVE, VOTE_REJECT] {
+            unrecorded_vote(fault, vote)?;
+        }
+    }
+    Ok(())
+}
+
+/// Planted, both ways: a clock that is unreadable when the decision arrives.
+/// No vote is taken and the engine halts at the level of the held action; an
+/// adjudication that names no held action halts at the highest level.
+#[test]
+fn an_adjudication_under_an_unreadable_clock_halts_at_the_level_in_hand() -> Fallible<()> {
+    let halted = Some(HaltReason::ClockUnavailable);
+    let fault_world = halted_at(TIER_A)?;
+    let held_level = stored_level(&fault_world)?;
+    assert_ne!(held_level, RiskLevel::HIGHEST.tag());
+    let cases = [
+        (HELD, held_level),
+        ("intent-held-2", RiskLevel::HIGHEST.tag()),
+    ];
+    for (request, level) in cases {
+        let world = world();
+        let mut binding = holding(&world, TIER_A)?;
+        let bytes = adjudication(VOTE_APPROVE, request, &["carol"])?;
+        world.time.set(-1);
+        let code = binding.adjudicate(&bytes);
+        world.time.set(START);
+        assert_eq!(
+            parts(code),
+            untaken(Unadjudicated::ClockUnavailable, halted),
+            "{request}"
+        );
+        assert!(!code.permits_execution(), "{request}");
+        assert_eq!(
+            stored_byte(&world, STATUS_AT)?,
+            RecordStatus::HaltEngaged.tag()
+        );
+        assert_eq!(stored_level(&world)?, level, "{request}");
+        let after = binding.adjudicate(&bytes);
+        assert_eq!(
+            parts(after),
+            untaken(Unadjudicated::Halted, halted),
+            "{request}"
+        );
+    }
+    Ok(())
+}
+
+/// Boundary: a held action is decided inside its approval window. One second
+/// before the window closes the approval is taken; at the second it closes
+/// it is not, and nothing is recorded.
+#[test]
+fn a_held_action_is_decided_only_inside_its_approval_window() -> Fallible<()> {
+    let window = i64::from(DEFAULT_APPROVAL_TTL_SECS);
+    let due = START.saturating_add(window);
+    let open = world();
+    let mut binding = holding(&open, TIER_A)?;
+    open.time.set(due.saturating_sub(1));
+    let code = binding.adjudicate(&approval(&["carol"])?);
+    assert_eq!(parts(code), (Class::Allow, 0, 0));
+    let late = world();
+    let mut binding = holding(&late, TIER_A)?;
+    late.time.set(due);
+    let code = binding.adjudicate(&approval(&["carol"])?);
+    assert_eq!(parts(code), untaken(Unadjudicated::Expired, None));
+    assert!(!code.permits_execution());
+    assert_eq!(late.stored.borrow().len(), 1);
+    Ok(())
+}
+
+/// Negative: a halted engine takes no decision of a held action, approval or
+/// rejection.
+#[test]
+fn a_halted_engine_takes_no_adjudication() -> Fallible<()> {
+    let world = world();
+    let mut binding = holding(&world, TIER_A)?;
+    assert_eq!(binding.halt(1), HaltStatus::Recorded);
+    for vote in [VOTE_APPROVE, VOTE_REJECT] {
+        let code = binding.adjudicate(&adjudication(vote, HELD, &["carol"])?);
+        assert_eq!(
+            parts(code),
+            untaken(Unadjudicated::Halted, Some(HaltReason::OperatorStop)),
+            "vote {vote}"
+        );
+        assert!(!code.permits_execution());
+    }
+    assert_eq!(world.stored.borrow().len(), 2);
+    Ok(())
+}
+
+/// Negative: bytes that are no adjudication never reach the engine, record
+/// nothing and leave the action held.
+#[test]
+fn adjudication_bytes_that_are_no_adjudication_are_refused() -> Fallible<()> {
+    let world = world();
+    let mut binding = holding(&world, TIER_A)?;
+    let long = "p".repeat(MAX_IDENTITY_LEN.saturating_add(1));
+    let good = approval(&["carol"])?;
+    let cases: [(&str, Vec<u8>); 14] = [
+        ("no bytes", Vec::new()),
+        ("a vote byte of zero", adjudication(0, HELD, &["carol"])?),
+        ("a vote byte of three", adjudication(3, HELD, &["carol"])?),
+        ("no checker", adjudication(VOTE_APPROVE, HELD, &[])?),
+        (
+            "three checkers",
+            adjudication(VOTE_APPROVE, HELD, &["a", "b", "c"])?,
+        ),
+        ("a count beyond the checkers", vec![1, 1, b'i', 2, 1, b'a']),
+        (
+            "a count of zero before two checkers",
+            vec![1, 1, b'i', 0, 1, b'a', 1, b'b'],
+        ),
+        (
+            "a count of three before two checkers",
+            vec![1, 1, b'i', 3, 1, b'a', 1, b'b'],
+        ),
+        ("bytes behind the last checker", [&good[..], &[0]].concat()),
+        ("an empty intent id", vec![1, 0, 1, 1, b'a']),
+        (
+            "an intent id past its bound",
+            adjudication(VOTE_APPROVE, &long, &["carol"])?,
+        ),
+        (
+            "an intent id outside the character set",
+            adjudication(VOTE_APPROVE, "bad id!", &["carol"])?,
+        ),
+        (
+            "a checker outside the character set",
+            adjudication(VOTE_APPROVE, HELD, &["carol", "bad name!"])?,
+        ),
+        (
+            "a checker that is no text",
+            vec![1, 1, b'i', 1, 2, 0xff, 0xfe],
+        ),
+    ];
+    for (name, bytes) in cases {
+        let code = binding.adjudicate(&bytes);
+        assert_eq!(code, OutcomeCode::refused(Refusal::Adjudication), "{name}");
+        assert!(!code.permits_execution(), "{name}");
+    }
+    assert_eq!(OutcomeCode::refused(Refusal::Adjudication).to_u32(), 0x0804);
+    assert_eq!(world.stored.borrow().len(), 1);
+    assert_eq!(parts(binding.adjudicate(&good)), (Class::Allow, 0, 0));
+    Ok(())
+}
+
+/// Boundary: adjudication bytes split into the vote, the intent id and one or
+/// two checkers, each identity up to its bound, and into nothing else.
+#[test]
+fn adjudication_bytes_split_into_their_parts() -> Fallible<()> {
+    let widest = "p".repeat(MAX_IDENTITY_LEN);
+    let one = approval(&["carol"])?;
+    let parts = AdjudicationParts::split(&one).ok_or("one checker was not read")?;
+    assert_eq!(parts.vote(), Vote::Approve);
+    assert_eq!(parts.request(), HELD.as_bytes());
+    assert_eq!((parts.first(), parts.second()), (&b"carol"[..], None));
+    let panel = [widest.as_str(), widest.as_str()];
+    let two = adjudication(VOTE_REJECT, &widest, &panel)?;
+    assert_eq!(two.len(), MAX_ADJUDICATION_BYTES);
+    let parts = AdjudicationParts::split(&two).ok_or("two checkers were not read")?;
+    assert_eq!(parts.vote(), Vote::Reject);
+    assert_eq!(parts.request(), widest.as_bytes());
+    assert_eq!(parts.first(), widest.as_bytes());
+    assert_eq!(parts.second(), Some(widest.as_bytes()));
+    Ok(())
+}
+
+/// Boundary: adjudication bytes that end early, name more than they carry or
+/// hold an identity past its bound split into nothing.
+#[test]
+fn adjudication_bytes_cut_short_split_into_nothing() -> Fallible<()> {
+    let too_wide = "p".repeat(MAX_IDENTITY_LEN.saturating_add(1));
+    for bytes in [
+        vec![VOTE_APPROVE],
+        vec![VOTE_APPROVE, 1, b'i'],
+        vec![VOTE_APPROVE, 1, b'i', 1],
+        vec![VOTE_APPROVE, 1, b'i', 1, 5, b'c'],
+        vec![VOTE_APPROVE, 1, b'i', 2, 1, b'c'],
+        vec![VOTE_APPROVE, 1, b'i', 1, 0],
+        adjudication(VOTE_APPROVE, HELD, &[too_wide.as_str()])?,
+        adjudication(VOTE_APPROVE, &too_wide, &["carol"])?,
+    ] {
+        assert_eq!(AdjudicationParts::split(&bytes), None, "{bytes:?}");
+    }
+    Ok(())
+}
+
+// --- The operator halt -------------------------------------------------------
+
+/// Positive: an operator halt is a record of the chain at the level the host
+/// names, for every level, and the engine blocks from then on.
+#[test]
+fn an_operator_halt_is_a_record_at_the_level_it_names() -> Fallible<()> {
+    let stopped = block(BlockReason::KillswitchEngaged(HaltReason::OperatorStop));
+    for tag in RiskLevel::LOWEST.tag()..=RiskLevel::HIGHEST.tag() {
+        let world = world();
+        let mut binding = binding(&world)?;
+        allow(&mut binding, 1)?;
+        assert_eq!(binding.halt(u32::from(tag)), HaltStatus::Recorded);
+        assert_eq!(
+            stored_byte(&world, STATUS_AT)?,
+            RecordStatus::HaltEngaged.tag()
+        );
+        assert_eq!(stored_byte(&world, LATCH_AT)?, 1);
+        assert_eq!(
+            stored_byte(&world, REASON_AT)?,
+            HaltReason::OperatorStop.tag()
+        );
+        assert_eq!(stored_level(&world)?, tag);
+        let code = binding.decide(ROUTINE.as_bytes());
+        assert_eq!(parts(code), stopped, "level {tag}");
+        assert!(!code.permits_execution());
+        assert_eq!(walk_store(&world), Ok(3));
+    }
+    Ok(())
+}
+
+/// Planted: a level value that is the tag of no level. The halt is not
+/// refused for it and stands at the highest level, also where the low byte
+/// of the value is the tag of a lower one.
+#[test]
+fn an_operator_halt_at_no_level_stands_at_the_highest() -> Fallible<()> {
+    assert_eq!((RiskLevel::LOWEST.tag(), RiskLevel::HIGHEST.tag()), (1, 6));
+    for level in [0, 7, 255, 256, 257, 0x0100_0003, u32::MAX] {
+        let world = world();
+        let mut binding = binding(&world)?;
+        assert_eq!(binding.halt(level), HaltStatus::Recorded, "level {level}");
+        assert_eq!(
+            stored_level(&world)?,
+            RiskLevel::HIGHEST.tag(),
+            "level {level}"
+        );
+        assert_eq!(walk_store(&world), Ok(1));
+    }
+    Ok(())
+}
+
+/// A binding halted by the operator under a host that cannot record the
+/// halt: the engine is halted all the same and blocks while the fault lasts.
+fn halted_unrecorded(fault: Fault) -> Fallible<(Rc<World>, TestBinding)> {
+    let (name, plant, mend) = fault;
+    let world = world();
+    let mut binding = binding(&world)?;
+    allow(&mut binding, 1)?;
+    plant(&world);
+    assert_eq!(binding.halt(2), HaltStatus::Unrecorded, "{name}");
+    assert_ne!(binding.engine().killswitch(), KillswitchState::Armed);
+    let code = binding.decide(ROUTINE.as_bytes());
+    assert_eq!(
+        parts(code),
+        block(BlockReason::KillswitchEngaged(HaltReason::OperatorStop)),
+        "{name}"
+    );
+    assert!(!code.permits_execution(), "{name}");
+    assert_eq!(world.stored.borrow().len(), 1, "{name}");
+    mend(&world);
+    Ok((world, binding))
+}
+
+/// Planted: a host that cannot sign the record of a halt, or cannot store
+/// it. The engine is halted all the same and blocks while the fault lasts;
+/// the stored chain shows the halt once the host delivers again.
+#[test]
+fn a_halt_that_cannot_be_recorded_is_still_a_halt() -> Fallible<()> {
+    let stopped = block(BlockReason::KillswitchEngaged(HaltReason::OperatorStop));
+    for fault in RECORD_FAULTS {
+        let (world, mut binding) = halted_unrecorded(fault)?;
+        assert_eq!(binding.halt(2), HaltStatus::Recorded, "{}", fault.0);
+        assert_eq!(stored_byte(&world, LATCH_AT)?, 1, "{}", fault.0);
+        assert_eq!(stored_level(&world)?, 2, "{}", fault.0);
+        assert_eq!(parts(binding.decide(ROUTINE.as_bytes())), stopped);
+    }
+    Ok(())
+}
+
+/// Boundary: a halt is never made weaker. A second halt at a stricter level
+/// raises the level and is a record; one at a lower level, or at no level
+/// where the highest stands, changes nothing and writes nothing.
+#[test]
+fn a_second_halt_never_lowers_the_level() -> Fallible<()> {
+    let world = world();
+    let mut binding = binding(&world)?;
+    let steps = [
+        (1, 1, 1),
+        (3, 3, 2),
+        (1, 3, 2),
+        (6, 6, 3),
+        (3, 6, 3),
+        (0, 6, 3),
+    ];
+    for (asked, stands, records) in steps {
+        assert_eq!(binding.halt(asked), HaltStatus::Recorded);
+        assert_eq!(stored_level(&world)?, stands, "asked {asked}");
+        assert_eq!(world.stored.borrow().len(), records, "asked {asked}");
+    }
+    assert_eq!(walk_store(&world), Ok(3));
+    Ok(())
+}
+
+/// Planted, both ways: an operator halt is released as every halt is, at a
+/// continuation and with the approval of the level it stands at.
+#[test]
+fn an_operator_halt_is_released_with_the_approval_of_its_level() -> Fallible<()> {
+    let world = world();
+    let mut halted = binding(&world)?;
+    assert_eq!(halted.halt(3), HaltStatus::Recorded);
+    drop(halted);
+    let refused = released(&world, &["olga"])?;
+    assert_eq!(refused.err(), Some(InitError::Approval));
+    assert_still_halted(&world, 1)?;
+    let mut binding =
+        released(&world, &["olga", "petra"])?.map_err(|error| format!("{error:?}"))?;
+    assert_eq!(binding.engine().killswitch(), KillswitchState::Armed);
+    allow(&mut binding, 1)?;
+    assert_eq!(walk_store(&world), Ok(3));
+    Ok(())
+}
+
+/// Boundary: an adjudication and a halt that find the engine's window full
+/// drop it as a decision does, and their records go on the one chain.
+#[test]
+fn an_adjudication_and_a_halt_run_past_a_full_window() -> Fallible<()> {
+    let world = world();
+    let mut binding = holding(&world, TIER_A)?;
+    let rest = MAX_LEDGER_RECORDS.saturating_sub(1);
+    allow(&mut binding, rest)?;
+    assert_eq!(binding.engine().audit_room(), 0);
+    let code = binding.adjudicate(&approval(&["carol"])?);
+    assert_eq!(parts(code), (Class::Allow, 0, 0));
+    assert_eq!(binding.engine().ledger().len(), 1);
+    allow(&mut binding, rest)?;
+    assert_eq!(binding.engine().audit_room(), 0);
+    assert_eq!(binding.halt(1), HaltStatus::Recorded);
+    assert_eq!(binding.engine().ledger().len(), 1);
+    let stored = MAX_LEDGER_RECORDS.saturating_mul(2).saturating_add(1);
+    let stored = u64::try_from(stored).map_err(|error| error.to_string())?;
+    assert_eq!(walk_store(&world), Ok(stored));
+    Ok(())
+}
+
+/// Negative: the numbers of an adjudication and of a halt are fixed.
+#[test]
+fn the_numbers_of_an_adjudication_and_of_a_halt_are_fixed() {
+    assert_eq!((Class::Rejected as u8, Class::NotAdjudicated as u8), (5, 6));
+    assert_eq!(Refusal::Adjudication as u8, 8);
+    assert_eq!((VOTE_APPROVE, VOTE_REJECT), (1, 2));
+    assert_eq!(MAX_ADJUDICATION_CHECKERS, 2);
+    assert_eq!(MAX_ADJUDICATION_BYTES, 197);
+    let details = [
+        Unadjudicated::Halted,
+        Unadjudicated::UnknownRequest,
+        Unadjudicated::AlreadyDecided,
+        Unadjudicated::Expired,
+        Unadjudicated::Approval,
+        Unadjudicated::ClockUnavailable,
+        Unadjudicated::Unrecorded,
+        Unadjudicated::Engine,
+    ];
+    assert_eq!(details.map(|detail| detail as u8), [1, 2, 3, 4, 5, 6, 7, 8]);
+    let statuses = [
+        HaltStatus::Recorded,
+        HaltStatus::NotInitialised,
+        HaltStatus::Busy,
+        HaltStatus::Unrecorded,
+    ];
+    assert_eq!(statuses.map(|status| status as u32), [0, 1, 2, 3]);
 }

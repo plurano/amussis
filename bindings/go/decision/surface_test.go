@@ -43,7 +43,8 @@ type shapeFunction struct {
 
 // realSurface is the surface of the real module, over functions that answer:
 // the loader's interface version, a 4,096-byte input buffer at address 16, two
-// set-ups that succeed and a decision that allows.
+// set-ups that succeed, a decision that allows, an adjudication that approves
+// and a halt that is recorded.
 func realSurface() shape {
 	return shape{
 		imports: []shapeImport{
@@ -58,9 +59,16 @@ func realSurface() shape {
 			{exportInit, []byte{i32, i32}, []byte{i32}, 0},
 			{exportContinue, []byte{i32, i32, i32, i32}, []byte{i32}, 0},
 			{exportDecide, []byte{i32}, []byte{i32}, 0},
+			{exportAdjudicate, []byte{i32}, []byte{i32}, 0},
+			{exportHalt, []byte{i32}, []byte{i32}, 0},
 		},
 		memoryName: exportMemory,
 	}
+}
+
+// without removes the exports of the given names.
+func (s *shape) without(names ...string) {
+	s.exports = slices.DeleteFunc(s.exports, func(f shapeFunction) bool { return slices.Contains(names, f.name) })
 }
 
 func (s *shape) export(name string) *shapeFunction {
@@ -195,17 +203,23 @@ func TestAModuleWithAnotherSurfaceIsRefused(t *testing.T) {
 		{"an export beyond the interface", func(s *shape) {
 			s.exports = append(s.exports, shapeFunction{"amussis_extra", nil, []byte{i32}, 0})
 		}, "no function of this interface"},
-		{"no decide function", func(s *shape) { s.exports = s.exports[:5] }, "exports 5 of the 6"},
-		{"the exports of interface version 1, which cannot continue a chain", func(s *shape) {
-			s.exports = slices.DeleteFunc(s.exports, func(f shapeFunction) bool { return f.name == exportContinue })
-		}, "exports 5 of the 6"},
+		{"no decide function", func(s *shape) { s.without(exportDecide) }, "exports 7 of the 8"},
+		{"no continue function", func(s *shape) { s.without(exportContinue) }, "exports 7 of the 8"},
+		{"no adjudicate function", func(s *shape) { s.without(exportAdjudicate) }, "exports 7 of the 8"},
+		{"no halt function", func(s *shape) { s.without(exportHalt) }, "exports 7 of the 8"},
+		{"the exports of interface version 3, which can neither adjudicate nor halt", func(s *shape) {
+			s.without(exportAdjudicate, exportHalt)
+		}, "exports 6 of the 8"},
+		{"an adjudicate function of another type", func(s *shape) { s.export(exportAdjudicate).params = []byte{i32, i32} }, "another type"},
+		{"a halt function without its level", func(s *shape) { s.export(exportHalt).params = nil }, "another type"},
+		{"a halt function with a wide result", func(s *shape) { s.export(exportHalt).results = []byte{i64} }, "another type"},
 		{"a continue function without the length of its release", func(s *shape) { s.export(exportContinue).params = []byte{i32, i32, i32} }, "another type"},
 		{"a decide function of another type", func(s *shape) { s.export(exportDecide).params = []byte{i32, i32} }, "another type"},
 		{"a decide function with a wide result", func(s *shape) { s.export(exportDecide).results = []byte{i64} }, "another type"},
 		{"no exported memory", func(s *shape) { s.memoryName = "" }, "exactly one memory"},
 		{"a memory under another name", func(s *shape) { s.memoryName = "mem" }, "exactly one memory"},
-		{"the interface version before this one", func(s *shape) { s.export(exportABIVersion).value = 2 }, "interface version 2"},
-		{"the interface version after this one", func(s *shape) { s.export(exportABIVersion).value = 4 }, "interface version 4"},
+		{"the interface version before this one", func(s *shape) { s.export(exportABIVersion).value = 3 }, "interface version 3"},
+		{"the interface version after this one", func(s *shape) { s.export(exportABIVersion).value = 5 }, "interface version 5"},
 		{"interface version zero", func(s *shape) { s.export(exportABIVersion).value = 0 }, "interface version 0"},
 		{"an input buffer past the memory", func(s *shape) { s.export(exportInput).value = 65536 - 100 }, "not in its memory"},
 		{"an input buffer at the highest address", func(s *shape) { s.export(exportInput).value = -1 }, "not in its memory"},
@@ -288,7 +302,9 @@ func TestOnlyTheCodesTheModuleWritesAreRead(t *testing.T) {
 		0x00ff03,   // block with the loader's own reason
 		0x000004,   // refusal without a reason
 		0x010104,   // refusal with a halt
-		0x000005,   // a class past the last
+		0x000005,   // the rejection of an adjudication
+		0x000206,   // an adjudication that was not taken
+		0x000007,   // a class past the last
 		0x0000ff,
 		0xffffffff,
 	}

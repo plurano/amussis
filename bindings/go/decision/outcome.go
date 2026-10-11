@@ -5,7 +5,8 @@ package decision
 
 import "fmt"
 
-// Class is what the engine decided about one proposal.
+// Class is what the engine decided about one proposal, or what came of the
+// checkers' decision of a held action.
 //
 // The zero value is Blocked, so an Outcome that was never filled in permits
 // nothing.
@@ -20,8 +21,14 @@ const (
 	RequireApproval
 	// Warned: the action may run and is monitored.
 	Warned
-	// Allowed: the action may run.
+	// Allowed: the action may run. Decide gives it for an action that needs
+	// no approval, Adjudicate for a held action the checkers approved.
 	Allowed
+	// Rejected: the checkers rejected the held action. It must not run.
+	Rejected
+	// NotAdjudicated: the engine took no decision of a held action and
+	// recorded no vote. Outcome.Detail says why.
+	NotAdjudicated
 )
 
 // Details of a Blocked outcome: the engine's block reasons.
@@ -54,17 +61,54 @@ const (
 	RefusedMalformed      uint8 = 5
 	RefusedIntent         uint8 = 6
 	RefusedBusy           uint8 = 7
+	// RefusedAdjudication: the Adjudication cannot be read: a vote that is
+	// neither Approve nor Reject, no checker or more than MaxCheckers, or an
+	// intent id or a checker that is no identity of the engine.
+	RefusedAdjudication uint8 = 8
 )
 
-// Outcome is the engine's answer to one proposal.
+// Details of a NotAdjudicated outcome. The action stays held, but for the
+// one detail that says otherwise.
+const (
+	// UnadjudicatedHalted: the engine is halted and takes no decision of a
+	// held action; Outcome.Halt says why.
+	UnadjudicatedHalted uint8 = 1
+	// UnadjudicatedUnknownRequest: no action is held under the intent id. It
+	// was never held, or an earlier engine held it.
+	UnadjudicatedUnknownRequest uint8 = 2
+	// UnadjudicatedAlreadyDecided: the action was approved or rejected
+	// before.
+	UnadjudicatedAlreadyDecided uint8 = 3
+	// UnadjudicatedExpired: the approval window of the action closed.
+	UnadjudicatedExpired uint8 = 4
+	// UnadjudicatedApproval: the checkers do not satisfy the approval rule of
+	// the action: too few, one person named twice, or the maker among them.
+	UnadjudicatedApproval uint8 = 5
+	// UnadjudicatedClockUnavailable: the clock could not be read. The engine
+	// is halted.
+	UnadjudicatedClockUnavailable uint8 = 6
+	// UnadjudicatedUnrecorded: the vote could not be signed or stored. The
+	// action is no longer held, nothing was decided, and the engine is
+	// halted.
+	UnadjudicatedUnrecorded uint8 = 7
+	// UnadjudicatedEngine: the engine refused for a reason that has no detail
+	// of its own.
+	UnadjudicatedEngine uint8 = 8
+)
+
+// Outcome is the engine's answer to one proposal or to one adjudication.
 type Outcome struct {
-	Class  Class
+	Class Class
+	// Detail says why, for the classes that name one.
 	Detail uint8
-	Halt   uint8
+	// Halt is the reason the engine is halted for: beside BlockHalted, and
+	// beside a NotAdjudicated outcome that found or left the engine halted.
+	Halt uint8
 }
 
 // Permits reports whether the action may run now. Only Allowed and Warned
-// permit; a held, blocked or refused action does not.
+// permit; a held, blocked, refused or rejected action does not, and neither
+// does one whose adjudication the engine did not take.
 func (o Outcome) Permits() bool {
 	return o.Class == Allowed || o.Class == Warned
 }
@@ -76,12 +120,15 @@ const (
 	wireRequireApproval = 2
 	wireBlock           = 3
 	wireRefused         = 4
+	wireRejected        = 5
+	wireNotAdjudicated  = 6
 )
 
-// decode reads the module's outcome code: class, detail and halt in the three
-// low bytes, zero in the fourth. A code it does not know is an error, never a
-// permitting outcome: an answer that permits carries exactly the bytes the
-// module writes for it.
+// decode reads the module's outcome code for a proposal: class, detail and
+// halt in the three low bytes, zero in the fourth. A code it does not know is
+// an error, never a permitting outcome: an answer that permits carries
+// exactly the bytes the module writes for it. The classes of an adjudication
+// are none the module writes for a proposal.
 func decode(code uint32) (Outcome, error) {
 	class, detail, halt, rest := uint8(code), uint8(code>>8), uint8(code>>16), uint8(code>>24)
 	outcome := Outcome{Detail: detail, Halt: halt}
@@ -100,6 +147,31 @@ func decode(code uint32) (Outcome, error) {
 		outcome.Class = Refused
 	default:
 		return Outcome{}, fmt.Errorf("outcome code %#x is not one the module writes", code)
+	}
+	return outcome, nil
+}
+
+// decodeAdjudication reads the module's outcome code for an adjudication, as
+// strictly as decode reads the one for a proposal. An approval is the allow
+// code and no other; a warning, a hold and a block are none the module
+// writes for an adjudication.
+func decodeAdjudication(code uint32) (Outcome, error) {
+	class, detail, halt, rest := uint8(code), uint8(code>>8), uint8(code>>16), uint8(code>>24)
+	outcome := Outcome{Detail: detail, Halt: halt}
+	known := detail >= UnadjudicatedHalted && detail <= UnadjudicatedEngine
+	switch {
+	case rest != 0:
+		return Outcome{}, fmt.Errorf("outcome code %#x sets a reserved byte", code)
+	case class == wireAllow && detail == 0 && halt == 0:
+		outcome.Class = Allowed
+	case class == wireRejected && detail == 0 && halt == 0:
+		outcome.Class = Rejected
+	case class == wireNotAdjudicated && known && (detail != UnadjudicatedHalted || halt != 0):
+		outcome.Class = NotAdjudicated
+	case class == wireRefused && detail != 0 && halt == 0:
+		outcome.Class = Refused
+	default:
+		return Outcome{}, fmt.Errorf("outcome code %#x is not one the module writes for an adjudication", code)
 	}
 	return outcome, nil
 }
