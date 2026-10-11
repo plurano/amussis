@@ -1,0 +1,15 @@
+# SPDX-FileCopyrightText: 2026 Lusoris <lusoris@pm.me>
+# SPDX-License-Identifier: EUPL-1.2
+#
+# The exceptions of this workspace to its own rules, for rules the Praetor
+# engine's list in .standards.yaml does not read. The shape is the engine's:
+# one rule, one file, a reason, and the day the exception ends, at most 90 days
+# ahead. An entry past its day excuses nothing. tools/exceptions_check.py
+# reads this list in `make verify`. The list moves into .standards.yaml once
+# the engine accepts repository-declared rules (cordanaLLM/praetor#1206).
+
+[[exception]]
+rule = "unsafe_code"
+path = "crates/amussis-decision-wasm/src/abi.rs"
+reason = "a WebAssembly module declares its imports in an unsafe extern block and names its exports with #[unsafe(no_mangle)]; Rust has no safe spelling for either, and the file holds no unsafe block and dereferences no raw pointer"
+expires = "2027-01-09"

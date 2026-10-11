@@ -87,13 +87,18 @@ jobs:
 
       # The runner image ships a Rust toolchain, but not the pinned one. With
       # no toolchain argument rustup installs the active toolchain, which
-      # rust-toolchain.toml overrides to the pinned channel.
+      # rust-toolchain.toml overrides to the pinned channel. That form takes
+      # the components from the file and ignores a target given on the
+      # command line, so the WebAssembly target is added in a step of its own
+      # and its presence is checked here, before the gate needs it.
       - name: Materialise the pinned Rust toolchain
         run: |
           rustup toolchain install --no-self-update --profile minimal \
             -c rustfmt,clippy
+          rustup target add wasm32-unknown-unknown
           rustup show active-toolchain
           rustup which cargo-clippy
+          rustup target list --installed | grep -qx wasm32-unknown-unknown
 
       - name: Verification gate
         run: make verify-all REUSE="pipx run reuse==${REUSE_VERSION}"

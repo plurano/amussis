@@ -15,6 +15,8 @@ path = [
     "rustfmt.toml",
     "settings-source.json",
     ".gitignore",
+    "bindings/go/go.sum",
+    "bindings/go/decision/amussis_decision.wasm",
 ]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Lusoris <lusoris@pm.me>"
@@ -38,6 +40,7 @@ path = [
     ".github/actionlint.yaml",
     ".github/copilot-instructions.md",
     ".github/pull_request_template.md",
+    ".github/workflows/praetor-api.yml",
     ".github/workflows/reuse.yml",
     ".helix/**",
     ".idea/**",

@@ -40,6 +40,9 @@
             "context": "Verification gate"
           },
           {
+            "context": "Go API Compatibility"
+          },
+          {
             "context": "REUSE lint"
           }
         ],

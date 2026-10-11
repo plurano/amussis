@@ -7,6 +7,7 @@
 resolver = "3"
 members = [
     "crates/amussis-decision",
+    "crates/amussis-decision-wasm",
 ]
 
 # edition, rust-version and the two lint tables below are settings shared with
@@ -26,6 +27,17 @@ serde = { version = "1.0.229", default-features = false, features = ["derive"] }
 serde_json = { version = "1.0.151", default-features = false, features = ["std"] }
 sha2 = { version = "0.11.0", default-features = false }
 thiserror = { version = "2.0.20", default-features = false, features = ["std"] }
+
+# The WebAssembly module of crates/amussis-decision-wasm. Size is not the aim:
+# one codegen unit and link-time optimisation make the build reproducible
+# enough to compare the committed module byte for byte, and abort keeps a
+# panic from unwinding into the host.
+[profile.wasm]
+inherits = "release"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

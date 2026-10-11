@@ -1,0 +1,52 @@
+# SPDX-FileCopyrightText: 2026 Lusoris <lusoris@pm.me>
+# SPDX-License-Identifier: EUPL-1.2
+
+[package]
+name = "amussis-decision-wasm"
+description = "WebAssembly export crate of the decision engine: signer, sink and clock are host functions."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+# cdylib is the WebAssembly module; rlib lets the integration tests drive the
+# same binding with test hosts on the build machine.
+[lib]
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+amussis-decision = { path = "../amussis-decision" }
+
+# This crate cannot write `workspace = true`: the workspace forbids unsafe code,
+# a forbid cannot be lowered in source, and a WebAssembly export needs
+# `#[unsafe(no_mangle)]`. The two tables below are the workspace tables with
+# one key changed, `unsafe_code` from "forbid" to "deny", so that exactly one
+# file can allow it. tools/exceptions_check.py holds both halves: the tables
+# equal the workspace tables but for that key, and the allowance stands in the
+# one file exceptions.toml names, until the date it names.
+[lints.rust]
+unsafe_code = "deny"
+missing_docs = "deny"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+arithmetic_side_effects = "deny"
+cognitive_complexity = "deny"
+dbg_macro = "deny"
+exit = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+panic = "deny"
+print_stderr = "deny"
+print_stdout = "deny"
+todo = "deny"
+too_many_lines = "deny"
+undocumented_unsafe_blocks = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+unwrap_in_result = "deny"
+unwrap_used = "deny"
