@@ -4,14 +4,16 @@
 //! The halt as a record of the chain, the risk level it stands at, and its
 //! release.
 //!
-//! A halt writes one record that names no action. It stands at a risk level:
+//! A halt writes one record that names no action, and names the person whose
+//! call engaged it or made it stricter. It stands at a risk level:
 //! the one the caller names, the one of the action in hand for a fault the
 //! engine found itself, and the highest where there is none. The release is
 //! held to the approval rule actions are held to, asked for that level. The
 //! planted cases are the ones that must be refused: a release without the
 //! approval the level demands, a panel that names the releaser, a release of
 //! a halt the engine did not take over, a release whose record cannot be
-//! written, and a record whose status and fields do not belong together.
+//! written, a record whose status and fields do not belong together, and a
+//! halt record that names a person for a halt that person did not engage.
 
 mod common;
 
@@ -64,10 +66,11 @@ fn two(first: &str, second: &str) -> Fallible<CheckerSet> {
     )?)
 }
 
-/// An engine an operator halted at `level`: its store ends on the halt record.
+/// An engine halted at `level` with no person named: its store ends on the
+/// halt record.
 fn halted_at(level: RiskLevel) -> Fallible<TestEngine> {
     let mut halted = engine(600, 4)?;
-    halted.halt(HaltReason::OperatorStop, level)?;
+    halted.halt_unnamed(HaltReason::OperatorStop, level)?;
     Ok(halted)
 }
 
@@ -146,6 +149,33 @@ impl LedgerSink for SwitchSink {
     }
 }
 
+/// An engine over a store that can be switched off and on.
+fn flaky() -> Fallible<EngineWith<SwitchSink, FixedClock>> {
+    Ok(DecisionEngine::new(
+        config(600, 4)?,
+        SignerBinding::Bound(FixtureSigner::new()?),
+        SwitchSink {
+            inner: InMemorySink::with_bound(FIXTURE_AUDIT_BOUND),
+        },
+        io_deadline(),
+        FixedClock::new(START),
+    ))
+}
+
+/// The person `name`, who halts.
+fn operator(name: &str) -> Fallible<MakerId> {
+    Ok(MakerId::parse(name)?)
+}
+
+/// Who the record of a halt by `name` at `level` names.
+fn halted_by(name: &str, level: RiskLevel) -> Fallible<RecordPrincipals> {
+    Ok(RecordPrincipals {
+        level,
+        maker: operator(name)?,
+        checkers: None,
+    })
+}
+
 // --- Positive -------------------------------------------------------------
 
 /// Positive: a halt is one record that names no action and carries the time,
@@ -167,7 +197,7 @@ fn a_halt_is_one_record_that_names_no_action() -> Fallible<()> {
     assert_eq!(draft.subject, None);
     assert!(draft.is_well_formed());
 
-    halted.halt(HaltReason::OperatorStop, SINGLE)?;
+    halted.halt_unnamed(HaltReason::OperatorStop, SINGLE)?;
     assert_eq!(
         halted.ledger().len(),
         1,
@@ -251,17 +281,9 @@ fn a_release_passes_with_the_approval_the_level_demands() -> Fallible<()> {
 /// call of `halt`, and by no call after that.
 #[test]
 fn a_halt_record_that_failed_is_written_by_the_next_halt() -> Fallible<()> {
-    let mut flaky: EngineWith<SwitchSink, FixedClock> = DecisionEngine::new(
-        config(600, 4)?,
-        SignerBinding::Bound(FixtureSigner::new()?),
-        SwitchSink {
-            inner: InMemorySink::with_bound(FIXTURE_AUDIT_BOUND),
-        },
-        io_deadline(),
-        FixedClock::new(START),
-    );
+    let mut flaky = flaky()?;
     DOWN.set(true);
-    let unwritten = flaky.halt(HaltReason::OperatorStop, SINGLE);
+    let unwritten = flaky.halt_unnamed(HaltReason::OperatorStop, SINGLE);
     DOWN.set(false);
     assert_eq!(
         unwritten,
@@ -275,11 +297,123 @@ fn a_halt_record_that_failed_is_written_by_the_next_halt() -> Fallible<()> {
     );
     assert!(flaky.ledger().sink().inner.accepted().is_empty());
 
-    flaky.halt(HaltReason::OperatorStop, SINGLE)?;
-    flaky.halt(HaltReason::OperatorStop, SINGLE)?;
+    flaky.halt_unnamed(HaltReason::OperatorStop, SINGLE)?;
+    flaky.halt_unnamed(HaltReason::OperatorStop, SINGLE)?;
     let stored = flaky.ledger().sink().inner.accepted();
     assert_eq!(stored.len(), 1, "written once");
     assert_eq!(last_draft(&flaky)?.status, RecordStatus::HaltEngaged);
+    Ok(())
+}
+
+/// Positive: a halt a person calls is one record that names that person at
+/// the level the halt stands at, and no checker. An engine that continues
+/// the chain reads that record as its head and starts halted.
+#[test]
+fn a_halt_by_a_person_names_that_person() -> Fallible<()> {
+    let levels = [
+        RiskLevel::LOWEST,
+        MONITORED,
+        SINGLE,
+        DUAL,
+        RiskLevel::HIGHEST,
+    ];
+    for level in levels {
+        let mut halted = engine(600, 4)?;
+        halted.halt(&operator("olga")?, level)?;
+        let engaged = KillswitchState::Engaged {
+            at: START,
+            reason: HaltReason::OperatorStop,
+            level,
+        };
+        assert_eq!(halted.killswitch(), engaged);
+        assert_eq!(halted.ledger().len(), 1);
+        let draft = last_draft(&halted)?;
+        let olga = halted_by("olga", level)?;
+        assert_eq!(draft, RecordDraft::of_halt_by(engaged, olga, START));
+        assert_eq!(draft.principals, Some(olga));
+        assert_eq!(draft.status, RecordStatus::HaltEngaged);
+        assert_eq!(draft.subject, None);
+        assert!(draft.is_well_formed());
+
+        let continued: TestEngine = DecisionEngine::continue_from(
+            config(600, 4)?,
+            SignerBinding::Bound(FixtureSigner::new()?),
+            InMemorySink::with_bound(FIXTURE_AUDIT_BOUND),
+            io_deadline(),
+            FixedClock::new(START),
+            &anchor_of(&halted)?,
+        );
+        assert_eq!(continued.killswitch(), engaged, "carried over");
+    }
+    Ok(())
+}
+
+/// Positive: the person a halt record names is the one whose call the halt
+/// stands on. A second person who changes nothing writes nothing, and one who
+/// makes the halt stricter is named by a second record, at the stricter
+/// level.
+#[test]
+fn a_stricter_halt_names_the_person_who_made_it_stricter() -> Fallible<()> {
+    let mut halted = engine(600, 4)?;
+    halted.halt(&operator("olga")?, SINGLE)?;
+    halted.halt(&operator("petra")?, SINGLE)?;
+    halted.halt(&operator("petra")?, MONITORED)?;
+    assert_eq!(halted.ledger().len(), 1, "nothing changed, nothing written");
+    assert_eq!(
+        last_draft(&halted)?.principals,
+        Some(halted_by("olga", SINGLE)?)
+    );
+
+    halted.halt(&operator("petra")?, DUAL)?;
+    assert_eq!(halted.ledger().len(), 2);
+    let stricter = last_draft(&halted)?;
+    assert_eq!(stricter.status, RecordStatus::HaltEngaged);
+    assert_eq!(stricter.principals, Some(halted_by("petra", DUAL)?));
+    assert_eq!(stricter.killswitch.level(), Some(DUAL));
+
+    halted.halt(&operator("olga")?, DUAL)?;
+    assert_eq!(halted.ledger().len(), 2, "one halt record per state");
+    Ok(())
+}
+
+/// An engine `name` halted at the single-checker level while the store was
+/// down, so that the record of the halt is owed to the chain.
+fn halted_unwritten(name: &str) -> Fallible<EngineWith<SwitchSink, FixedClock>> {
+    let mut flaky = flaky()?;
+    DOWN.set(true);
+    let unwritten = flaky.halt(&operator(name)?, SINGLE);
+    DOWN.set(false);
+    assert_eq!(unwritten, Err(LedgerError::Sink(SinkError::Unavailable)));
+    assert_eq!(flaky.killswitch().level(), Some(SINGLE));
+    Ok(flaky)
+}
+
+/// Positive: a person's halt whose record could not be written is owed to
+/// the chain. The next halt writes it with the person the halt stands on,
+/// whoever calls, also after a refusal already carried the halt into the
+/// chain, and no call after that writes it again.
+#[test]
+fn a_named_halt_record_that_failed_is_written_with_its_person() -> Fallible<()> {
+    for refused_between in [false, true] {
+        let mut flaky = halted_unwritten("olga")?;
+        let mut written = 0;
+        if refused_between {
+            let refused = flaky.decide(&action("intent-refused", RiskTier::TierCRoutineBounded)?);
+            assert!(refused.block_reason().is_some());
+            assert_eq!(last_draft(&flaky)?.status, RecordStatus::Halted);
+            written = 1;
+        }
+        assert_eq!(flaky.ledger().sink().inner.accepted().len(), written);
+
+        flaky.halt(&operator("petra")?, SINGLE)?;
+        let owed = last_draft(&flaky)?;
+        assert_eq!(owed.status, RecordStatus::HaltEngaged);
+        assert_eq!(owed.principals, Some(halted_by("olga", SINGLE)?));
+        flaky.halt(&operator("petra")?, SINGLE)?;
+        flaky.halt_unnamed(HaltReason::OperatorStop, SINGLE)?;
+        let stored = flaky.ledger().sink().inner.accepted().len();
+        assert_eq!(stored, written + 1, "written once");
+    }
     Ok(())
 }
 
@@ -380,7 +514,7 @@ fn a_release_is_refused_outside_an_inherited_halt() -> Fallible<()> {
     );
 
     let mut again = carried(RiskLevel::LOWEST)?;
-    again.halt(HaltReason::OperatorStop, RiskLevel::LOWEST)?;
+    again.halt_unnamed(HaltReason::OperatorStop, RiskLevel::LOWEST)?;
     assert_eq!(
         again.release_halt(&releaser()?, None),
         Err(ReleaseError::NotInherited),
@@ -389,7 +523,7 @@ fn a_release_is_refused_outside_an_inherited_halt() -> Fallible<()> {
 
     let mut released = carried(RiskLevel::LOWEST)?;
     released.release_halt(&releaser()?, None)?;
-    released.halt(HaltReason::OperatorStop, RiskLevel::LOWEST)?;
+    released.halt_unnamed(HaltReason::OperatorStop, RiskLevel::LOWEST)?;
     assert_eq!(
         released.release_halt(&releaser()?, None),
         Err(ReleaseError::NotInherited)
@@ -489,12 +623,64 @@ fn a_release_under_a_clock_fault_does_not_release() -> Fallible<()> {
     Ok(())
 }
 
+/// Negative, planted: no record names a person for a halt that person did
+/// not engage. A halt no person called stays unnamed when a person halts on
+/// top of it and changes nothing, and a person whose record is still owed is
+/// not named for the stricter halt a fault made of theirs.
+#[test]
+fn a_halt_no_person_engaged_is_not_named_after_one() -> Fallible<()> {
+    let mut faulted = engine(600, 4)?;
+    faulted.halt_unnamed(HaltReason::AuditUnavailable, SINGLE)?;
+    faulted.halt(&operator("olga")?, SINGLE)?;
+    faulted.halt(&operator("olga")?, MONITORED)?;
+    assert_eq!(faulted.ledger().len(), 1);
+    let draft = last_draft(&faulted)?;
+    assert_eq!(draft.principals, None, "the fault is nobody's halt");
+    assert_eq!(
+        faulted.killswitch().reason(),
+        Some(HaltReason::AuditUnavailable)
+    );
+
+    let mut flaky = flaky()?;
+    DOWN.set(true);
+    let unwritten = flaky.halt(&operator("olga")?, MONITORED);
+    DOWN.set(false);
+    assert_eq!(unwritten, Err(LedgerError::Sink(SinkError::Unavailable)));
+    flaky.halt_unnamed(HaltReason::AuditUnavailable, DUAL)?;
+    let stricter = last_draft(&flaky)?;
+    assert_eq!(stricter.killswitch.level(), Some(DUAL));
+    assert_eq!(stricter.principals, None, "olga did not halt at this level");
+    flaky.halt(&operator("olga")?, DUAL)?;
+    assert_eq!(flaky.ledger().sink().inner.accepted().len(), 1);
+    Ok(())
+}
+
+/// Negative: a person's halt whose record cannot be written reports that,
+/// and halts all the same.
+#[test]
+fn a_named_halt_that_cannot_be_recorded_still_halts() -> Fallible<()> {
+    let mut unsigned = unsigned_engine()?;
+    let unwritten = unsigned.halt(&operator("olga")?, SINGLE);
+    assert!(
+        matches!(unwritten, Err(LedgerError::Sign(_))),
+        "{unwritten:?}"
+    );
+    assert_eq!(unsigned.killswitch().level(), Some(SINGLE));
+    assert!(unsigned.ledger().sink().accepted().is_empty());
+    let outcome = unsigned.decide(&action("intent-after", RiskTier::TierCRoutineBounded)?);
+    assert_eq!(
+        outcome.block_reason(),
+        Some(BlockReason::KillswitchEngaged(HaltReason::OperatorStop))
+    );
+    Ok(())
+}
+
 /// Negative: a halt whose record cannot be written reports that, and halts
 /// all the same.
 #[test]
 fn a_halt_that_cannot_be_recorded_still_halts() -> Fallible<()> {
     let mut unsigned = unsigned_engine()?;
-    let unwritten = unsigned.halt(HaltReason::OperatorStop, SINGLE);
+    let unwritten = unsigned.halt_unnamed(HaltReason::OperatorStop, SINGLE);
     assert!(
         matches!(unwritten, Err(LedgerError::Sign(_))),
         "{unwritten:?}"
@@ -656,11 +842,11 @@ fn a_fault_while_deciding_halts_at_the_level_of_the_action() -> Fallible<()> {
 #[test]
 fn the_level_of_a_halt_only_rises() -> Fallible<()> {
     let mut halted = halted_at(SINGLE)?;
-    halted.halt(HaltReason::OperatorStop, RiskLevel::LOWEST)?;
+    halted.halt_unnamed(HaltReason::OperatorStop, RiskLevel::LOWEST)?;
     assert_eq!(halted.killswitch().level(), Some(SINGLE));
     assert_eq!(halted.ledger().len(), 1, "a weaker halt writes nothing");
 
-    halted.halt(HaltReason::OperatorStop, RiskLevel::HIGHEST)?;
+    halted.halt_unnamed(HaltReason::OperatorStop, RiskLevel::HIGHEST)?;
     assert_eq!(halted.killswitch().level(), Some(RiskLevel::HIGHEST));
     assert_eq!(
         halted.ledger().len(),
@@ -679,8 +865,8 @@ fn the_level_of_a_halt_only_rises() -> Fallible<()> {
 
     let mut continued = carried(SINGLE)?;
     let carried_over = continued.ledger().len();
-    continued.halt(HaltReason::OperatorStop, RiskLevel::LOWEST)?;
-    continued.halt(HaltReason::OperatorStop, SINGLE)?;
+    continued.halt_unnamed(HaltReason::OperatorStop, RiskLevel::LOWEST)?;
+    continued.halt_unnamed(HaltReason::OperatorStop, SINGLE)?;
     assert_eq!(
         continued.killswitch().level(),
         Some(SINGLE),

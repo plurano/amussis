@@ -34,7 +34,7 @@
 //! | `amussis_continue` | `(key_id_len: i32, head_len: i32, release_len: i32, io_deadline_ms: i32) -> i32` | Sets up the engine as the continuation of a stored chain; the input buffer holds the signer key identifier, the frame ([`wire`]) of the chain's last stored record and the release of its halt ([`ReleaseParts`]; `release_len` zero keeps the halt). `0`, or an [`InitError`] number. |
 //! | `amussis_decide` | `(len: i32) -> i32` | Decides the proposal text in the input buffer; returns the outcome code. |
 //! | `amussis_adjudicate` | `(len: i32) -> i32` | Brings the checkers' decision of a held action to the engine; the input buffer holds the adjudication ([`AdjudicationParts`]). Returns the outcome code. |
-//! | `amussis_halt` | `(level: i32) -> i32` | Halts the engine as an operator stop at the risk level `level` is the tag of (`1` to `6`); every other value halts at the highest level. `0`, or a [`HaltStatus`] number. |
+//! | `amussis_halt` | `(level: i32, by_len: i32) -> i32` | Halts the engine as the stop of the person whose identity is in the input buffer, at the risk level `level` is the tag of (`1` to `6`); every other value halts at the highest level. `0`, or a [`HaltStatus`] number. |
 //!
 //! # Outcome code
 //!
@@ -99,11 +99,15 @@
 //! level when it had none. A chain that ends halted continues halted; a
 //! restart is no release.
 //!
-//! The host halts the engine with `amussis_halt`, an operator stop at the
-//! risk level it names. The halt holds whatever the call answers: a halt
-//! whose record cannot be signed or stored is still a halt of this engine,
-//! and the answer says that the stored chain does not show it. A module
-//! instance has no call that lifts a halt.
+//! The host halts the engine with `amussis_halt`, the stop of a person at
+//! the risk level it names. The record of the halt names that person where
+//! the call engaged the halt or made it stricter; a call that changes
+//! nothing about the halt writes no record. The halt holds whatever the call
+//! answers: a halt whose record cannot be signed or stored is still a halt
+//! of this engine, and the answer says that the stored chain does not show
+//! it. A halt is never refused for its arguments either: bytes that are no
+//! identity halt the engine with a record that names nobody, and the answer
+//! says that too. A module instance has no call that lifts a halt.
 //!
 //! The one release of a halt is part of a continuation. The host names the
 //! person who releases and the checkers who approve ([`ReleaseParts`]), and
@@ -120,12 +124,14 @@
 //!
 //! # Identities
 //!
-//! The maker in a proposal, the checkers of an adjudication and the persons
-//! of a release are identities of at most 64 bytes. The module writes them
+//! The maker in a proposal, the checkers of an adjudication, the persons of
+//! a release and the person who halts are identities of at most 64 bytes.
+//! The module writes them
 //! into the records it hands to the signer and the sink as it received
 //! them, and compares them as bytes; it does not hash them. A host passes a
 //! keyed hash of its own identifier, never a name: what it passes in is
-//! what the store keeps. The record of a halt names nobody.
+//! what the store keeps. The record of a halt the engine engaged itself, on
+//! a fault, names nobody.
 //!
 //! # Limits
 //!
@@ -168,7 +174,7 @@ pub use crate::wire::{
 };
 
 /// Version of the import and export interface described above.
-pub const ABI_VERSION: u32 = 5;
+pub const ABI_VERSION: u32 = 6;
 
 /// Name of the import module the host functions live in.
 pub const HOST_MODULE: &str = "amussis_host_v1";

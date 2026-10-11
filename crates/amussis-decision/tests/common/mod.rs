@@ -277,7 +277,8 @@ pub fn intent(
 
 /// Who a fixture record of `status` names, so that the record is well
 /// formed: a maker at a level the status belongs to, and the one checker a
-/// rejection needs. `None` for the record of a halt, which names nobody.
+/// rejection needs. `None` for the record of a halt, which here is one no
+/// person engaged and names nobody.
 ///
 /// # Errors
 ///

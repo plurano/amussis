@@ -37,11 +37,12 @@ pub struct LedgerLine {
     pub intent_id: Option<String>,
     /// The agent that proposed the action; `None` as for the intent.
     pub agent: Option<String>,
-    /// The tag of the risk level the approval rule was asked at; `None` for
-    /// the record of a halt, which names nobody.
+    /// The tag of the risk level the approval rule was asked at, or the one
+    /// a person's halt stands at; `None` for the record of a halt no person
+    /// engaged, which names nobody.
     pub level: Option<u8>,
-    /// The maker of the proposal, or the person who released the halt, as the
-    /// identity the caller passed in; `None` as for the level.
+    /// The maker of the proposal, or the person who engaged or released the
+    /// halt, as the identity the caller passed in; `None` as for the level.
     pub maker: Option<String>,
     /// The checkers who cast the vote or approved the release, in the order
     /// the record states them. Empty where nobody voted.

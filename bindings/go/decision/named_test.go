@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -18,6 +19,9 @@ const namesAt = levelAt + 1
 
 // The maker of the proposals of these tests.
 const maker = "maker-alice"
+
+// The person who halts in these tests.
+const operator = "operator-olga"
 
 // persons is what the content of a record says about the persons it names:
 // the risk level the approval rule was asked at, and the maker (or the
@@ -146,21 +150,85 @@ func TestTheRecordOfAReleaseNamesTheReleaserAndTheApprovers(t *testing.T) {
 	}
 }
 
-// Negative: the record of a halt names nobody. Halt takes no person, and
-// the record states level zero where a person's record states its level.
-func TestTheRecordOfAHaltNamesNobody(t *testing.T) {
+// wantHalt requires the head of the stored chain to be the record of a halt
+// at level, and returns it.
+func wantHalt(t *testing.T, w *world, level Level) Record {
+	t.Helper()
+	record := head(t, w)
+	if record.Preimage[statusAt] != statusHaltEngaged || record.Preimage[levelAt] != byte(level) {
+		t.Fatalf("the head is no halt at level %d: status %d, level %d", level, record.Preimage[statusAt], record.Preimage[levelAt])
+	}
+	return record
+}
+
+// Positive: the record of a halt names the person who halted, at the level
+// the halt stands at, and no checker. A second person who changes nothing
+// writes no record; one who makes the halt stricter is named by a record of
+// their own.
+func TestTheRecordOfAHaltNamesThePersonWhoHalted(t *testing.T) {
 	inBothModes(t, func(t *testing.T, mode Mode) {
 		w := newWorld()
 		engine := engineFor(t, w, mode)
-		if err := engine.Halt(t.Context(), LevelConsequential); err != nil {
+		if err := engine.Halt(t.Context(), operator, LevelConsequential); err != nil {
 			t.Fatalf("Halt: %v", err)
 		}
-		record := head(t, w)
-		if record.Preimage[statusAt] != statusHaltEngaged || record.Preimage[levelAt] != byte(LevelConsequential) {
-			t.Fatalf("the head is no halt at the level asked: status %d", record.Preimage[statusAt])
+		wantNamed(t, wantHalt(t, w, LevelConsequential), LevelConsequential, operator)
+		if err := engine.Halt(t.Context(), "petra", LevelConsequential); err != nil {
+			t.Fatalf("a second Halt: %v", err)
 		}
-		wantNamed(t, record, 0)
+		wantChain(t, w, 1)
+		if err := engine.Halt(t.Context(), "petra", LevelAnnexIIIRoutine); err != nil {
+			t.Fatalf("a stricter Halt: %v", err)
+		}
+		wantNamed(t, wantHalt(t, w, LevelAnnexIIIRoutine), LevelAnnexIIIRoutine, "petra")
+		wantChain(t, w, 2)
 	})
+}
+
+// Boundary: the person who halts is named with 1 to MaxPersonBytes bytes,
+// byte for byte. One byte more is no identity.
+func TestAHaltNamesAPersonOfOneToSixtyFourBytes(t *testing.T) {
+	inBothModes(t, func(t *testing.T, mode Mode) {
+		for _, width := range []int{1, MaxPersonBytes} {
+			w := newWorld()
+			person := strings.Repeat("a", width)
+			if err := engineFor(t, w, mode).Halt(t.Context(), person, LevelMaterial); err != nil {
+				t.Fatalf("Halt by %d bytes: %v", width, err)
+			}
+			wantNamed(t, wantHalt(t, w, LevelMaterial), LevelMaterial, person)
+		}
+	})
+}
+
+// Negative, planted: a person who is no identity. The halt is not refused
+// for it: the engine is halted, the record of the halt names nobody and
+// states level zero where a person's record states its level, and Halt
+// answers ErrHaltUnnamed.
+func TestAHaltByNoIdentityHaltsAndNamesNobody(t *testing.T) {
+	planted := map[string]string{
+		"no person":                   "",
+		"one byte past the bound":     strings.Repeat("a", MaxPersonBytes+1),
+		"far past the bound":          strings.Repeat("a", 8192),
+		"a byte outside the alphabet": "olga smith",
+		"bytes that are no text":      "\xff\xfe",
+	}
+	for name, person := range planted {
+		t.Run(name, func(t *testing.T) {
+			inBothModes(t, func(t *testing.T, mode Mode) {
+				w := newWorld()
+				engine := engineFor(t, w, mode)
+				allow(t, engine, 1)
+				if err := engine.Halt(t.Context(), person, LevelConsequential); !errors.Is(err, ErrHaltUnnamed) {
+					t.Fatalf("Halt gave the error %v", err)
+				}
+				wantNamed(t, wantHalt(t, w, LevelConsequential), 0)
+				if outcome := decide(t, engine, routine); outcome != halted(HaltOperatorStop) || outcome.Permits() {
+					t.Fatalf("an engine halted by no identity decided %+v", outcome)
+				}
+				wantChain(t, w, 3)
+			})
+		})
+	}
 }
 
 // Boundary: an identity of the longest length, the 64 characters a keyed

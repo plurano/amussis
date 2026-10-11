@@ -33,8 +33,10 @@
 //! that rule with the record alone: a vote or a release that names fewer
 //! checkers than its level demands has no canonical pre-image, and neither
 //! has one whose maker is among its checkers or whose two checkers are one.
-//! Both are comparisons of bytes. The record of a halt names nobody: a halt
-//! is called without a person.
+//! Both are comparisons of bytes. The record of a halt names the person who
+//! engaged it, at the level the halt stands at and without a checker. A halt
+//! no person engaged names nobody: a fault the engine found, or a stop whose
+//! person the caller cannot name.
 //!
 //! An identity is the bytes the caller passed in, and the chain keeps them
 //! for as long as it is kept. The library does not hash them and cannot tell
@@ -351,10 +353,10 @@ pub struct RecordSubject {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RecordPrincipals {
     /// The risk level of the action the record decides, or of the halt the
-    /// record releases.
+    /// record engages or releases.
     pub level: RiskLevel,
     /// The maker of the proposal the record decides, or the person who
-    /// released the halt.
+    /// engaged or released the halt.
     pub maker: MakerId,
     /// The checkers who cast the vote the record states, or who approved the
     /// release. `None` where nobody voted.
@@ -411,6 +413,17 @@ impl RecordPrincipals {
         }
     }
 
+    /// Returns whether the principals are those of a halt in the state
+    /// `killswitch`: one person, at the level the halt stands at. Nobody
+    /// votes on a halt.
+    fn is_halt_of(&self, killswitch: KillswitchState) -> bool {
+        let stands_at = match killswitch {
+            KillswitchState::Engaged { level, .. } => Some(level),
+            KillswitchState::Armed => None,
+        };
+        self.is_unvoted() && stands_at == Some(self.level)
+    }
+
     /// Returns whether the principals belong to a record of `status` that
     /// decides an action.
     fn fits_decision(&self, status: RecordStatus) -> bool {
@@ -437,8 +450,8 @@ pub struct RecordDraft {
     pub subject: Option<RecordSubject>,
     /// Who the record names, and the risk level they answer at.
     ///
-    /// `None` for the record of a halt and for no other record: see
-    /// [`Self::is_well_formed`].
+    /// `None` for the record of a halt no person engaged and for no other
+    /// record: see [`Self::is_well_formed`].
     pub principals: Option<RecordPrincipals>,
     /// The decision recorded.
     pub status: RecordStatus,
@@ -456,8 +469,8 @@ pub struct RecordDraft {
 }
 
 impl RecordDraft {
-    /// Drafts the record of a halt: the latch engaged in the state
-    /// `killswitch`, written at `at`. It names nobody.
+    /// Drafts the record of a halt no person engaged: the latch engaged in
+    /// the state `killswitch`, written at `at`. It names nobody.
     ///
     /// A draft of an armed latch is not well formed: a halt record carries
     /// the halt.
@@ -466,6 +479,28 @@ impl RecordDraft {
         Self {
             subject: None,
             principals: None,
+            status: RecordStatus::HaltEngaged,
+            block_reason: None,
+            killswitch,
+            at,
+        }
+    }
+
+    /// Drafts the record of a halt a person engaged: the latch engaged in the
+    /// state `killswitch`, written at `at`. It names that person as the
+    /// maker, at the risk level the halt stands at, and no checker.
+    ///
+    /// A draft whose level is not the one of `killswitch`, or that names a
+    /// checker, is not well formed.
+    #[must_use]
+    pub const fn of_halt_by(
+        killswitch: KillswitchState,
+        operator: RecordPrincipals,
+        at: UnixSeconds,
+    ) -> Self {
+        Self {
+            subject: None,
+            principals: Some(operator),
             status: RecordStatus::HaltEngaged,
             block_reason: None,
             killswitch,
@@ -494,8 +529,10 @@ impl RecordDraft {
     /// proposal. It names checkers exactly when it states a vote: a rejection,
     /// or the approval of an action whose level demands a checker. A record
     /// of the halt latch names no action and no refusal reason, and carries
-    /// the latch state its status states: engaged for the halt, which names
-    /// nobody, and armed for the release, which names the releasing person.
+    /// the latch state its status states: engaged for the halt, and armed
+    /// for the release, which names the releasing person. The record of a
+    /// halt names the person who engaged it, at the level the halt stands at
+    /// and with no checker, or it names nobody.
     ///
     /// Where checkers are named they are as many as the level demands, the
     /// maker is none of them and two of them are two principals.
@@ -504,7 +541,11 @@ impl RecordDraft {
         let unnamed = self.subject.is_none() && self.block_reason.is_none();
         match self.status {
             RecordStatus::HaltEngaged => {
-                unnamed && self.killswitch.is_engaged() && self.principals.is_none()
+                let engaged_by = match self.principals {
+                    Some(operator) => operator.is_halt_of(self.killswitch),
+                    None => true,
+                };
+                unnamed && self.killswitch.is_engaged() && engaged_by
             }
             RecordStatus::HaltReleased => {
                 unnamed

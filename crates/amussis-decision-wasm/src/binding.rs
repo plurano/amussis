@@ -104,6 +104,10 @@ pub enum HaltStatus {
     /// The engine is halted, and the record of the halt could not be signed
     /// or stored. The stored chain does not show the halt.
     Unrecorded = 3,
+    /// The engine is halted and the halt is a record of the chain, and this
+    /// call named nobody for it: the bytes handed over as the person who
+    /// halts are not an identity.
+    Unnamed = 4,
 }
 
 /// Why setting up a binding failed.
@@ -409,23 +413,33 @@ impl<C: HostClock, S: HostSigner, K: HostSink> Binding<C, S, K> {
         }
     }
 
-    /// Halts the engine as an operator stop at the risk level `level` is the
-    /// tag of. A value that is the tag of no level halts at the highest
-    /// level: the halt is never refused for its argument, and its release is
-    /// then held to the strictest approval.
+    /// Halts the engine as the stop of the person `by` is the identity of,
+    /// at the risk level `level` is the tag of. The record of the halt names
+    /// that person where the call engaged the halt or made it stricter.
+    ///
+    /// The halt is never refused for an argument. A value that is the tag of
+    /// no level halts at the highest level, and its release is then held to
+    /// the strictest approval. Bytes that are no identity halt as an operator
+    /// stop that names nobody, and the answer says so.
     ///
     /// The engine is halted whatever this returns.
     /// [`HaltStatus::Unrecorded`] says that the record of the halt was not
-    /// written.
-    pub fn halt(&mut self, level: u32) -> HaltStatus {
+    /// written, and [`HaltStatus::Unnamed`] that this call named nobody.
+    pub fn halt(&mut self, level: u32, by: &[u8]) -> HaltStatus {
         let level = u8::try_from(level)
             .ok()
             .and_then(RiskLevel::from_tag)
             .unwrap_or(RiskLevel::HIGHEST);
+        let operator = identity(by).map(MakerId::from_identity);
         self.make_room();
-        match self.engine.halt(HaltReason::OperatorStop, level) {
-            Ok(()) => HaltStatus::Recorded,
-            Err(_) => HaltStatus::Unrecorded,
+        let written = match &operator {
+            Some(person) => self.engine.halt(person, level),
+            None => self.engine.halt_unnamed(HaltReason::OperatorStop, level),
+        };
+        match (written, operator) {
+            (Err(_), _) => HaltStatus::Unrecorded,
+            (Ok(()), Some(_)) => HaltStatus::Recorded,
+            (Ok(()), None) => HaltStatus::Unnamed,
         }
     }
 

@@ -36,9 +36,11 @@
 //! # A halt is a record
 //!
 //! [`DecisionEngine::halt`] engages the latch and writes one record of the
-//! halt itself ([`RecordStatus::HaltEngaged`]), which names no action. The
-//! latch is engaged in every case; the call reports whether the record was
-//! written. The engine's own halts do the same where they can: a clock fault
+//! halt itself ([`RecordStatus::HaltEngaged`]), which names no action and
+//! names the person who halted. The latch is engaged in every case; the call
+//! reports whether the record was written.
+//! [`DecisionEngine::halt_unnamed`] is the same halt with no person to name.
+//! The engine's own halts do the same where they can: a clock fault
 //! while adjudicating, a chain that fails its re-walk, a record that could
 //! not be written. For the last of these the halt record usually cannot be
 //! written either, and the halt then reaches the chain with the next record
@@ -128,8 +130,9 @@
 //! Every record that decides an action names the maker of the proposal, and
 //! the record of a vote names the panel that cast it. The engine writes the
 //! identities it was given, byte for byte; it neither hashes them nor reads
-//! them. The record of a halt names nobody, because a halt is called without
-//! a person.
+//! them. The record of a halt names the person whose call engaged the halt or
+//! made it stricter ([`DecisionEngine::halt`]). A halt no person called names
+//! nobody: a fault the engine found, or [`DecisionEngine::halt_unnamed`].
 //!
 //! A halt whose record could not be written, and under which nothing was
 //! recorded afterwards, is not in the stored chain. An engine continued from
@@ -198,6 +201,10 @@ pub struct DecisionEngine<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Cl
     /// Whether the engaged latch is the one the continued chain handed over,
     /// with no halt of this engine's own on top of it.
     halt_inherited: bool,
+    /// The person whose halt no record of the chain names yet: the one whose
+    /// call engaged the latch or made it stricter, kept until the record of
+    /// the halt is written.
+    halt_operator: Option<MakerId>,
 }
 
 impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Clock> DecisionEngine<H, S, K, C> {
@@ -222,6 +229,7 @@ impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Clock> DecisionEngine<H
             guard: MonotonicGuard::new(),
             halt_recorded: false,
             halt_inherited: false,
+            halt_operator: None,
         }
     }
 
@@ -255,6 +263,7 @@ impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Clock> DecisionEngine<H
             guard: MonotonicGuard::after(anchor.at()),
             halt_recorded: anchor.killswitch().is_engaged(),
             halt_inherited: anchor.killswitch().is_engaged(),
+            halt_operator: None,
         }
     }
 
@@ -299,7 +308,8 @@ impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Clock> DecisionEngine<H
         self.guard.last()
     }
 
-    /// Engages the halt latch and writes the halt into the audit chain.
+    /// Engages the halt latch as the stop of the person `operator`, and
+    /// writes the halt into the audit chain.
     ///
     /// The latch is engaged in every case, whatever this returns: halting
     /// never itself fails. The time is taken from the engine's own clock,
@@ -307,7 +317,36 @@ impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Clock> DecisionEngine<H
     /// that failed. `level` is the risk level the halt stands at, which its
     /// release is held to; a caller that does not know it gives
     /// [`RiskLevel::HIGHEST`]. An engine that is halted already keeps its
-    /// first time and is never made weaker: see [`Killswitch::engage`].
+    /// first time and its first reason and is never made weaker: see
+    /// [`Killswitch::engage`].
+    ///
+    /// The record of the halt names `operator` when this call engaged the
+    /// latch or made it stricter: the person named is the one whose call the
+    /// halt stands on. A call that changes nothing about the halt writes no
+    /// record, unless the record of an earlier call is still owed, which it
+    /// then writes with the person of that earlier call.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LedgerError`] when the halt record cannot be written. The
+    /// engine is halted all the same. The stored chain does not show the halt
+    /// until a later record is written, and does not name `operator` until
+    /// this engine is halted again: that call writes the record owed.
+    pub fn halt(&mut self, operator: &MakerId, level: RiskLevel) -> Result<(), LedgerError> {
+        let at = self.best_effort_now();
+        let stricter = self.latch(at, HaltReason::OperatorStop, level);
+        if stricter {
+            self.halt_operator = Some(*operator);
+        }
+        self.record_halt()
+    }
+
+    /// Engages the halt latch for `reason` with no person to name, and
+    /// writes the halt into the audit chain: a fault the caller found, or a
+    /// stop whose person the caller cannot name. The record names nobody.
+    ///
+    /// Everything else is as for [`Self::halt`], which is the call for a
+    /// person's stop.
     ///
     /// # Errors
     ///
@@ -315,7 +354,11 @@ impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Clock> DecisionEngine<H
     /// engine is halted all the same, and the stored chain does not show it
     /// until a later record is written: a decision refused under the halt, or
     /// this call repeated.
-    pub fn halt(&mut self, reason: HaltReason, level: RiskLevel) -> Result<(), LedgerError> {
+    pub fn halt_unnamed(
+        &mut self,
+        reason: HaltReason,
+        level: RiskLevel,
+    ) -> Result<(), LedgerError> {
         let at = self.best_effort_now();
         self.latch(at, reason, level);
         self.record_halt()
@@ -388,30 +431,51 @@ impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Clock> DecisionEngine<H
     /// An inherited halt stops being one here, also when the latch was
     /// engaged already and keeps its first reason: a release must not undo a
     /// halt it does not know of. A halt this call made stricter is one the
-    /// chain does not carry yet.
-    fn latch(&mut self, at: UnixSeconds, reason: HaltReason, level: RiskLevel) {
+    /// chain does not carry yet, and one no earlier person stands for.
+    /// Returns whether the call engaged the latch or made it stricter.
+    fn latch(&mut self, at: UnixSeconds, reason: HaltReason, level: RiskLevel) -> bool {
         let before = self.killswitch.state();
         self.halt_inherited = false;
         self.killswitch.engage(at, reason, level);
-        if self.killswitch.state() != before {
+        let stricter = self.killswitch.state() != before;
+        if stricter {
             self.halt_recorded = false;
+            self.halt_operator = None;
         }
+        stricter
     }
 
     /// Writes the record of the halt, unless the chain carries the halt
-    /// already.
+    /// already and no person waits to be named for it.
+    ///
+    /// The record names the person who waits, at the level the halt stands
+    /// at when the record is written.
     fn record_halt(&mut self) -> Result<(), LedgerError> {
-        if self.halt_recorded {
+        if self.halt_recorded && self.halt_operator.is_none() {
             return Ok(());
         }
-        let draft = RecordDraft::of_halt(self.killswitch.state(), self.last_known_time());
-        self.append(&draft).map(|_| ())
+        let state = self.killswitch.state();
+        let at = self.last_known_time();
+        let draft = match (self.halt_operator, state) {
+            (Some(maker), KillswitchState::Engaged { level, .. }) => {
+                let operator = RecordPrincipals {
+                    level,
+                    maker,
+                    checkers: None,
+                };
+                RecordDraft::of_halt_by(state, operator, at)
+            }
+            _ => RecordDraft::of_halt(state, at),
+        };
+        self.append(&draft)?;
+        self.halt_operator = None;
+        Ok(())
     }
 
     /// Engages the latch for a fault the engine found itself and writes the
     /// halt record where that is possible.
     fn halt_on_fault(&mut self, reason: HaltReason, level: RiskLevel) {
-        self.latch(self.last_known_time(), reason, level);
+        let _stricter = self.latch(self.last_known_time(), reason, level);
         // The fault is often the audit path itself, and then this record
         // cannot be written either. The latch is engaged all the same, and
         // the next record that is written carries it.

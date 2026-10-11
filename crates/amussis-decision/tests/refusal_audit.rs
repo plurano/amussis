@@ -81,7 +81,7 @@ fn an_engine_refusal_is_recorded_with_its_reason() -> Fallible<()> {
 #[test]
 fn a_halted_refusal_is_recorded_with_the_halt_reason() -> Fallible<()> {
     let mut engine = engine(600, 4)?;
-    engine.halt(HaltReason::OperatorStop, RiskLevel::LOWEST)?;
+    engine.halt_unnamed(HaltReason::OperatorStop, RiskLevel::LOWEST)?;
     let proposal = intent(
         "intent-halted",
         "maker-alice",

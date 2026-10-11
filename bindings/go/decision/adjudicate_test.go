@@ -261,7 +261,7 @@ func TestAHaltedEngineTakesNoAdjudication(t *testing.T) {
 	inBothModes(t, func(t *testing.T, mode Mode) {
 		w := newWorld()
 		engine := holding(t, w, mode, heldConsequential)
-		if err := engine.Halt(t.Context(), LevelRoutine); err != nil {
+		if err := engine.Halt(t.Context(), operator, LevelRoutine); err != nil {
 			t.Fatalf("Halt: %v", err)
 		}
 		for _, decision := range []Vote{Approve, Reject} {
@@ -413,7 +413,7 @@ func TestAnOperatorHaltIsARecordAtTheLevelItNames(t *testing.T) {
 			w := newWorld()
 			engine := engineFor(t, w, mode)
 			allow(t, engine, 1)
-			if err := engine.Halt(t.Context(), level); err != nil {
+			if err := engine.Halt(t.Context(), operator, level); err != nil {
 				t.Fatalf("Halt at level %d: %v", level, err)
 			}
 			content := head(t, w).Preimage
@@ -439,7 +439,7 @@ func TestAHaltAtNoLevelStandsAtTheHighest(t *testing.T) {
 	inBothModes(t, func(t *testing.T, mode Mode) {
 		for _, level := range []Level{0, 7, math.MaxUint8} {
 			w := newWorld()
-			if err := engineFor(t, w, mode).Halt(t.Context(), level); err != nil {
+			if err := engineFor(t, w, mode).Halt(t.Context(), operator, level); err != nil {
 				t.Fatalf("Halt at %d: %v", level, err)
 			}
 			if stands := head(t, w).Preimage[levelAt]; stands != levelHighest {
@@ -448,8 +448,9 @@ func TestAHaltAtNoLevelStandsAtTheHighest(t *testing.T) {
 		}
 		for _, level := range []uint64{256, 257, 0x0100_0003, math.MaxUint32} {
 			w := newWorld()
-			status, err := call(t.Context(), engineFor(t, w, mode).halt, level)
-			if err != nil || status != haltRecorded {
+			// No person is written: the halt of this call names nobody.
+			status, err := call(t.Context(), engineFor(t, w, mode).halt, level, 0)
+			if err != nil || status != haltUnnamed {
 				t.Fatalf("the module answered a halt at %d with status %d, error %v", level, status, err)
 			}
 			if stands := head(t, w).Preimage[levelAt]; stands != levelHighest {
@@ -470,7 +471,7 @@ func TestAHaltThatCannotBeRecordedIsStillAHalt(t *testing.T) {
 				engine := engineFor(t, w, mode)
 				allow(t, engine, 1)
 				fault.plant(w)
-				if err := engine.Halt(t.Context(), LevelMaterial); !errors.Is(err, ErrHaltUnrecorded) {
+				if err := engine.Halt(t.Context(), operator, LevelMaterial); !errors.Is(err, ErrHaltUnrecorded) {
 					t.Fatalf("a halt that cannot be recorded gave the error %v", err)
 				}
 				outcome := decide(t, engine, routine)
@@ -478,7 +479,7 @@ func TestAHaltThatCannotBeRecordedIsStillAHalt(t *testing.T) {
 					t.Fatalf("an engine halted without a record decided %+v with %d records", outcome, len(w.stored))
 				}
 				fault.mend(w)
-				if err := engine.Halt(t.Context(), LevelMaterial); err != nil {
+				if err := engine.Halt(t.Context(), operator, LevelMaterial); err != nil {
 					t.Fatalf("the halt repeated under a host that delivers: %v", err)
 				}
 				content := head(t, w).Preimage
@@ -504,7 +505,7 @@ func TestASecondHaltNeverLowersTheLevel(t *testing.T) {
 		w := newWorld()
 		engine := engineFor(t, w, mode)
 		for _, step := range steps {
-			if err := engine.Halt(t.Context(), step.asked); err != nil {
+			if err := engine.Halt(t.Context(), operator, step.asked); err != nil {
 				t.Fatalf("Halt at %d: %v", step.asked, err)
 			}
 			if stands := head(t, w).Preimage[levelAt]; stands != step.stands || len(w.stored) != step.records {
@@ -521,7 +522,7 @@ func TestAnOperatorHaltIsReleasedWithTheApprovalOfItsLevel(t *testing.T) {
 	inBothModes(t, func(t *testing.T, mode Mode) {
 		w := newWorld()
 		engine := engineFor(t, w, mode)
-		if err := engine.Halt(t.Context(), LevelConsequential); err != nil {
+		if err := engine.Halt(t.Context(), operator, LevelConsequential); err != nil {
 			t.Fatalf("Halt: %v", err)
 		}
 		if err := engine.Close(t.Context()); err != nil {
@@ -532,7 +533,7 @@ func TestAnOperatorHaltIsReleasedWithTheApprovalOfItsLevel(t *testing.T) {
 	})
 	inBothModes(t, func(t *testing.T, mode Mode) {
 		w := newWorld()
-		if err := engineFor(t, w, mode).Halt(t.Context(), LevelConsequential); err != nil {
+		if err := engineFor(t, w, mode).Halt(t.Context(), operator, LevelConsequential); err != nil {
 			t.Fatalf("Halt: %v", err)
 		}
 		released := continued(t, w, mode, Continuation{Head: head(t, w), Release: by("olga", "petra")})
@@ -550,7 +551,7 @@ func TestAnAdjudicationAndAHaltRunPastAFullWindow(t *testing.T) {
 	allow(t, engine, window-1)
 	want(t, adjudicate(t, engine, vote(Approve, "carol")), Outcome{Class: Allowed})
 	allow(t, engine, window-1)
-	if err := engine.Halt(t.Context(), LevelRoutine); err != nil {
+	if err := engine.Halt(t.Context(), operator, LevelRoutine); err != nil {
 		t.Fatalf("Halt: %v", err)
 	}
 	wantChain(t, w, 2*window+1)
@@ -570,7 +571,7 @@ func TestAClosedEngineTakesNoAdjudicationAndNoHalt(t *testing.T) {
 			t.Fatalf("a closed engine gave %+v and the error %v", outcome, err)
 		}
 	}
-	if err := engine.Halt(t.Context(), LevelRoutine); !errors.Is(err, errClosed) {
+	if err := engine.Halt(t.Context(), operator, LevelRoutine); !errors.Is(err, errClosed) {
 		t.Fatalf("a closed engine halted with the error %v", err)
 	}
 	if w.offered != 1 {
@@ -605,18 +606,19 @@ func TestAnAdjudicationAnswerTheModuleDoesNotWriteBlocksAndPoisons(t *testing.T)
 
 // A halt the module answers with a status the loader does not know is no
 // halt the loader can rely on: the engine blocks from then on. The one
-// status that says the halt stands unrecorded is ErrHaltUnrecorded and
-// leaves the engine to the module.
+// status that says the halt stands unrecorded is ErrHaltUnrecorded, the one
+// that says it names nobody is ErrHaltUnnamed, and both leave the engine to
+// the module.
 func TestAHaltTheModuleDoesNotConfirmPoisonsTheEngine(t *testing.T) {
 	inBothModes(t, func(t *testing.T, mode Mode) {
-		for _, status := range []int64{1, 2, 4, 0xff, -1} {
+		for _, status := range []int64{1, 2, 5, 0xff, -1} {
 			s := realSurface()
 			s.export(exportHalt).value = status
 			engine, err := loadShape(t, s, mode)
 			if err != nil {
 				t.Fatalf("load: %v", err)
 			}
-			if err := engine.Halt(t.Context(), LevelRoutine); err == nil || errors.Is(err, ErrHaltUnrecorded) {
+			if err := engine.Halt(t.Context(), operator, LevelRoutine); err == nil || errors.Is(err, ErrHaltUnrecorded) || errors.Is(err, ErrHaltUnnamed) {
 				t.Fatalf("halt status %d gave the error %v", status, err)
 			}
 			outcome, err := engine.Decide(t.Context(), []byte(routine))
@@ -624,14 +626,16 @@ func TestAHaltTheModuleDoesNotConfirmPoisonsTheEngine(t *testing.T) {
 				t.Fatalf("after halt status %d the engine decided %+v, error %v", status, outcome, err)
 			}
 		}
-		s := realSurface()
-		s.export(exportHalt).value = haltUnrecorded
-		engine, err := loadShape(t, s, mode)
-		if err != nil {
-			t.Fatalf("load: %v", err)
-		}
-		if err := engine.Halt(t.Context(), LevelRoutine); !errors.Is(err, ErrHaltUnrecorded) || engine.fault != nil {
-			t.Fatalf("halt status 3 gave the error %v and the fault %v", err, engine.fault)
+		for status, want := range map[int64]error{haltUnrecorded: ErrHaltUnrecorded, haltUnnamed: ErrHaltUnnamed} {
+			s := realSurface()
+			s.export(exportHalt).value = status
+			engine, err := loadShape(t, s, mode)
+			if err != nil {
+				t.Fatalf("load: %v", err)
+			}
+			if err := engine.Halt(t.Context(), operator, LevelRoutine); !errors.Is(err, want) || engine.fault != nil {
+				t.Fatalf("halt status %d gave the error %v and the fault %v", status, err, engine.fault)
+			}
 		}
 	})
 }

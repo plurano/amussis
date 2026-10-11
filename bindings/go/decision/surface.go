@@ -12,7 +12,7 @@ import (
 )
 
 // abiVersion is the interface version this loader speaks.
-const abiVersion = 5
+const abiVersion = 6
 
 const (
 	exportMemory        = "memory"
@@ -45,7 +45,7 @@ func moduleExports() map[string]signature {
 		exportContinue:      {[]api.ValueType{i32, i32, i32, i32}, []api.ValueType{i32}},
 		exportDecide:        {[]api.ValueType{i32}, []api.ValueType{i32}},
 		exportAdjudicate:    {[]api.ValueType{i32}, []api.ValueType{i32}},
-		exportHalt:          {[]api.ValueType{i32}, []api.ValueType{i32}},
+		exportHalt:          {[]api.ValueType{i32, i32}, []api.ValueType{i32}},
 	}
 }
 

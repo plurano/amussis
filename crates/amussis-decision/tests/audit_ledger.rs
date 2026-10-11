@@ -344,7 +344,7 @@ fn md5_is_absent_from_the_crate() -> Fallible<()> {
 #[test]
 fn the_observed_killswitch_state_is_recorded() -> Fallible<()> {
     let mut engine = engine(60, 8)?;
-    engine.halt(HaltReason::OperatorStop, RiskLevel::LOWEST)?;
+    engine.halt_unnamed(HaltReason::OperatorStop, RiskLevel::LOWEST)?;
     let routine = intent(
         "intent-recorded-halt",
         "maker-alice",

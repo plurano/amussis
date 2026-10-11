@@ -16,7 +16,7 @@
 use core::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Mutex;
 
-use amussis_decision::{DIGEST_LEN, MAX_PROPOSAL_BYTES, MAX_SIGNATURE_BYTES};
+use amussis_decision::{DIGEST_LEN, MAX_IDENTITY_LEN, MAX_PROPOSAL_BYTES, MAX_SIGNATURE_BYTES};
 
 use crate::binding::{Binding, Continuation, HaltStatus, InitError, OutcomeCode, Refusal};
 use crate::host::{HostClock, HostSigner, HostSink};
@@ -228,23 +228,37 @@ pub extern "C" fn amussis_adjudicate(len: u32) -> u32 {
     call(len, Binding::adjudicate).to_u32()
 }
 
-/// Halts the engine as an operator stop at the risk level `level` is the tag
-/// of; every other value halts at the highest level. Returns zero, or a
+/// Halts the engine as the stop of a person, at the risk level `level` is the
+/// tag of; every other value halts at the highest level. The identity of the
+/// person is the first `by_len` bytes of the input buffer. Returns zero, or a
 /// [`HaltStatus`] number.
 // SAFETY: as for `amussis_abi_version`.
 #[unsafe(no_mangle)]
-pub extern "C" fn amussis_halt(level: u32) -> u32 {
-    halt(level) as u32
+pub extern "C" fn amussis_halt(level: u32, by_len: u32) -> u32 {
+    halt(level, by_len) as u32
 }
 
-fn halt(level: u32) -> HaltStatus {
+fn halt(level: u32, by_len: u32) -> HaltStatus {
     let Ok(mut guard) = BINDING.try_lock() else {
         return HaltStatus::Busy;
     };
-    match guard.as_mut() {
-        Some(binding) => binding.halt(level),
-        None => HaltStatus::NotInitialised,
-    }
+    let Some(binding) = guard.as_mut() else {
+        return HaltStatus::NotInitialised;
+    };
+    let mut person = [0u8; MAX_IDENTITY_LEN];
+    // A length no identity has names nobody; the engine is halted all the
+    // same.
+    let by = match usize::try_from(by_len)
+        .ok()
+        .and_then(|len| person.get_mut(..len))
+    {
+        Some(bytes) => {
+            load(&INPUT, bytes);
+            &*bytes
+        }
+        None => &[],
+    };
+    binding.halt(level, by)
 }
 
 /// One call of the engine over the bytes of the input buffer.

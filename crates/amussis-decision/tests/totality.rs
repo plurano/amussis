@@ -44,7 +44,7 @@ fn decide_is_total_over_tier_class_and_halt_state() -> Fallible<()> {
 fn exercise(tier: RiskTier, class: OversightClass, halted: bool) -> Fallible<()> {
     let mut engine = engine(60, 8)?;
     if halted {
-        engine.halt(HaltReason::OperatorStop, RiskLevel::LOWEST)?;
+        engine.halt_unnamed(HaltReason::OperatorStop, RiskLevel::LOWEST)?;
     }
     let proposal = intent(
         "intent-total",

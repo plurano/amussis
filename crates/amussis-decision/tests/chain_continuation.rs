@@ -326,7 +326,7 @@ fn the_anchor_names_the_head_record() -> Fallible<()> {
 #[test]
 fn the_anchor_of_stored_bytes_is_the_anchor_of_the_record() -> Fallible<()> {
     let mut engine = fresh(WINDOW)?;
-    engine.halt(HaltReason::OperatorStop, RiskLevel::LOWEST)?;
+    engine.halt_unnamed(HaltReason::OperatorStop, RiskLevel::LOWEST)?;
     let _refused = engine.decide(&routine("intent-halted")?);
     let record = stored_head(&engine)?;
     let preimage = record.body().canonical_preimage()?;
@@ -355,7 +355,7 @@ fn the_anchor_of_stored_bytes_is_the_anchor_of_the_record() -> Fallible<()> {
 fn a_chain_that_ends_halted_continues_halted_until_released() -> Fallible<()> {
     let mut first = fresh(WINDOW)?;
     allow(&mut first, "first", 1)?;
-    first.halt(HaltReason::OperatorStop, RiskLevel::LOWEST)?;
+    first.halt_unnamed(HaltReason::OperatorStop, RiskLevel::LOWEST)?;
     let refused = first.decide(&routine("intent-stopped")?);
     let halted = BlockReason::KillswitchEngaged(HaltReason::OperatorStop);
     assert_eq!(refused.block_reason(), Some(halted));
@@ -573,7 +573,7 @@ fn stored_bytes_that_are_not_a_canonical_pre_image_are_refused() -> Fallible<()>
 #[test]
 fn an_unknown_halt_reason_and_a_failed_hash_are_refused() -> Fallible<()> {
     let mut engine = fresh(WINDOW)?;
-    engine.halt(HaltReason::ClockUnavailable, RiskLevel::LOWEST)?;
+    engine.halt_unnamed(HaltReason::ClockUnavailable, RiskLevel::LOWEST)?;
     let _refused = engine.decide(&routine("intent-halted")?);
     let record = stored_head(&engine)?;
     let canonical = record.body().canonical_preimage()?;
@@ -625,7 +625,7 @@ fn a_compromised_chain_is_not_released() -> Fallible<()> {
         Err(ReleaseError::NotHalted)
     );
 
-    engine.halt(HaltReason::LedgerCompromised, RiskLevel::LOWEST)?;
+    engine.halt_unnamed(HaltReason::LedgerCompromised, RiskLevel::LOWEST)?;
     let _refused = engine.decide(&routine("intent-compromised")?);
     let anchor = anchor_of(&engine)?;
 

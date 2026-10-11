@@ -54,6 +54,9 @@ const ANNEX_III: (&str, &str) = (
     r#""oversight":"annex-iii-biometric""#,
 );
 
+/// The person who halts in these tests.
+const OPERATOR: &[u8] = b"operator-olga";
+
 const ROUTINE: &str = concat!(
     r#"{"schema":"amussis.decision.proposal.v1","id":"intent-0001","agent":"agent-01","#,
     r#""maker":"maker-alice","action":"file-modification","target":"/srv/data/report.txt","#,
@@ -284,7 +287,7 @@ fn each_tier_yields_its_class() -> Fallible<()> {
 /// Positive: the constants a host is written against.
 #[test]
 fn the_interface_names_are_fixed() {
-    assert_eq!(ABI_VERSION, 5);
+    assert_eq!(ABI_VERSION, 6);
     assert_eq!(HOST_MODULE, "amussis_host_v1");
     assert_eq!(SINK_STORED, 0);
     assert_eq!(HOST_UNAVAILABLE, -1);
@@ -1417,7 +1420,7 @@ fn a_held_action_is_decided_only_inside_its_approval_window() -> Fallible<()> {
 fn a_halted_engine_takes_no_adjudication() -> Fallible<()> {
     let world = world();
     let mut binding = holding(&world, TIER_A)?;
-    assert_eq!(binding.halt(1), HaltStatus::Recorded);
+    assert_eq!(binding.halt(1, OPERATOR), HaltStatus::Recorded);
     for vote in [VOTE_APPROVE, VOTE_REJECT] {
         let code = binding.adjudicate(&adjudication(vote, HELD, &["carol"])?);
         assert_eq!(
@@ -1539,7 +1542,7 @@ fn an_operator_halt_is_a_record_at_the_level_it_names() -> Fallible<()> {
         let world = world();
         let mut binding = binding(&world)?;
         allow(&mut binding, 1)?;
-        assert_eq!(binding.halt(u32::from(tag)), HaltStatus::Recorded);
+        assert_eq!(binding.halt(u32::from(tag), OPERATOR), HaltStatus::Recorded);
         assert_eq!(
             stored_byte(&world, STATUS_AT)?,
             RecordStatus::HaltEngaged.tag()
@@ -1558,6 +1561,105 @@ fn an_operator_halt_is_a_record_at_the_level_it_names() -> Fallible<()> {
     Ok(())
 }
 
+/// The bytes the content of a record that names `person` alone at the level
+/// `tag` ends on; with no person, the bytes of a record that names nobody.
+fn named_alone(tag: u8, person: &[u8]) -> Fallible<Vec<u8>> {
+    let len = u32::try_from(person.len()).map_err(|error| error.to_string())?;
+    let mut tail = vec![if person.is_empty() { 0 } else { tag }];
+    tail.extend_from_slice(&len.to_be_bytes());
+    tail.extend_from_slice(person);
+    tail.extend_from_slice(&[0; 8]);
+    Ok(tail)
+}
+
+/// Whether the content of the last stored record ends on `tail`.
+fn stored_ends_on(world: &World, tail: &[u8]) -> Fallible<bool> {
+    let head = last_stored(world)?;
+    Ok(parse(&head)?.preimage.ends_with(tail))
+}
+
+/// Positive: the record of an operator halt names the person the host
+/// passed in, byte for byte, at the level the halt stands at: a short
+/// identity, and one of the 64 bytes a keyed hash in hexadecimal has.
+#[test]
+fn an_operator_halt_names_the_person_who_halted() -> Fallible<()> {
+    let longest = [b'a'; MAX_IDENTITY_LEN];
+    for person in [OPERATOR, &longest[..1], &longest[..]] {
+        let world = world();
+        let mut binding = binding(&world)?;
+        allow(&mut binding, 1)?;
+        assert_eq!(binding.halt(2, person), HaltStatus::Recorded);
+        assert_eq!(
+            stored_byte(&world, STATUS_AT)?,
+            RecordStatus::HaltEngaged.tag()
+        );
+        assert!(stored_ends_on(&world, &named_alone(2, person)?)?);
+        assert_eq!(walk_store(&world), Ok(2));
+    }
+    Ok(())
+}
+
+/// Boundary: a second person who halts an engine already halted at that
+/// level changes nothing and is in no record; the person who makes the halt
+/// stricter is named in the record of the stricter halt.
+#[test]
+fn a_later_halt_names_only_the_person_who_made_it_stricter() -> Fallible<()> {
+    let world = world();
+    let mut binding = binding(&world)?;
+    assert_eq!(binding.halt(2, OPERATOR), HaltStatus::Recorded);
+    assert_eq!(binding.halt(2, b"petra"), HaltStatus::Recorded);
+    assert_eq!(walk_store(&world), Ok(1), "a halt that changes nothing");
+    assert!(stored_ends_on(&world, &named_alone(2, OPERATOR)?)?);
+    assert_eq!(binding.halt(5, b"petra"), HaltStatus::Recorded);
+    assert!(stored_ends_on(&world, &named_alone(5, b"petra")?)?);
+    assert_eq!(walk_store(&world), Ok(2));
+    Ok(())
+}
+
+/// Planted: bytes that are no identity where the person who halts stands:
+/// none, one byte too many, a byte outside the alphabet, and bytes that are
+/// no text. The halt is not refused for them. The engine is halted, the
+/// record names nobody, and the answer says so.
+#[test]
+fn an_operator_halt_by_no_identity_halts_and_names_nobody() -> Fallible<()> {
+    let too_long = [b'a'; MAX_IDENTITY_LEN + 1];
+    let planted: [&[u8]; 4] = [b"", &too_long, b"olga smith", &[0xff, 0xfe]];
+    for person in planted {
+        let world = world();
+        let mut binding = binding(&world)?;
+        assert_eq!(binding.halt(2, person), HaltStatus::Unnamed, "{person:?}");
+        assert_eq!(
+            stored_byte(&world, STATUS_AT)?,
+            RecordStatus::HaltEngaged.tag()
+        );
+        assert_eq!(stored_level(&world)?, 2);
+        assert!(stored_ends_on(&world, &named_alone(2, b"")?)?, "{person:?}");
+        let code = binding.decide(ROUTINE.as_bytes());
+        assert_eq!(
+            parts(code),
+            block(BlockReason::KillswitchEngaged(HaltReason::OperatorStop))
+        );
+        assert_eq!(walk_store(&world), Ok(2));
+    }
+    Ok(())
+}
+
+/// Planted: a halt by no identity under a host that cannot record it. The
+/// answer is the one that matters more to the host: the stored chain does
+/// not show the halt.
+#[test]
+fn an_unnamed_halt_that_cannot_be_recorded_answers_unrecorded() -> Fallible<()> {
+    for (name, plant, _mend) in RECORD_FAULTS {
+        let world = world();
+        let mut binding = binding(&world)?;
+        plant(&world);
+        assert_eq!(binding.halt(2, b""), HaltStatus::Unrecorded, "{name}");
+        assert_ne!(binding.engine().killswitch(), KillswitchState::Armed);
+        assert!(world.stored.borrow().is_empty(), "{name}");
+    }
+    Ok(())
+}
+
 /// Planted: a level value that is the tag of no level. The halt is not
 /// refused for it and stands at the highest level, also where the low byte
 /// of the value is the tag of a lower one.
@@ -1567,7 +1669,11 @@ fn an_operator_halt_at_no_level_stands_at_the_highest() -> Fallible<()> {
     for level in [0, 7, 255, 256, 257, 0x0100_0003, u32::MAX] {
         let world = world();
         let mut binding = binding(&world)?;
-        assert_eq!(binding.halt(level), HaltStatus::Recorded, "level {level}");
+        assert_eq!(
+            binding.halt(level, OPERATOR),
+            HaltStatus::Recorded,
+            "level {level}"
+        );
         assert_eq!(
             stored_level(&world)?,
             RiskLevel::HIGHEST.tag(),
@@ -1586,7 +1692,7 @@ fn halted_unrecorded(fault: Fault) -> Fallible<(Rc<World>, TestBinding)> {
     let mut binding = binding(&world)?;
     allow(&mut binding, 1)?;
     plant(&world);
-    assert_eq!(binding.halt(2), HaltStatus::Unrecorded, "{name}");
+    assert_eq!(binding.halt(2, OPERATOR), HaltStatus::Unrecorded, "{name}");
     assert_ne!(binding.engine().killswitch(), KillswitchState::Armed);
     let code = binding.decide(ROUTINE.as_bytes());
     assert_eq!(
@@ -1608,7 +1714,12 @@ fn a_halt_that_cannot_be_recorded_is_still_a_halt() -> Fallible<()> {
     let stopped = block(BlockReason::KillswitchEngaged(HaltReason::OperatorStop));
     for fault in RECORD_FAULTS {
         let (world, mut binding) = halted_unrecorded(fault)?;
-        assert_eq!(binding.halt(2), HaltStatus::Recorded, "{}", fault.0);
+        assert_eq!(
+            binding.halt(2, OPERATOR),
+            HaltStatus::Recorded,
+            "{}",
+            fault.0
+        );
         assert_eq!(stored_byte(&world, LATCH_AT)?, 1, "{}", fault.0);
         assert_eq!(stored_level(&world)?, 2, "{}", fault.0);
         assert_eq!(parts(binding.decide(ROUTINE.as_bytes())), stopped);
@@ -1632,7 +1743,7 @@ fn a_second_halt_never_lowers_the_level() -> Fallible<()> {
         (0, 6, 3),
     ];
     for (asked, stands, records) in steps {
-        assert_eq!(binding.halt(asked), HaltStatus::Recorded);
+        assert_eq!(binding.halt(asked, OPERATOR), HaltStatus::Recorded);
         assert_eq!(stored_level(&world)?, stands, "asked {asked}");
         assert_eq!(world.stored.borrow().len(), records, "asked {asked}");
     }
@@ -1646,7 +1757,7 @@ fn a_second_halt_never_lowers_the_level() -> Fallible<()> {
 fn an_operator_halt_is_released_with_the_approval_of_its_level() -> Fallible<()> {
     let world = world();
     let mut halted = binding(&world)?;
-    assert_eq!(halted.halt(3), HaltStatus::Recorded);
+    assert_eq!(halted.halt(3, OPERATOR), HaltStatus::Recorded);
     drop(halted);
     let refused = released(&world, &["olga"])?;
     assert_eq!(refused.err(), Some(InitError::Approval));
@@ -1673,7 +1784,7 @@ fn an_adjudication_and_a_halt_run_past_a_full_window() -> Fallible<()> {
     assert_eq!(binding.engine().ledger().len(), 1);
     allow(&mut binding, rest)?;
     assert_eq!(binding.engine().audit_room(), 0);
-    assert_eq!(binding.halt(1), HaltStatus::Recorded);
+    assert_eq!(binding.halt(1, OPERATOR), HaltStatus::Recorded);
     assert_eq!(binding.engine().ledger().len(), 1);
     let stored = MAX_LEDGER_RECORDS.saturating_mul(2).saturating_add(1);
     let stored = u64::try_from(stored).map_err(|error| error.to_string())?;
@@ -1705,6 +1816,7 @@ fn the_numbers_of_an_adjudication_and_of_a_halt_are_fixed() {
         HaltStatus::NotInitialised,
         HaltStatus::Busy,
         HaltStatus::Unrecorded,
+        HaltStatus::Unnamed,
     ];
-    assert_eq!(statuses.map(|status| status as u32), [0, 1, 2, 3]);
+    assert_eq!(statuses.map(|status| status as u32), [0, 1, 2, 3, 4]);
 }

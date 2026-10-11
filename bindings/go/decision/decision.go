@@ -32,16 +32,18 @@
 // caller's decision; the record of the vote names the maker of the proposal
 // and the checkers who cast it.
 //
-// The maker of a proposal, the checkers of a Vote and the persons of a
-// Release are identities of at most 64 bytes. The engine writes them into
+// The maker of a proposal, the checkers of a Vote, the persons of a Release
+// and the person who calls Halt are identities of at most 64 bytes. The
+// engine writes them into
 // the records the Sink stores as it received them and compares them as
 // bytes; it does not hash them. Pass a keyed hash of the identifier your
 // system knows a person by, never a name: what is passed in is what the
-// Sink keeps. The record of a halt names nobody.
+// Sink keeps. The record of a halt the engine engaged itself, on a fault,
+// names nobody.
 //
-// Halt stops a running engine as an operator stop at a risk level. No call
-// lifts that halt on the engine it was set on: the chain is continued with a
-// Release.
+// Halt stops a running engine as the stop of a person at a risk level, and
+// the record of the halt names that person. No call lifts that halt on the
+// engine it was set on: the chain is continued with a Release.
 package decision
 
 import (
@@ -221,10 +223,17 @@ const (
 // engine writes its next record. Test for it with errors.Is.
 var ErrHaltUnrecorded = errors.New("decision: the engine is halted and the halt could not be recorded")
 
+// ErrHaltUnnamed: the engine is halted and the halt is a record of the chain,
+// and the call named nobody for it, because the person handed to Halt is no
+// identity: empty, longer than MaxPersonBytes, or outside the engine's
+// identity alphabet. Test for it with errors.Is.
+var ErrHaltUnnamed = errors.New("decision: the engine is halted and the person who halted is no identity")
+
 // The halt statuses of the module's interface.
 const (
 	haltRecorded   = 0
 	haltUnrecorded = 3
+	haltUnnamed    = 4
 )
 
 // encodeAdjudication writes an Adjudication as the module reads it: the vote,
@@ -579,32 +588,49 @@ func (e *Engine) ask(ctx context.Context, function api.Function, input []byte, r
 	return outcome, nil
 }
 
-// Halt halts the engine as an operator stop at the risk level the caller
-// names; a Level that is none of the six halts at the highest. Every decision
-// is Blocked from then on and no adjudication is taken. A halt that stands
-// already is never made weaker: it keeps its reason, and takes the stricter
-// of the two levels.
+// Halt halts the engine as the stop of the person by, at the risk level the
+// caller names; a Level that is none of the six halts at the highest. Every
+// decision is Blocked from then on and no adjudication is taken. A halt that
+// stands already is never made weaker: it keeps its reason, and takes the
+// stricter of the two levels.
+//
+// by is the identity of the person who halts, 1 to MaxPersonBytes bytes of
+// the engine's identity alphabet: a keyed hash, as for every person. The
+// record of the halt names that person at the level the halt stands at,
+// where the call engaged the halt or made it stricter. A call that changes
+// nothing about a halt writes no record.
 //
 // The engine permits nothing after Halt, whatever Halt returns. Nil says the
 // halt is a record of the chain. ErrHaltUnrecorded says the engine is halted
-// and the record could not be signed or stored. Every other error says the
-// module could not be run or gave an answer the loader cannot read: the
-// engine then answers Blocked with BlockLoaderFault from then on.
+// and the record could not be signed or stored. ErrHaltUnnamed says the
+// engine is halted and by is no identity: a halt is not refused for the
+// person it is called with, and its record then names nobody. Every other
+// error says the module could not be run or gave an answer the loader cannot
+// read: the engine then answers Blocked with BlockLoaderFault from then on.
 //
 // No call lifts the halt on this Engine. The program continues the stored
 // chain with Continue and a Release.
-func (e *Engine) Halt(ctx context.Context, level Level) error {
+func (e *Engine) Halt(ctx context.Context, by string, level Level) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.fault != nil {
 		return e.fault
 	}
-	status, err := call(ctx, e.halt, uint64(level))
+	// A person longer than an identity is not written; the module is told
+	// the true length and halts naming nobody.
+	length := min(uint64(len(by)), math.MaxUint32)
+	if length <= MaxPersonBytes && !e.memory.Write(e.inputAt, []byte(by)) {
+		_, err := e.poison(errors.New("decision: the person who halts cannot be written to the module"))
+		return err
+	}
+	status, err := call(ctx, e.halt, uint64(level), length)
 	switch {
 	case err != nil:
 		_, err = e.poison(err)
 	case status == haltUnrecorded:
 		err = ErrHaltUnrecorded
+	case status == haltUnnamed:
+		err = ErrHaltUnnamed
 	case status != haltRecorded:
 		_, err = e.poison(fmt.Errorf("decision: the module answered the halt with status %d", status))
 	}

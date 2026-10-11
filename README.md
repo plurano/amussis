@@ -208,12 +208,20 @@ the vote into the chain. Only an approval permits:
 is the level its release is held to:
 
 ```go
-err := engine.Halt(ctx, decision.LevelConsequential)
+err := engine.Halt(ctx, operatorHash, decision.LevelConsequential)
 ```
+
+The second argument is the person who halts, as the keyed hash the host knows
+that person by. The record of the halt names that person where the call engaged
+the halt or made it stricter; a call that changes nothing about a halt writes
+no record (`TestTheRecordOfAHaltNamesThePersonWhoHalted`).
 
 The engine permits nothing after `Halt`, whatever it returns. `nil` says the
 halt is a record of the chain; `decision.ErrHaltUnrecorded` says the engine is
-halted and the record could not be signed or stored. A `Level` that is none of
+halted and the record could not be signed or stored. `decision.ErrHaltUnnamed`
+says the engine is halted and the person is no identity: a halt is not refused
+for the person it is called with, and its record then names nobody
+(`TestAHaltByNoIdentityHaltsAndNamesNobody`). A `Level` that is none of
 the six, the zero value included, halts at the highest level, and a second
 halt never lowers the level a halt stands at
 (`TestAHaltAtNoLevelStandsAtTheHighest`, `TestASecondHaltNeverLowersTheLevel`).
@@ -240,9 +248,10 @@ Limits as of this state:
   in the store, which a walk over the store shows
   (`TestAContinuationFromAnotherRecordThanTheHeadShowsInTheStore`); the module
   does not prevent it.
-- The record of a halt names nobody: `Halt` takes no person
-  (`TestTheRecordOfAHaltNamesNobody`). A host that has to show who stopped the
-  engine keeps that itself. Every other record names its persons, see
+- The record of a halt names the person whose call engaged it or made it
+  stricter, and nobody else. A person who calls `Halt` on an engine that is
+  halted already at that level or a stricter one is in no record; a host that
+  has to show every such call keeps that itself. See
   [Identities in the audit chain](#identities-in-the-audit-chain).
 - A chain written before interface version 5 is not continued: its records
   carry no identities, and a head record in that layout is refused
@@ -262,15 +271,16 @@ byte. After a change to the engine or the export crate, run
 
 A record that is about a person names that person, and the store keeps those
 bytes for as long as it keeps the chain. What a host passes in as the maker of
-a proposal, as a checker or as the releaser of a halt is therefore what its
-audit log holds. Pass a keyed hash, never a name.
+a proposal, as a checker or as the person who halts or releases a halt is
+therefore what its audit log holds. Pass a keyed hash, never a name.
 
 | Record | Names | Shown by |
 | :--- | :--- | :--- |
 | A decision: passed, blocked or held | the maker of the proposal | `TestTheRecordOfADecisionNamesTheMaker` |
 | A vote: approved or rejected | the maker and the checkers who cast it | `TestTheRecordOfAVoteNamesTheCheckers` |
 | The release of a halt | the releaser and the checkers who approved | `TestTheRecordOfAReleaseNamesTheReleaserAndTheApprovers` |
-| A halt | nobody | `TestTheRecordOfAHaltNamesNobody` |
+| A halt a person called with `Halt` | that person, at the level the halt stands at | `TestTheRecordOfAHaltNamesThePersonWhoHalted` |
+| A halt the engine engaged itself on a fault, and a halt by no identity | nobody | `TestAHaltByNoIdentityHaltsAndNamesNobody` |
 
 The library does not hash and does not read an identity. It takes 1 to 64
 bytes of letters, digits and `. - _ : @ /`, writes them into the record as

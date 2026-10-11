@@ -13,8 +13,8 @@ mod common;
 use amussis_decision::ledger::jsonl::{self, LedgerLine, RenderError};
 use amussis_decision::{
     ActionType, AgentId, AuditLedger, BlockReason, DecisionError, HaltReason, HashAlgorithm,
-    InMemorySink, IntentId, KillswitchState, RecordDraft, RecordStatus, RecordSubject, RiskLevel,
-    Sha256Hasher, SignerBinding, UnixSeconds,
+    InMemorySink, IntentId, KillswitchState, RecordDraft, RecordPrincipals, RecordStatus,
+    RecordSubject, RiskLevel, Sha256Hasher, SignerBinding, UnixSeconds,
 };
 
 use common::{FIXTURE_AUDIT_BOUND, Fallible, FixtureError, FixtureSigner, io_deadline, named_for};
@@ -111,34 +111,44 @@ fn a_record_projects_onto_the_line_it_renders_as() -> Fallible<()> {
 
 /// Positive, fourth half: the two records of the halt latch render without an
 /// intent and an agent, which they do not have, and parse back unchanged. The
-/// halt names nobody; the release names the person who released it.
+/// halt no person engaged names nobody; the halt of a person names that
+/// person at the level it stands at; the release names the person who
+/// released it.
 #[test]
 fn a_record_of_the_halt_latch_renders_without_an_action() -> Fallible<()> {
     let at = UnixSeconds::new(100);
     let released = named_for(RecordStatus::HaltReleased)?.ok_or(FixtureError::NoRecord)?;
+    let operator = RecordPrincipals {
+        level: HALTED.level().ok_or(FixtureError::NoRecord)?,
+        ..released
+    };
+    let halt = (RecordStatus::HaltEngaged, "halt-engaged");
+    let release = (RecordStatus::HaltReleased, "halt-released");
     let cases = [
+        (RecordDraft::of_halt(HALTED, at), halt, None),
         (
-            RecordDraft::of_halt(HALTED, at),
-            "halt-engaged",
-            RecordStatus::HaltEngaged,
-            true,
+            RecordDraft::of_halt_by(HALTED, operator, at),
+            halt,
+            Some(operator),
         ),
         (
             RecordDraft::of_release(released, at),
-            "halt-released",
-            RecordStatus::HaltReleased,
-            false,
+            release,
+            Some(released),
         ),
     ];
-    for (draft, spelling, status, engaged) in cases {
+    for (draft, (status, spelling), named) in cases {
         let parsed = latch_line(&draft, spelling)?;
         assert_eq!(parsed.status, status);
         assert_eq!(parsed.intent_id, None);
         assert_eq!(parsed.agent, None);
-        assert_eq!(parsed.killswitch_engaged, engaged);
+        assert_eq!(
+            parsed.killswitch_engaged,
+            status == RecordStatus::HaltEngaged
+        );
         assert_eq!(parsed.block_reason, None);
-        assert_eq!(parsed.maker.is_some(), !engaged);
-        assert_eq!(parsed.level.is_some(), !engaged);
+        assert_eq!(parsed.maker.as_deref(), named.map(|_| "maker-01"));
+        assert_eq!(parsed.level, named.map(|who| who.level.tag()));
         assert!(parsed.checkers.is_empty());
     }
     Ok(())

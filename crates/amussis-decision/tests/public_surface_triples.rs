@@ -378,7 +378,7 @@ fn every_outcome_variant_is_matched_by_shape() -> Fallible<()> {
         "a Tier A action must be held on a single-checker ticket, found {outcome:?}"
     );
 
-    unit.halt(HaltReason::OperatorStop, RiskLevel::LOWEST)?;
+    unit.halt_unnamed(HaltReason::OperatorStop, RiskLevel::LOWEST)?;
     let after = intent(
         "intent-shape-block",
         "maker-alice",
@@ -530,7 +530,7 @@ fn a_halted_unit_accepts_no_human_decision() -> Fallible<()> {
         .decide(&proposal)
         .ticket()
         .ok_or(FixtureError::NoTicket)?;
-    unit.halt(HaltReason::OperatorStop, RiskLevel::LOWEST)?;
+    unit.halt_unnamed(HaltReason::OperatorStop, RiskLevel::LOWEST)?;
 
     let panel = CheckerSet::single(CheckerId::parse("checker-bo")?);
     assert_eq!(

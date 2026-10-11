@@ -4,8 +4,9 @@
 //! Who the records of the chain name.
 //!
 //! A record that decides an action names the maker of the proposal, the
-//! record of a vote names the checkers who cast it, and the record of a
-//! release names the releasing person and the checkers who approved. Each
+//! record of a vote names the checkers who cast it, the record of a release
+//! names the releasing person and the checkers who approved, and the record
+//! of a halt names the person who halted. Each
 //! states the risk level the approval rule was asked at, so the record alone
 //! is held to that rule. The identities are the bytes the caller passed in.
 //!
@@ -204,7 +205,7 @@ fn action(id: &str, level: RiskLevel) -> Fallible<ActionIntent> {
 /// An engine that continues a chain an operator halted at `level`.
 fn carried(level: RiskLevel) -> Fallible<TestEngine> {
     let mut halted = engine(600, 4)?;
-    halted.halt(HaltReason::OperatorStop, level)?;
+    halted.halt_unnamed(HaltReason::OperatorStop, level)?;
     let anchor = anchor_of(&halted)?;
     Ok(DecisionEngine::continue_from(
         config(600, 4)?,
@@ -244,7 +245,7 @@ fn a_decision_record_names_the_maker_of_the_proposal() -> Fallible<()> {
         assert_names(&draft, &named(level, MAKER, None)?, "decided")?;
     }
 
-    deciding.halt(HaltReason::OperatorStop, SINGLE)?;
+    deciding.halt_unnamed(HaltReason::OperatorStop, SINGLE)?;
     let refused = deciding.decide(&action("intent-refused", DUAL)?);
     assert!(refused.block_reason().is_some());
     let draft = last_draft(&deciding)?;
@@ -299,11 +300,29 @@ fn the_record_of_a_release_names_the_releaser_and_the_approvers() -> Fallible<()
     Ok(())
 }
 
-/// Positive: the record of a halt names nobody, and says so in its bytes.
+/// Positive: the record of a halt a person called names that person in the
+/// place of the maker, the level the halt stands at, and no checker.
 #[test]
-fn the_record_of_a_halt_names_nobody() -> Fallible<()> {
+fn the_record_of_a_halt_names_the_person_who_halted() -> Fallible<()> {
+    for level in [RiskLevel::LOWEST, MONITORED, SINGLE, DUAL] {
+        let mut halted = engine(600, 4)?;
+        halted.halt(&MakerId::parse("olga")?, level)?;
+        let draft = last_draft(&halted)?;
+        assert_eq!(draft.status, RecordStatus::HaltEngaged);
+        assert_eq!(draft.subject, None);
+        assert_names(&draft, &named(level, "olga", None)?, "halted")?;
+        let head = preimage_of(&draft)?;
+        assert!(read_under_own_digest(&head)?.is_ok(), "read as a head");
+    }
+    Ok(())
+}
+
+/// Positive: the record of a halt no person engaged names nobody, and says
+/// so in its bytes.
+#[test]
+fn the_record_of_a_halt_no_person_engaged_names_nobody() -> Fallible<()> {
     let mut halted = engine(600, 4)?;
-    halted.halt(HaltReason::OperatorStop, DUAL)?;
+    halted.halt_unnamed(HaltReason::OperatorStop, DUAL)?;
     let draft = last_draft(&halted)?;
     assert_eq!(draft.status, RecordStatus::HaltEngaged);
     assert_eq!(draft.principals, None);
@@ -404,8 +423,9 @@ fn a_maker_among_the_checkers_is_refused_by_byte_equality() -> Fallible<()> {
 }
 
 /// Negative, planted: a record that names someone its status has no place
-/// for is refused: a halt that names a person, a vote where none was cast,
-/// and a hold or a rejection at a level that holds nothing.
+/// for is refused: a halt that names a person at another level than it
+/// stands at, a halt anyone voted on, a vote where none was cast, and a hold
+/// or a rejection at a level that holds nothing.
 #[test]
 fn a_record_that_names_someone_it_must_not_is_refused() -> Fallible<()> {
     let engaged = KillswitchState::Engaged {
@@ -413,13 +433,26 @@ fn a_record_that_names_someone_it_must_not_is_refused() -> Fallible<()> {
         reason: HaltReason::OperatorStop,
         level: SINGLE,
     };
-    let named_halt = RecordDraft {
-        principals: Some(named(SINGLE, "olga", None)?),
-        ..RecordDraft::of_halt(engaged, START)
-    };
-    assert_refused(&named_halt, "a halt that names a person")?;
-
     let panel = Some(one("checker-bob")?);
+    let halted = RecordDraft::of_halt_by(engaged, named(SINGLE, "olga", None)?, START);
+    assert!(
+        halted.is_well_formed(),
+        "the person at the level it stands at"
+    );
+    for level in [RiskLevel::LOWEST, MONITORED, DUAL] {
+        let elsewhere = RecordDraft::of_halt_by(engaged, named(level, "olga", None)?, START);
+        assert_refused(&elsewhere, "a halt named at a level it does not stand at")?;
+    }
+    for checkers in [panel, Some(two("checker-bob", "checker-cara")?)] {
+        let voted = RecordDraft::of_halt_by(engaged, named(SINGLE, "olga", checkers)?, START);
+        assert_refused(&voted, "a halt somebody voted on")?;
+    }
+    let armed = RecordDraft {
+        killswitch: KillswitchState::Armed,
+        ..halted
+    };
+    assert_refused(&armed, "a named halt of an engine that is not halted")?;
+
     let unvoted = [
         (RecordStatus::PendingApproval, SINGLE),
         (RecordStatus::Blocked, SINGLE),
@@ -454,7 +487,7 @@ fn a_record_that_names_someone_it_must_not_is_refused() -> Fallible<()> {
 #[test]
 fn a_head_in_the_layout_without_the_names_is_refused() -> Fallible<()> {
     let mut halted = engine(600, 4)?;
-    halted.halt(HaltReason::OperatorStop, SINGLE)?;
+    halted.halt_unnamed(HaltReason::OperatorStop, SINGLE)?;
     let halt = stored_head(&halted)?.body().canonical_preimage()?;
     let halt = halt.as_slice();
     assert!(read_under_own_digest(halt)?.is_ok());
@@ -557,6 +590,12 @@ fn the_largest_record_fits_the_preimage_bound() -> Fallible<()> {
         LARGEST_PREIMAGE - 5 * MAX_IDENTITY_LEN,
         "five identities apart"
     );
+    let operator = named(RiskLevel::HIGHEST, &long("o"), None)?;
+    let halted = RecordDraft::of_halt_by(engaged, operator, START);
+    assert_names(&halted, &operator, "a halt by the longest identity")?;
+    let named_halt = preimage_of(&halted)?;
+    assert_eq!(named_halt.len(), smallest.len() + MAX_IDENTITY_LEN);
+    assert!(read_under_own_digest(&named_halt)?.is_ok());
     Ok(())
 }
 
