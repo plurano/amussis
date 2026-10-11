@@ -201,8 +201,8 @@ pub use crate::ledger::sha256::Sha256Hasher;
 pub use crate::ledger::signer::{RecordSigner, SignError, Signature, SignerBinding};
 pub use crate::ledger::{
     AUDIT_DOMAIN, AuditLedger, AuditRecord, InMemorySink, IoDeadline, LedgerError, LedgerSink,
-    RecordBody, RecordDraft, RecordStatus, RecordSubject, Sequence, Sha256Ledger, SinkError,
-    UnavailableSink, verify_chain, verify_chain_bounded, verify_continuation,
+    RecordBody, RecordDraft, RecordPrincipals, RecordStatus, RecordSubject, Sequence, Sha256Ledger,
+    SinkError, UnavailableSink, verify_chain, verify_chain_bounded, verify_continuation,
 };
 pub use crate::outcome::{BlockReason, InterceptorOutcome, WarningCode};
 pub use crate::oversight::{

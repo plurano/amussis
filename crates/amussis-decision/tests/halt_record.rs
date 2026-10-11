@@ -21,9 +21,9 @@ use amussis_decision::{
     ActionType, AgentId, AuditRecord, BlockReason, CheckerId, CheckerSet, Clock, ClockError,
     DecisionEngine, DecisionError, Digest32, FixedClock, HaltReason, HashAlgorithm, InMemorySink,
     IntentId, InterceptorOutcome, IoDeadline, KillswitchState, LedgerError, LedgerSink, MakerId,
-    OversightClass, OversightError, PreimageError, RecordBody, RecordDraft, RecordStatus,
-    RecordSubject, ReleaseError, RequestId, RequiredApproval, RiskLevel, RiskTier, Sequence,
-    Sha256Hasher, SignerBinding, SinkError, UnavailableSink, UnixSeconds, Vote,
+    OversightClass, OversightError, PreimageError, RecordBody, RecordDraft, RecordPrincipals,
+    RecordStatus, RecordSubject, ReleaseError, RequestId, RequiredApproval, RiskLevel, RiskTier,
+    Sequence, Sha256Hasher, SignerBinding, SinkError, UnavailableSink, UnixSeconds, Vote,
 };
 use common::{
     FIXTURE_AUDIT_BOUND, Fallible, FaultyClock, FixtureError, FixtureSigner, START, TestEngine,
@@ -161,7 +161,8 @@ fn a_halt_is_one_record_that_names_no_action() -> Fallible<()> {
     assert_eq!(halted.killswitch(), engaged);
     assert_eq!(halted.ledger().len(), 1);
     let draft = last_draft(&halted)?;
-    assert_eq!(draft, RecordDraft::of_latch(engaged, START));
+    assert_eq!(draft, RecordDraft::of_halt(engaged, START));
+    assert_eq!(draft.principals, None, "a halt names nobody");
     assert_eq!(draft.status, RecordStatus::HaltEngaged);
     assert_eq!(draft.subject, None);
     assert!(draft.is_well_formed());
@@ -216,7 +217,12 @@ fn the_lowest_level_is_released_by_one_person() -> Fallible<()> {
         assert_eq!(released, continued.ledger().head());
         assert_eq!(continued.killswitch(), KillswitchState::Armed);
         let draft = last_draft(&continued)?;
-        assert_eq!(draft, RecordDraft::of_latch(KillswitchState::Armed, START));
+        let alone = RecordPrincipals {
+            level,
+            maker: releaser()?,
+            checkers: None,
+        };
+        assert_eq!(draft, RecordDraft::of_release(alone, START));
         assert_eq!(draft.status, RecordStatus::HaltReleased);
         let outcome = continued.decide(&action("intent-resumed", RiskTier::TierCRoutineBounded)?);
         assert_eq!(outcome, InterceptorOutcome::Allow);
@@ -517,8 +523,13 @@ fn a_record_of_the_wrong_shape_has_no_preimage() -> Fallible<()> {
         agent: AgentId::parse("agent-01")?,
         action_type: ActionType::FileModification,
     };
-    let halt = RecordDraft::of_latch(engaged, START);
-    let release = RecordDraft::of_latch(KillswitchState::Armed, START);
+    let alone = RecordPrincipals {
+        level: RiskLevel::LOWEST,
+        maker: releaser()?,
+        checkers: None,
+    };
+    let halt = RecordDraft::of_halt(engaged, START);
+    let release = RecordDraft::of_release(alone, START);
     let decided = RecordDraft {
         subject: Some(subject),
         status: RecordStatus::Approved,
@@ -526,7 +537,7 @@ fn a_record_of_the_wrong_shape_has_no_preimage() -> Fallible<()> {
     };
     for sound in [halt, release, decided] {
         assert!(sound.is_well_formed(), "{sound:?}");
-        assert!(preimage_refusal(sound).is_none(), "{sound:?}");
+        assert!(preimage_refusal(&sound).is_none(), "{sound:?}");
     }
     let unsound = [
         RecordDraft {
@@ -556,19 +567,19 @@ fn a_record_of_the_wrong_shape_has_no_preimage() -> Fallible<()> {
     ];
     for draft in unsound {
         assert!(!draft.is_well_formed(), "{draft:?}");
-        assert_eq!(preimage_refusal(draft), Some(PreimageError::Shape));
+        assert_eq!(preimage_refusal(&draft), Some(PreimageError::Shape));
     }
     Ok(())
 }
 
 /// Why `draft` has no canonical pre-image at the first chain position, if it
 /// has none.
-fn preimage_refusal(draft: RecordDraft) -> Option<PreimageError> {
+fn preimage_refusal(draft: &RecordDraft) -> Option<PreimageError> {
     RecordBody::from_parts(
         Sequence::FIRST,
         Digest32::GENESIS,
         HashAlgorithm::Sha256,
-        draft,
+        *draft,
     )
     .canonical_preimage()
     .err()

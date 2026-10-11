@@ -284,7 +284,7 @@ fn each_tier_yields_its_class() -> Fallible<()> {
 /// Positive: the constants a host is written against.
 #[test]
 fn the_interface_names_are_fixed() {
-    assert_eq!(ABI_VERSION, 4);
+    assert_eq!(ABI_VERSION, 5);
     assert_eq!(HOST_MODULE, "amussis_host_v1");
     assert_eq!(SINK_STORED, 0);
     assert_eq!(HOST_UNAVAILABLE, -1);

@@ -17,30 +17,31 @@ use amussis_decision::{
     Sha256Hasher, SignerBinding, UnixSeconds,
 };
 
-use common::{FIXTURE_AUDIT_BOUND, Fallible, FixtureError, FixtureSigner, io_deadline};
+use common::{FIXTURE_AUDIT_BOUND, Fallible, FixtureError, FixtureSigner, io_deadline, named_for};
 
 type Ledger = AuditLedger<Sha256Hasher, FixtureSigner, InMemorySink>;
 
 /// Builds a fixture ledger holding the one record `draft` seals to.
-fn ledger_of(draft: RecordDraft) -> Result<Ledger, DecisionError> {
+fn ledger_of(draft: &RecordDraft) -> Result<Ledger, DecisionError> {
     let mut ledger: Ledger = AuditLedger::with_bound(
         SignerBinding::Bound(FixtureSigner::new()?),
         InMemorySink::with_bound(FIXTURE_AUDIT_BOUND),
         io_deadline(),
         FIXTURE_AUDIT_BOUND,
     );
-    ledger.append(draft)?;
+    ledger.append(*draft)?;
     Ok(ledger)
 }
 
 /// Builds a fixture ledger holding one record with `status` and `reason`.
 fn one_record(status: RecordStatus, reason: Option<BlockReason>) -> Result<Ledger, DecisionError> {
-    ledger_of(RecordDraft {
+    ledger_of(&RecordDraft {
         subject: Some(RecordSubject {
             intent_id: IntentId::parse("intent-1")?,
             agent: AgentId::parse("agent-01")?,
             action_type: ActionType::FileModification,
         }),
+        principals: named_for(status)?,
         status,
         block_reason: reason,
         killswitch: KillswitchState::Armed,
@@ -109,32 +110,73 @@ fn a_record_projects_onto_the_line_it_renders_as() -> Fallible<()> {
 }
 
 /// Positive, fourth half: the two records of the halt latch render without an
-/// intent and an agent, which they do not have, and parse back unchanged.
+/// intent and an agent, which they do not have, and parse back unchanged. The
+/// halt names nobody; the release names the person who released it.
 #[test]
 fn a_record_of_the_halt_latch_renders_without_an_action() -> Fallible<()> {
+    let at = UnixSeconds::new(100);
+    let released = named_for(RecordStatus::HaltReleased)?.ok_or(FixtureError::NoRecord)?;
     let cases = [
-        (HALTED, "halt-engaged", RecordStatus::HaltEngaged, true),
         (
-            KillswitchState::Armed,
+            RecordDraft::of_halt(HALTED, at),
+            "halt-engaged",
+            RecordStatus::HaltEngaged,
+            true,
+        ),
+        (
+            RecordDraft::of_release(released, at),
             "halt-released",
             RecordStatus::HaltReleased,
             false,
         ),
     ];
-    for (state, spelling, status, engaged) in cases {
-        let ledger = ledger_of(RecordDraft::of_latch(state, UnixSeconds::new(100)))?;
-        let record = ledger.records().first().ok_or(FixtureError::NoRecord)?;
-        let text = jsonl::render_line(record).map_err(|_| FixtureError::Render)?;
-        assert!(text.contains(&format!("\"status\":\"{spelling}\"")));
-        assert!(text.contains("\"intent-id\":null"));
-        assert!(text.contains("\"agent\":null"));
-        let parsed = jsonl::parse_line(&text).map_err(|_| FixtureError::Render)?;
+    for (draft, spelling, status, engaged) in cases {
+        let parsed = latch_line(&draft, spelling)?;
         assert_eq!(parsed.status, status);
         assert_eq!(parsed.intent_id, None);
         assert_eq!(parsed.agent, None);
         assert_eq!(parsed.killswitch_engaged, engaged);
         assert_eq!(parsed.block_reason, None);
+        assert_eq!(parsed.maker.is_some(), !engaged);
+        assert_eq!(parsed.level.is_some(), !engaged);
+        assert!(parsed.checkers.is_empty());
     }
+    Ok(())
+}
+
+/// Renders the one record `draft` seals to, requires the line to spell its
+/// status as `spelling` and to name no action, and parses it back.
+fn latch_line(draft: &RecordDraft, spelling: &str) -> Fallible<jsonl::LedgerLine> {
+    let ledger = ledger_of(draft)?;
+    let record = ledger.records().first().ok_or(FixtureError::NoRecord)?;
+    let text = jsonl::render_line(record).map_err(|_| FixtureError::Render)?;
+    assert!(text.contains(&format!("\"status\":\"{spelling}\"")));
+    assert!(text.contains("\"intent-id\":null"));
+    assert!(text.contains("\"agent\":null"));
+    Ok(jsonl::parse_line(&text).map_err(|_| FixtureError::Render)?)
+}
+
+/// Positive, fifth half: a line names the maker, the level and the checkers
+/// of its record, as the identities the caller passed in, and parses back.
+#[test]
+fn a_line_names_who_its_record_names() -> Fallible<()> {
+    let ledger = one_record(RecordStatus::Rejected, None)?;
+    let record = ledger.records().first().ok_or(FixtureError::NoRecord)?;
+    let text = jsonl::render_line(record).map_err(|_| FixtureError::Render)?;
+    assert!(text.contains("\"maker\":\"maker-01\""), "{text}");
+    assert!(text.contains("\"checkers\":[\"checker-01\"]"), "{text}");
+    assert!(text.contains("\"level\":3"), "{text}");
+    let parsed = jsonl::parse_line(&text).map_err(|_| FixtureError::Render)?;
+    assert_eq!(parsed.maker.as_deref(), Some("maker-01"));
+    assert_eq!(parsed.checkers, ["checker-01"]);
+    assert_eq!(parsed.level, Some(3));
+
+    let unvoted = one_record(RecordStatus::Approved, None)?;
+    let record = unvoted.records().first().ok_or(FixtureError::NoRecord)?;
+    let line = jsonl::project(record).map_err(|_| FixtureError::Render)?;
+    assert_eq!(line.maker.as_deref(), Some("maker-01"));
+    assert_eq!(line.level, Some(1));
+    assert!(line.checkers.is_empty());
     Ok(())
 }
 

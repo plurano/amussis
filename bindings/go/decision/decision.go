@@ -23,13 +23,21 @@
 // A halt stands at a risk level, and its one release is part of a
 // continuation: Continuation.Release names the person who releases it and the
 // checkers that level demands of an action. The release is a record of its
-// own in the chain. That record names no person; a host that has to show who
-// released a halt keeps that itself.
+// own in the chain, and names the level the halt stood at, the person who
+// released it and the checkers who approved.
 //
 // An action the engine holds (RequireApproval) is decided with Adjudicate. It
 // is named by the id of its proposal, and the engine holds the checkers the
 // caller names to the approval rule of the action. Who may approve is the
-// caller's decision; the record of the vote names no checker.
+// caller's decision; the record of the vote names the maker of the proposal
+// and the checkers who cast it.
+//
+// The maker of a proposal, the checkers of a Vote and the persons of a
+// Release are identities of at most 64 bytes. The engine writes them into
+// the records the Sink stores as it received them and compares them as
+// bytes; it does not hash them. Pass a keyed hash of the identifier your
+// system knows a person by, never a name: what is passed in is what the
+// Sink keeps. The record of a halt names nobody.
 //
 // Halt stops a running engine as an operator stop at a risk level. No call
 // lifts that halt on the engine it was set on: the chain is continued with a

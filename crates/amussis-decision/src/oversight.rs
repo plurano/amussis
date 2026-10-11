@@ -103,13 +103,18 @@ impl CheckerSet {
     ///
     /// # Errors
     ///
-    /// Returns [`OversightError::MakerIsChecker`] when the maker appears in
-    /// either slot. Both slots are checked; the imported sketch checked only
-    /// the first.
+    /// Returns [`OversightError::DuplicateChecker`] when both slots name the
+    /// same principal, which a panel written as a literal can, and
+    /// [`OversightError::MakerIsChecker`] when the maker appears in either
+    /// slot. Both slots are checked; the imported sketch checked only the
+    /// first.
     pub fn verify_against_maker(
         self,
         maker: &MakerId,
     ) -> Result<VerifiedCheckerSet, OversightError> {
+        if matches!(self, Self::Dual { first, second } if first == second) {
+            return Err(OversightError::DuplicateChecker);
+        }
         let clash = match self {
             Self::Single(checker) => maker.is_same_principal(&checker),
             Self::Dual { first, second } => {

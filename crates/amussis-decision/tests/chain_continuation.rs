@@ -27,7 +27,7 @@ use amussis_decision::{
 };
 use common::{
     Fallible, FixtureError, FixtureSigner, START, TestEngine, anchor_of, config, intent,
-    io_deadline, stored_head,
+    io_deadline, named_for, stored_head,
 };
 
 /// The audit window the fixtures use: small, so a test crosses it in a few
@@ -136,6 +136,7 @@ fn draft_at(at: UnixSeconds) -> Fallible<RecordDraft> {
             agent: AgentId::parse("agent-01")?,
             action_type: ActionType::FileModification,
         }),
+        principals: named_for(RecordStatus::Approved)?,
         status: RecordStatus::Approved,
         block_reason: None,
         killswitch: KillswitchState::Armed,
@@ -436,7 +437,7 @@ fn a_head_whose_content_was_edited_is_refused() -> Fallible<()> {
     let record = stored_head(&engine)?;
 
     let restated = AuditRecord::from_parts(
-        record.body().with_status(RecordStatus::Rejected),
+        record.body().with_status(RecordStatus::Blocked),
         *record.signature(),
         record.digest(),
     );

@@ -23,6 +23,24 @@
 //! do not belong together has no canonical pre-image
 //! ([`PreimageError::Shape`]), so it is neither sealed nor verified.
 //!
+//! # Who a record names
+//!
+//! A record that decides an action names the maker of the proposal, and the
+//! record of a vote names the checkers who cast it. The record of a release
+//! names the person who released the halt and the checkers who approved the
+//! release. Each of these records also states the risk level the approval
+//! rule was asked at ([`RecordPrincipals`]), so a reader holds a record to
+//! that rule with the record alone: a vote or a release that names fewer
+//! checkers than its level demands has no canonical pre-image, and neither
+//! has one whose maker is among its checkers or whose two checkers are one.
+//! Both are comparisons of bytes. The record of a halt names nobody: a halt
+//! is called without a person.
+//!
+//! An identity is the bytes the caller passed in, and the chain keeps them
+//! for as long as it is kept. The library does not hash them and cannot tell
+//! a name from a pseudonym. What a caller passes in is the caller's rule; the
+//! repository's `README.md` states the one this library is built for.
+//!
 //! Both retention buffers -- [`AuditLedger`]'s own record list and
 //! [`InMemorySink`]'s -- are reserved to their scalar bound at construction and
 //! refuse a push at that bound, so neither reallocates on the decision path.
@@ -50,7 +68,7 @@ pub mod signer;
 
 use core::num::NonZeroU32;
 
-use crate::identity::{AgentId, IntentId};
+use crate::identity::{AgentId, CheckerId, IntentId, MakerId};
 use crate::killswitch::KillswitchState;
 use crate::ledger::anchor::ChainAnchor;
 use crate::ledger::hash::{
@@ -59,7 +77,8 @@ use crate::ledger::hash::{
 use crate::ledger::sha256::Sha256Hasher;
 use crate::ledger::signer::{RecordSigner, SignError, Signature, SignerBinding};
 use crate::outcome::BlockReason;
-use crate::risk::ActionType;
+use crate::oversight::CheckerSet;
+use crate::risk::{ActionType, RiskLevel};
 use crate::time::UnixSeconds;
 use crate::{CONTRACT_VERSION, DEFAULT_SINK_SERVICE_MILLIS, MAX_LEDGER_RECORDS};
 
@@ -325,6 +344,89 @@ pub struct RecordSubject {
     pub action_type: ActionType,
 }
 
+/// Who a record names, and the risk level the approval rule was asked at.
+///
+/// Every identity is the bytes the caller passed in. Two identities are one
+/// principal exactly when their bytes are equal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RecordPrincipals {
+    /// The risk level of the action the record decides, or of the halt the
+    /// record releases.
+    pub level: RiskLevel,
+    /// The maker of the proposal the record decides, or the person who
+    /// released the halt.
+    pub maker: MakerId,
+    /// The checkers who cast the vote the record states, or who approved the
+    /// release. `None` where nobody voted.
+    pub checkers: Option<CheckerSet>,
+}
+
+impl RecordPrincipals {
+    /// Returns the checkers in the order the record states them.
+    #[must_use]
+    pub const fn checkers(&self) -> [Option<CheckerId>; 2] {
+        match self.checkers {
+            None => [None, None],
+            Some(CheckerSet::Single(only)) => [Some(only), None],
+            Some(CheckerSet::Dual { first, second }) => [Some(first), Some(second)],
+        }
+    }
+
+    /// Returns whether the maker is none of the checkers and two checkers
+    /// are two principals. Both are comparisons of bytes.
+    #[must_use]
+    pub fn is_separated(&self) -> bool {
+        match self.checkers {
+            None => true,
+            Some(CheckerSet::Single(only)) => !self.maker.is_same_principal(&only),
+            Some(CheckerSet::Dual { first, second }) => {
+                first != second
+                    && !self.maker.is_same_principal(&first)
+                    && !self.maker.is_same_principal(&second)
+            }
+        }
+    }
+
+    /// Returns whether nobody voted.
+    const fn is_unvoted(&self) -> bool {
+        self.checkers.is_none()
+    }
+
+    /// Returns whether the checkers are a vote the approval rule of the level
+    /// takes: separated from the maker, and as many as the level demands.
+    fn is_voted(&self) -> bool {
+        let required = self.level.required_approval();
+        let named = self.checkers.map_or(0, |panel| panel.len());
+        required.needs_human() && self.is_separated() && named >= required.checker_count()
+    }
+
+    /// Returns whether the principals are those of a release: the level's
+    /// vote where the level demands one, and otherwise the releasing person
+    /// alone or beside checkers who are not that person.
+    fn is_release(&self) -> bool {
+        if self.level.required_approval().needs_human() {
+            self.is_voted()
+        } else {
+            self.is_separated()
+        }
+    }
+
+    /// Returns whether the principals belong to a record of `status` that
+    /// decides an action.
+    fn fits_decision(&self, status: RecordStatus) -> bool {
+        let held = self.level.required_approval().needs_human();
+        match status {
+            RecordStatus::Approved if held => self.is_voted(),
+            RecordStatus::Rejected => self.is_voted(),
+            RecordStatus::PendingApproval => held && self.is_unvoted(),
+            RecordStatus::Approved | RecordStatus::Blocked | RecordStatus::Halted => {
+                self.is_unvoted()
+            }
+            RecordStatus::HaltEngaged | RecordStatus::HaltReleased => false,
+        }
+    }
+}
+
 /// The caller-supplied fields of one audit record.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RecordDraft {
@@ -333,6 +435,11 @@ pub struct RecordDraft {
     /// `None` for a record of the halt latch itself and for no other record:
     /// see [`Self::is_well_formed`].
     pub subject: Option<RecordSubject>,
+    /// Who the record names, and the risk level they answer at.
+    ///
+    /// `None` for the record of a halt and for no other record: see
+    /// [`Self::is_well_formed`].
+    pub principals: Option<RecordPrincipals>,
     /// The decision recorded.
     pub status: RecordStatus,
     /// Why the action was refused, when it was.
@@ -349,40 +456,67 @@ pub struct RecordDraft {
 }
 
 impl RecordDraft {
-    /// Drafts the record of the halt latch itself in the state `killswitch`,
-    /// written at `at`: the halt for an engaged latch, the release for an
-    /// armed one.
+    /// Drafts the record of a halt: the latch engaged in the state
+    /// `killswitch`, written at `at`. It names nobody.
+    ///
+    /// A draft of an armed latch is not well formed: a halt record carries
+    /// the halt.
     #[must_use]
-    pub const fn of_latch(killswitch: KillswitchState, at: UnixSeconds) -> Self {
-        let status = match killswitch {
-            KillswitchState::Engaged { .. } => RecordStatus::HaltEngaged,
-            KillswitchState::Armed => RecordStatus::HaltReleased,
-        };
+    pub const fn of_halt(killswitch: KillswitchState, at: UnixSeconds) -> Self {
         Self {
             subject: None,
-            status,
+            principals: None,
+            status: RecordStatus::HaltEngaged,
             block_reason: None,
             killswitch,
             at,
         }
     }
 
+    /// Drafts the record of the release of a halt, written at `at`. It names
+    /// the releasing person as the maker, the checkers who approved, and the
+    /// risk level the halt stood at.
+    #[must_use]
+    pub const fn of_release(principals: RecordPrincipals, at: UnixSeconds) -> Self {
+        Self {
+            subject: None,
+            principals: Some(principals),
+            status: RecordStatus::HaltReleased,
+            block_reason: None,
+            killswitch: KillswitchState::Armed,
+            at,
+        }
+    }
+
     /// Returns whether the status and the other fields belong together.
     ///
-    /// A record that decides an action names it. A record of the halt latch
-    /// names no action and no refusal reason, and carries the latch state its
-    /// status states: engaged for the halt, armed for the release.
+    /// A record that decides an action names the action and the maker of its
+    /// proposal. It names checkers exactly when it states a vote: a rejection,
+    /// or the approval of an action whose level demands a checker. A record
+    /// of the halt latch names no action and no refusal reason, and carries
+    /// the latch state its status states: engaged for the halt, which names
+    /// nobody, and armed for the release, which names the releasing person.
+    ///
+    /// Where checkers are named they are as many as the level demands, the
+    /// maker is none of them and two of them are two principals.
     #[must_use]
-    pub const fn is_well_formed(&self) -> bool {
+    pub fn is_well_formed(&self) -> bool {
         let unnamed = self.subject.is_none() && self.block_reason.is_none();
         match self.status {
-            RecordStatus::HaltEngaged => unnamed && self.killswitch.is_engaged(),
-            RecordStatus::HaltReleased => unnamed && !self.killswitch.is_engaged(),
-            RecordStatus::PendingApproval
-            | RecordStatus::Approved
-            | RecordStatus::Rejected
-            | RecordStatus::Blocked
-            | RecordStatus::Halted => self.subject.is_some(),
+            RecordStatus::HaltEngaged => {
+                unnamed && self.killswitch.is_engaged() && self.principals.is_none()
+            }
+            RecordStatus::HaltReleased => {
+                unnamed
+                    && !self.killswitch.is_engaged()
+                    && self.principals.is_some_and(|named| named.is_release())
+            }
+            decision => {
+                self.subject.is_some()
+                    && self
+                        .principals
+                        .is_some_and(|named| named.fits_decision(decision))
+            }
         }
     }
 }
@@ -472,6 +606,7 @@ impl RecordBody {
         write_block_reason(&mut buffer, self.draft.block_reason)?;
         write_killswitch(&mut buffer, self.draft.killswitch)?;
         write_names(&mut buffer, self.draft.subject.as_ref())?;
+        write_principals(&mut buffer, self.draft.principals.as_ref())?;
         Ok(buffer)
     }
 
@@ -511,6 +646,33 @@ fn write_names(
         buffer.write_framed(&[])?;
         buffer.write_framed(&[])
     }
+}
+
+/// Encodes who a record names: the tag of the risk level, then the maker and
+/// the two checkers, each behind its length.
+///
+/// A record that names nobody writes a zero level, which no level has, and a
+/// place a record leaves open is an empty field, which no identity encodes
+/// to. The layout is one for every record.
+fn write_principals(
+    buffer: &mut CanonicalBuffer,
+    principals: Option<&RecordPrincipals>,
+) -> Result<(), PreimageError> {
+    let Some(named) = principals else {
+        buffer.write_u8(0)?;
+        buffer.write_framed(&[])?;
+        buffer.write_framed(&[])?;
+        return buffer.write_framed(&[]);
+    };
+    buffer.write_u8(named.level.tag())?;
+    buffer.write_framed(named.maker.as_bytes())?;
+    for checker in named.checkers() {
+        match checker {
+            Some(checker) => buffer.write_framed(checker.as_bytes())?,
+            None => buffer.write_framed(&[])?,
+        }
+    }
+    Ok(())
 }
 
 /// Encodes the recorded refusal reason, if any, into the pre-image.

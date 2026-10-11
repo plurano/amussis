@@ -67,7 +67,8 @@
 //! Who may approve is the host's decision. The host names one or two
 //! checkers; the engine holds them to the approval rule of the action (one
 //! checker, or two distinct ones for an Annex III action, none of them the
-//! maker of the proposal) and records the vote. The record names no checker.
+//! maker of the proposal) and records the vote. The record names the maker
+//! and the checkers the host named, byte for byte.
 //!
 //! An adjudication never passes for want of a working effect. A vote that
 //! cannot be signed or stored is no vote: the hold is released without a
@@ -114,10 +115,17 @@
 //! engine writes. A chain halted as compromised is not released, and a
 //! release asked for a chain that is not halted is refused.
 //!
-//! The release record states that the halt was released and when. It names
-//! neither the releasing person nor the checkers; no record of the chain
-//! names a person. A host that has to show who released a halt keeps that
-//! itself.
+//! The release record states that the halt was released and when, the level
+//! it stood at, the releasing person and the checkers who approved.
+//!
+//! # Identities
+//!
+//! The maker in a proposal, the checkers of an adjudication and the persons
+//! of a release are identities of at most 64 bytes. The module writes them
+//! into the records it hands to the signer and the sink as it received
+//! them, and compares them as bytes; it does not hash them. A host passes a
+//! keyed hash of its own identifier, never a name: what it passes in is
+//! what the store keeps. The record of a halt names nobody.
 //!
 //! # Limits
 //!
@@ -160,7 +168,7 @@ pub use crate::wire::{
 };
 
 /// Version of the import and export interface described above.
-pub const ABI_VERSION: u32 = 4;
+pub const ABI_VERSION: u32 = 5;
 
 /// Name of the import module the host functions live in.
 pub const HOST_MODULE: &str = "amussis_host_v1";

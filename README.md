@@ -240,11 +240,14 @@ Limits as of this state:
   in the store, which a walk over the store shows
   (`TestAContinuationFromAnotherRecordThanTheHeadShowsInTheStore`); the module
   does not prevent it.
-- No record names a person. The chain shows that a held action was approved
-  or rejected and that a halt was released, and the halted records before the
-  release show at which level it stood; it does not show which checkers voted,
-  who released the halt or who approved the release. A host that has to show
-  that keeps it itself.
+- The record of a halt names nobody: `Halt` takes no person
+  (`TestTheRecordOfAHaltNamesNobody`). A host that has to show who stopped the
+  engine keeps that itself. Every other record names its persons, see
+  [Identities in the audit chain](#identities-in-the-audit-chain).
+- A chain written before interface version 5 is not continued: its records
+  carry no identities, and a head record in that layout is refused
+  (`a_head_in_the_layout_without_the_names_is_refused` in
+  `crates/amussis-decision/tests/record_principals.rs`).
 - A halt whose record never reached the sink (a signer or a sink that failed) is
   not in the stored chain, so a continuation from the stored head starts without
   it. The halted engine writes the halt with the next record the sink stores.
@@ -254,6 +257,61 @@ The committed module is the build of the source beside it: `tools/wasm_module.py
 check` rebuilds it with the machine's paths rewritten and fails on one differing
 byte. After a change to the engine or the export crate, run
 `python3 tools/wasm_module.py update` and commit the module with the change.
+
+## Identities in the audit chain
+
+A record that is about a person names that person, and the store keeps those
+bytes for as long as it keeps the chain. What a host passes in as the maker of
+a proposal, as a checker or as the releaser of a halt is therefore what its
+audit log holds. Pass a keyed hash, never a name.
+
+| Record | Names | Shown by |
+| :--- | :--- | :--- |
+| A decision: passed, blocked or held | the maker of the proposal | `TestTheRecordOfADecisionNamesTheMaker` |
+| A vote: approved or rejected | the maker and the checkers who cast it | `TestTheRecordOfAVoteNamesTheCheckers` |
+| The release of a halt | the releaser and the checkers who approved | `TestTheRecordOfAReleaseNamesTheReleaserAndTheApprovers` |
+| A halt | nobody | `TestTheRecordOfAHaltNamesNobody` |
+
+The library does not hash and does not read an identity. It takes 1 to 64
+bytes of letters, digits and `. - _ : @ /`, writes them into the record as
+they came, and treats two persons as one exactly when their bytes are equal
+(`TestAMakerAmongTheCheckersIsNotRecorded`). It cannot tell a pseudonym from a
+name, so the rule is the host's to keep:
+
+1. **A keyed hash of your own identifier.** HMAC-SHA-256 over the identifier
+   your system knows the person by, in lower-case hexadecimal, is 64
+   characters: the longest identity the engine takes
+   (`TestAnIdentityOfSixtyFourBytesIsRecordedByteForByte`).
+2. **Never an unkeyed hash.** Identifiers are few and guessable; a plain
+   SHA-256 of one is undone by hashing the list of candidates.
+3. **Every role, one key, one spelling.** Hash the maker, the checkers and the
+   releaser the same way. Only then is one person one string of bytes, and
+   only then does the engine see a maker who votes on the own proposal. The
+   same hash once in upper and once in lower case is two persons to the engine.
+4. **One key per log period.** Keep the key outside the store. To show who a
+   record names, compute the hash of the candidate again and compare. When the
+   key is destroyed, the records of that period name persons nobody can
+   recover, and the chain verifies as before, because no byte of it changes.
+
+```go
+func identity(key []byte, id string) string {
+    mac := hmac.New(sha256.New, key)
+    mac.Write([]byte(id))
+    return hex.EncodeToString(mac.Sum(nil))
+}
+```
+
+Each record that names a person also states the risk level its approval rule
+was asked at. A reader of the store holds a record to that rule with the
+record alone: a vote or a release with fewer checkers than its level demands,
+with the maker among the checkers or with one checker named twice has no
+canonical content, and is refused when it is appended and when the chain is
+verified (`a_record_without_the_identities_it_needs_is_refused` and
+`a_maker_among_the_checkers_is_refused_by_byte_equality` in
+`crates/amussis-decision/tests/record_principals.rs`). The largest record, a
+vote of two checkers with every identity at 64 bytes, has a content of 454
+bytes of the 512 a record may have
+(`the_largest_record_fits_the_preimage_bound`).
 
 ## Exceptions
 

@@ -15,13 +15,14 @@
 #![allow(dead_code)]
 
 use amussis_decision::{
-    ActionIntent, ActionType, AgentId, AuditRecord, BlockReason, ChainAnchor, ClockError,
-    ContractError, Correlation, DIGEST_LEN, DecisionEngine, DecisionError, Digest32, EngineConfig,
-    EventId, FixedClock, HashAlgorithm, Identity, InMemorySink, IntentId, IntentSpec, IoDeadline,
-    MAX_SIGNATURE_BYTES, MakerId, OversightClass, OversightSignature, PayloadBuffer, RecordSigner,
-    RecordStatus, RequestId, RequiredApproval, RiskTier, SchemaTag, Sequence, Sha256Hasher,
-    SignError, Signature, SignatureAlgorithm, SignerBinding, SignerKeyId, TargetResource, Ttl,
-    UnixSeconds, decode_text, encode_into,
+    ActionIntent, ActionType, AgentId, AuditRecord, BlockReason, ChainAnchor, CheckerId,
+    CheckerSet, ClockError, ContractError, Correlation, DIGEST_LEN, DecisionEngine, DecisionError,
+    Digest32, EngineConfig, EventId, FixedClock, HashAlgorithm, Identity, InMemorySink, IntentId,
+    IntentSpec, IoDeadline, MAX_SIGNATURE_BYTES, MakerId, OversightClass, OversightSignature,
+    PayloadBuffer, RecordPrincipals, RecordSigner, RecordStatus, RequestId, RequiredApproval,
+    RiskLevel, RiskTier, SchemaTag, Sequence, Sha256Hasher, SignError, Signature,
+    SignatureAlgorithm, SignerBinding, SignerKeyId, TargetResource, Ttl, UnixSeconds, decode_text,
+    encode_into,
 };
 
 /// Anything that can go wrong building or reading a fixture.
@@ -272,6 +273,34 @@ pub fn intent(
         target: TargetResource::parse("/var/lib/aegis/example")?,
     };
     Ok(ActionIntent::new(spec)?)
+}
+
+/// Who a fixture record of `status` names, so that the record is well
+/// formed: a maker at a level the status belongs to, and the one checker a
+/// rejection needs. `None` for the record of a halt, which names nobody.
+///
+/// # Errors
+///
+/// Propagates an identity parse failure.
+pub fn named_for(status: RecordStatus) -> Result<Option<RecordPrincipals>, DecisionError> {
+    let held = RiskLevel::new(RiskTier::TierAConsequential, OversightClass::Standard);
+    let (level, checkers) = match status {
+        RecordStatus::HaltEngaged => return Ok(None),
+        RecordStatus::PendingApproval => (held, None),
+        RecordStatus::Rejected => (
+            held,
+            Some(CheckerSet::single(CheckerId::parse("checker-01")?)),
+        ),
+        RecordStatus::Approved
+        | RecordStatus::Blocked
+        | RecordStatus::Halted
+        | RecordStatus::HaltReleased => (RiskLevel::LOWEST, None),
+    };
+    Ok(Some(RecordPrincipals {
+        level,
+        maker: MakerId::parse("maker-01")?,
+        checkers,
+    }))
 }
 
 // --- Fixtures for the encoding rules ---------------------------------------

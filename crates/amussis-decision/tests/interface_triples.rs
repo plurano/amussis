@@ -17,7 +17,7 @@ use amussis_decision::{
     UnavailableSink, UnixSeconds,
 };
 
-use common::{FIXTURE_AUDIT_BOUND, Fallible, FixtureError, FixtureSigner, io_deadline};
+use common::{FIXTURE_AUDIT_BOUND, Fallible, FixtureError, FixtureSigner, io_deadline, named_for};
 
 // --- Identity -------------------------------------------------------------
 
@@ -606,6 +606,7 @@ fn in_memory_sink_positive_negative_and_boundary() -> Fallible<()> {
                 agent: AgentId::parse("agent-01")?,
                 action_type: ActionType::FileModification,
             }),
+            principals: named_for(RecordStatus::Approved)?,
             status: RecordStatus::Approved,
             block_reason: None,
             killswitch: KillswitchState::Armed,
@@ -707,6 +708,7 @@ fn verify_chain_bound_positive_negative_and_boundary() -> Fallible<()> {
                 agent: AgentId::parse("agent-01")?,
                 action_type: ActionType::FileModification,
             }),
+            principals: named_for(RecordStatus::Approved)?,
             status: RecordStatus::Approved,
             block_reason: None,
             killswitch: KillswitchState::Armed,

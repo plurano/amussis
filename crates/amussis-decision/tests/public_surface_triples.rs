@@ -32,6 +32,7 @@ use amussis_decision::{
 
 use common::{
     FIXTURE_AUDIT_BOUND, Fallible, FixtureError, FixtureSigner, START, engine, intent, io_deadline,
+    named_for,
 };
 
 /// Builds an empty fixture ledger through the concrete SHA-256 alias.
@@ -52,6 +53,7 @@ fn sample_draft(id: &str, at: u64) -> Result<RecordDraft, DecisionError> {
             agent: AgentId::parse("agent-01")?,
             action_type: ActionType::FileModification,
         }),
+        principals: named_for(RecordStatus::Approved)?,
         status: RecordStatus::Approved,
         block_reason: None,
         killswitch: KillswitchState::Armed,

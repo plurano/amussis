@@ -14,7 +14,7 @@ use amussis_decision::{
 
 use common::{
     FIXTURE_AUDIT_BOUND, Fallible, FixtureError, FixtureSigner, OversizedSigner, engine, intent,
-    io_deadline, unsigned_engine,
+    io_deadline, named_for, unsigned_engine,
 };
 
 /// The FIPS 180-4 SHA-256 digest of `abc`, as a literal so no dev-dependency is
@@ -47,6 +47,7 @@ fn draft(id: &str, status: RecordStatus, at: u64) -> Result<RecordDraft, Decisio
             agent: AgentId::parse("agent-01")?,
             action_type: ActionType::FileModification,
         }),
+        principals: named_for(status)?,
         status,
         block_reason: None,
         killswitch: KillswitchState::Armed,
@@ -152,8 +153,9 @@ fn single_flipped_byte_is_detected_and_missing_signer_returns_an_error() -> Fall
     );
 
     // One field of the stored body is edited, keeping the original digest.
+    // The edit keeps the record well formed, so the digest is what tells.
     let forged_body = AuditRecord::from_parts(
-        original.body().with_status(RecordStatus::Rejected),
+        original.body().with_status(RecordStatus::Blocked),
         *original.signature(),
         original.digest(),
     );

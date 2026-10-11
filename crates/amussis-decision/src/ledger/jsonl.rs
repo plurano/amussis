@@ -10,6 +10,7 @@
 //! ledger digest.
 
 use crate::ledger::AuditRecord;
+use crate::ledger::RecordPrincipals;
 use crate::ledger::RecordStatus;
 use crate::ledger::hash::{HashAlgorithm, HashError};
 
@@ -36,6 +37,15 @@ pub struct LedgerLine {
     pub intent_id: Option<String>,
     /// The agent that proposed the action; `None` as for the intent.
     pub agent: Option<String>,
+    /// The tag of the risk level the approval rule was asked at; `None` for
+    /// the record of a halt, which names nobody.
+    pub level: Option<u8>,
+    /// The maker of the proposal, or the person who released the halt, as the
+    /// identity the caller passed in; `None` as for the level.
+    pub maker: Option<String>,
+    /// The checkers who cast the vote or approved the release, in the order
+    /// the record states them. Empty where nobody voted.
+    pub checkers: Vec<String>,
     /// Whether the halt latch was engaged when the decision was taken.
     pub killswitch_engaged: bool,
 }
@@ -73,6 +83,7 @@ pub fn project(record: &AuditRecord) -> Result<LedgerLine, RenderError> {
         ),
         None => (None, None),
     };
+    let named = named_of(draft.principals.as_ref())?;
     Ok(LedgerLine {
         sequence: body.sequence().get(),
         algorithm: body.algorithm(),
@@ -83,7 +94,35 @@ pub fn project(record: &AuditRecord) -> Result<LedgerLine, RenderError> {
         digest,
         intent_id,
         agent,
+        level: named.level,
+        maker: named.maker,
+        checkers: named.checkers,
         killswitch_engaged: draft.killswitch.is_engaged(),
+    })
+}
+
+/// Who a record names, as text. A record that names nobody leaves all of it
+/// empty.
+#[derive(Default)]
+struct Named {
+    level: Option<u8>,
+    maker: Option<String>,
+    checkers: Vec<String>,
+}
+
+/// Reads who a record names as text: the level tag, the maker, the checkers.
+fn named_of(principals: Option<&RecordPrincipals>) -> Result<Named, RenderError> {
+    let Some(named) = principals else {
+        return Ok(Named::default());
+    };
+    let mut checkers = Vec::with_capacity(2);
+    for checker in named.checkers().iter().flatten() {
+        checkers.push(text_of(checker.as_bytes())?);
+    }
+    Ok(Named {
+        level: Some(named.level.tag()),
+        maker: Some(text_of(named.maker.as_bytes())?),
+        checkers,
     })
 }
 

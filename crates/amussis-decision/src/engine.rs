@@ -118,9 +118,18 @@
 //! only with that many, none of them the releasing person. There is no
 //! second rule.
 //!
-//! The release record states that the halt was released and when. It does
-//! not name the releasing person or the checkers: no record of the chain
-//! names a person. Who released a halt is for the caller to keep.
+//! The release record states that the halt was released and when, the level
+//! the halt stood at, the releasing person and the checkers who approved
+//! ([`RecordPrincipals`]). A reader of the chain holds the release to the
+//! approval rule with that record alone.
+//!
+//! # Who the records name
+//!
+//! Every record that decides an action names the maker of the proposal, and
+//! the record of a vote names the panel that cast it. The engine writes the
+//! identities it was given, byte for byte; it neither hashes them nor reads
+//! them. The record of a halt names nobody, because a halt is called without
+//! a person.
 //!
 //! A halt whose record could not be written, and under which nothing was
 //! recorded afterwards, is not in the stored chain. An engine continued from
@@ -134,7 +143,8 @@ use crate::ledger::anchor::ChainAnchor;
 use crate::ledger::hash::{Digest32, LedgerHasher};
 use crate::ledger::signer::{RecordSigner, SignerBinding};
 use crate::ledger::{
-    AuditLedger, IoDeadline, LedgerError, LedgerSink, RecordDraft, RecordStatus, RecordSubject,
+    AuditLedger, IoDeadline, LedgerError, LedgerSink, RecordDraft, RecordPrincipals, RecordStatus,
+    RecordSubject,
 };
 use crate::outcome::{BlockReason, InterceptorOutcome, WarningCode};
 use crate::oversight::{
@@ -346,7 +356,12 @@ impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Clock> DecisionEngine<H
         let level = self.releasable_level()?;
         approve_release(level, releaser, panel)?;
         let at = self.now()?;
-        let draft = RecordDraft::of_latch(KillswitchState::Armed, at);
+        let named = RecordPrincipals {
+            level,
+            maker: *releaser,
+            checkers: panel,
+        };
+        let draft = RecordDraft::of_release(named, at);
         let sealed = self.ledger.append(draft)?;
         self.killswitch = Killswitch::new();
         self.halt_recorded = false;
@@ -389,8 +404,8 @@ impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Clock> DecisionEngine<H
         if self.halt_recorded {
             return Ok(());
         }
-        let draft = RecordDraft::of_latch(self.killswitch.state(), self.last_known_time());
-        self.append(draft).map(|_| ())
+        let draft = RecordDraft::of_halt(self.killswitch.state(), self.last_known_time());
+        self.append(&draft).map(|_| ())
     }
 
     /// Engages the latch for a fault the engine found itself and writes the
@@ -404,8 +419,8 @@ impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Clock> DecisionEngine<H
     }
 
     /// Seals `draft`, and notes when the chain then carries the halt.
-    fn append(&mut self, draft: RecordDraft) -> Result<Digest32, LedgerError> {
-        let sealed = self.ledger.append(draft)?;
+    fn append(&mut self, draft: &RecordDraft) -> Result<Digest32, LedgerError> {
+        let sealed = self.ledger.append(*draft)?;
         if draft.killswitch.is_engaged() {
             self.halt_recorded = true;
         }
@@ -518,7 +533,7 @@ impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Clock> DecisionEngine<H
         // A halted system still records the refusal. A seal failure cannot make
         // the block any weaker, and the latch is already engaged, so there is
         // nothing left to escalate to.
-        let _sealed = self.append(draft);
+        let _sealed = self.append(&draft);
         InterceptorOutcome::Block { reason }
     }
 
@@ -531,7 +546,7 @@ impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Clock> DecisionEngine<H
         let draft = draft_for(intent, RecordStatus::Blocked, observed, at, Some(reason));
         // The refusal carries the engaged latch, so it is the record of this
         // halt as well; no halt record is written beside it.
-        let _sealed = self.append(draft);
+        let _sealed = self.append(&draft);
         InterceptorOutcome::Block { reason }
     }
 
@@ -544,7 +559,7 @@ impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Clock> DecisionEngine<H
     ) -> InterceptorOutcome {
         let observed = self.killswitch.state();
         let draft = draft_for(intent, RecordStatus::Blocked, observed, now, Some(reason));
-        match self.append(draft) {
+        match self.append(&draft) {
             Ok(_) => InterceptorOutcome::Block { reason },
             Err(error) => self.escalate_audit_failure(&error, intent.level()),
         }
@@ -627,7 +642,7 @@ impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Clock> DecisionEngine<H
     ) -> InterceptorOutcome {
         let observed = self.killswitch.state();
         let draft = draft_for(intent, status, observed, now, None);
-        match self.append(draft) {
+        match self.append(&draft) {
             Ok(_) => candidate,
             Err(error) => {
                 if let Some(ticket) = candidate.ticket() {
@@ -720,12 +735,17 @@ impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Clock> DecisionEngine<H
                 agent: *ticket.agent(),
                 action_type: ticket.action(),
             }),
+            principals: Some(RecordPrincipals {
+                level: ticket.level(),
+                maker: *ticket.maker(),
+                checkers: Some(verified.panel()),
+            }),
             status,
             block_reason: None,
             killswitch: self.killswitch.state(),
             at: now,
         };
-        if let Err(error) = self.append(draft) {
+        if let Err(error) = self.append(&draft) {
             return Err(self.escalate_unrecorded_vote(ticket, &error));
         }
         Ok(match vote {
@@ -787,6 +807,11 @@ fn draft_for(
             intent_id: *intent.id(),
             agent: *intent.agent(),
             action_type: intent.action(),
+        }),
+        principals: Some(RecordPrincipals {
+            level: intent.level(),
+            maker: *intent.maker(),
+            checkers: None,
         }),
         status,
         block_reason,

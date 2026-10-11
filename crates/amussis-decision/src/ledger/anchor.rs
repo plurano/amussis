@@ -177,6 +177,10 @@ fn read_anchor<H: LedgerHasher>(preimage: &[u8], head: Digest32) -> Option<Chain
     let killswitch = read_killswitch(&mut reader)?;
     let _intent = reader.framed()?;
     let _agent = reader.framed()?;
+    let _level = reader.byte()?;
+    let _maker = reader.framed()?;
+    let _first_checker = reader.framed()?;
+    let _second_checker = reader.framed()?;
     let canonical = domain == AUDIT_DOMAIN
         && contract == CONTRACT_VERSION.as_bytes()
         && algorithm == H::ALGORITHM.tag()
