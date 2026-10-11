@@ -1,5 +1,27 @@
 # Amussis
 
+<!-- praetor:readme-governance:start -->
+[![HISS Adopted][praetor-hiss-badge]][praetor-hiss-agents]
+
+Praetor manages this repository's declared governance policy. This managed
+block records adoption state; it is not a verification certificate.
+
+**Verification**: `make verify-all` runs the repository's configured
+verification cascade.
+
+**HISS Audit**: `praetorctl audit` enforces policy, generated-surface
+integrity, and the debt ratchet.
+
+**Context Sync**: `praetorctl compile-context --verify` verifies every
+generated agent context against `AGENTS.md`.
+
+**Debt Baseline**: `.standards-baseline.json` anchors the debt ratchet at
+1 recorded infraction; audit forbids growth.
+
+[praetor-hiss-badge]: https://img.shields.io/badge/Standards-HISS%20Adopted%20(1%20baselined)-yellow
+[praetor-hiss-agents]: https://github.com/plurano/amussis/blob/HEAD/AGENTS.md
+<!-- praetor:readme-governance:end -->
+
 Shared Rust crates of the Plurano framework family, kept in one workspace.
 
 ## Name
@@ -22,17 +44,20 @@ kill switch) that moves here from the operating-system repository.
 | `tools/settings_sync.py` | Holds the shared toolchain and lint settings to their recorded source. |
 | `settings-source.json` | The record: source repository, commit, file hashes and manifest settings. |
 | `LICENSES/`, `REUSE.toml` | Licence text and the annotations for files that cannot carry a header. |
+| `.standards.yaml`, `.standards.lock`, `.standards-baseline.json` | The Praetor adoption: profile, pinned policy and the recorded debt the audit lets shrink, never grow. |
 
 ## Verification gate
 
 ```sh
-make verify
+make verify-all
 ```
 
-One target, the same one CI runs. It checks the shared settings, then formats,
-builds, tests (default and all features), lints with warnings refused and
-builds the documentation on the toolchain `rust-toolchain.toml` pins, and
-finally checks the licence headers with `reuse lint`.
+One target, the same one CI runs. Its first half, `make verify`, needs no
+engine: it checks the shared settings, then formats, builds, tests (default and
+all features), lints with warnings refused and builds the documentation on the
+toolchain `rust-toolchain.toml` pins, and checks the licence headers with
+`reuse lint`. Its second half is the Praetor standards audit, which needs
+`praetorctl`; CI builds it from the commit pinned in the workflow.
 
 `cargo fetch --locked` is the only step that reaches a third-party host (the
 crates.io registry); everything after it runs with `--offline`. Builds follow

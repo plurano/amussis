@@ -1,13 +1,19 @@
 # SPDX-FileCopyrightText: 2026 Lusoris <lusoris@proton.me>
 # SPDX-License-Identifier: EUPL-1.2
+-include .config/praetor/engine.mk
 
 SHELL := /bin/sh
 REUSE ?= reuse
 
 .PHONY: verify verify-settings verify-rust verify-reuse fetch
 
-# The one gate: CI runs exactly this target, so a local green run and a green
-# status check mean the same thing.
+# The one gate is `make verify-all`: CI runs exactly that target, so a local
+# green run and a green status check mean the same thing. Its recipe, at the
+# end of this file, belongs to the engine and runs the standards audit; the
+# prerequisite here puts this workspace's own checks in front of it.
+verify-all: verify
+
+# This workspace's own checks; they need no engine.
 verify: verify-settings verify-rust verify-reuse
 	@printf '%s\n' 'PASS: settings, crate gate and licence headers.'
 
@@ -40,3 +46,20 @@ verify-rust: fetch
 # Every file carries its licence header or is named in REUSE.toml.
 verify-reuse:
 	$(REUSE) lint
+
+# Praetor declared verification; existing project recipes remain unchanged.
+# Praetor ships one binary under two names; resolve whichever is installed.
+PRAETORCTL ?= $(shell command -v praetorctl 2>/dev/null || command -v standardsctl 2>/dev/null || echo praetorctl)
+.PHONY: verify-all
+verify-all:
+	@$(PRAETORCTL) compile-context --verify
+	@$(PRAETORCTL) caveman check --configured-sources
+	@$(PRAETORCTL) audit
+	@exec 'cargo' 'build' '--locked'
+	@exec 'cargo' 'test' '--locked'
+
+compile-context:
+	@$(PRAETORCTL) compile-context
+
+audit:
+	@$(PRAETORCTL) audit

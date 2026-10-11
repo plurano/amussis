@@ -1,8 +1,10 @@
 # SPDX-FileCopyrightText: 2026 Lusoris <lusoris@proton.me>
 # SPDX-License-Identifier: EUPL-1.2
 #
-# Only files that cannot carry a header are named here. There is deliberately
-# no "**" table: a source file without its own header must fail `reuse lint`.
+# Only files that cannot carry a header are named here, and the files the
+# Praetor engine writes, which it compares byte for byte and so cannot gain
+# one. There is deliberately no "**" table: a source file without its own
+# header must fail `reuse lint`.
 
 version = 1
 
@@ -15,5 +17,52 @@ path = [
     ".gitignore",
 ]
 precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Lusoris <lusoris@proton.me>"
+SPDX-License-Identifier = "EUPL-1.2"
+
+# Written by `praetorctl adopt` and held in step by `praetorctl audit`.
+# "closest" keeps the terms a generated file states itself, as the bundled
+# skills do.
+[[annotations]]
+path = [
+    ".agents/**",
+    ".claude/**",
+    ".codex/**",
+    ".config/**",
+    ".cursor/**",
+    ".devcontainer/**",
+    ".fleet/**",
+    ".gemini/**",
+    ".github/agents/**",
+    ".github/rulesets/**",
+    ".github/actionlint.yaml",
+    ".github/copilot-instructions.md",
+    ".github/pull_request_template.md",
+    ".github/workflows/reuse.yml",
+    ".helix/**",
+    ".idea/**",
+    ".paperclip/**",
+    ".vscode/**",
+    ".zed/**",
+    "docs/adr/**",
+    "lua/standards.lua",
+    ".clang-tidy",
+    ".dir-locals.el",
+    ".editorconfig",
+    ".gitattributes",
+    ".nvim.lua",
+    ".standards-baseline.json",
+    ".standards.lock",
+    ".standards.yaml",
+    ".windsurfrules",
+    "AGENTS.md",
+    "AGENTS.readonly.md",
+    "CLAUDE.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "lefthook.yml",
+    "standards.sublime-project",
+]
+precedence = "closest"
 SPDX-FileCopyrightText = "2026 Lusoris <lusoris@proton.me>"
 SPDX-License-Identifier = "EUPL-1.2"
