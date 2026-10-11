@@ -54,6 +54,7 @@ kill switch) that moves here from the operating-system repository.
 | `docs/handover/` | What left this repository for the operating-system repository, each with paths, hashes and the steps to switch: the service unit, and the conversation schemas with the subsystem graph. |
 | `tools/apicompat/`, `.github/workflows/praetor-api.yml` | Written by the Praetor engine: on a pull request, compares the exported API of the Go module with the base commit. |
 | `settings-source.json` | The record: source repository, commit, file hashes and manifest settings. |
+| `.github/workflows/release.yml`, `release-build.yml` | The release: a version tag builds, signs and attests the release files and stores them in a draft release. See [Releases](#releases). |
 | `LICENSES/`, `REUSE.toml` | Licence text and the annotations for files that cannot carry a header. |
 | `.standards.yaml`, `.standards.lock`, `.standards-baseline.json` | The Praetor adoption: profile, pinned policy and the recorded debt the audit lets shrink, never grow. |
 
@@ -373,6 +374,61 @@ python3 tools/settings_sync.py update --source <checkout of the source repositor
 
 `selftest` plants one defect per setting and requires each to be refused; the
 gate runs it before the check.
+
+## Releases
+
+Nothing is released yet, and the release workflow has not run: the path below
+is unproven until its first run. That run is a pre-release tag on the public
+repository, and `v0.1.0` is set only after it ends green. This section says
+what the workflow files do.
+
+A version tag, `v` and the version in `Cargo.toml` (`v0.1.0`), starts
+`.github/workflows/release.yml`. The run publishes nothing: it ends in a draft
+release on the forge, which a person reads and publishes.
+
+| File of a release | What it is |
+| :--- | :--- |
+| `amussis-decision-<version>.crate` | The library as `cargo package` packs it, compiled once more from the packed sources. |
+| `amussis-decision-<version>.wasm` | The module the Go binding embeds, rebuilt from the tag and compared byte for byte (`tools/wasm_module.py check`). |
+| `amussis-decision-<version>.cyclonedx.json`, `.spdx.json` | The dependencies of the packed crate, read from its lock file. |
+| `checksums.txt` | The SHA-256 of the four files above. |
+| `checksums.txt.sigstore.json` | The signature over `checksums.txt`. |
+
+The files are built in `.github/workflows/release-build.yml`, which only the
+release workflow calls and which only builds. The signature and the provenance
+of every file name that workflow, so a file built anywhere else does not pass.
+A tag that names another version than the manifest finds no crate file of its
+name, and the run stops before anything is signed.
+
+A tag with a hyphen after the version (`v0.1.0-rc.1`) runs the same path to
+prove it. Its files carry the manifest version, its draft is marked as a
+pre-release, and the draft is deleted after reading, not published.
+
+To check a release after downloading its files:
+
+```sh
+sha256sum --check --strict checksums.txt
+cosign verify-blob \
+  --certificate-identity https://github.com/plurano/amussis/.github/workflows/release-build.yml@refs/tags/v0.1.0 \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --bundle checksums.txt.sigstore.json checksums.txt
+gh attestation verify amussis-decision-0.1.0.crate --repo plurano/amussis \
+  --signer-workflow plurano/amussis/.github/workflows/release-build.yml
+```
+
+The run does the same before it stores the files (job `Read the release files
+back`): each check once on the file as built, and once on a copy with a planted
+change or against the wrong workflow, which has to be refused.
+
+Limits as of this state:
+
+- No run has signed or attested anything yet. `praetorctl audit` measures the
+  declared supply chain (build level 3, signed checksums, a dependency
+  inventory) from the two workflow files; it reads no published signature.
+- Nothing goes to a package registry. Both crates carry `publish = false`, and
+  the export crate ships as the module it builds, not as a crate file.
+- The run sets no tag for the Go module. A module in a subdirectory is fetched
+  by a tag of its own, `bindings/go/v<version>`.
 
 ## Dependencies
 

@@ -1,0 +1,124 @@
+# SPDX-FileCopyrightText: 2026 Lusoris <lusoris@pm.me>
+# SPDX-License-Identifier: EUPL-1.2
+---
+# Release builder: builds the release files from the checked-out tag, signs
+# their checksums and attests their provenance. It is called by release.yml
+# and by nothing else, so the identity in the signature and in the attestation
+# is this file, which only builds. It restores no cache and downloads no
+# earlier build: every file it attests was built in this job.
+name: Release build
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: never
+
+jobs:
+  build:
+    name: Build, sign and attest the release files
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Check out the tagged commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Same step as the verification gate: with no toolchain argument rustup
+      # installs the channel rust-toolchain.toml pins, and the WebAssembly
+      # target is added and checked in a step of its own.
+      - name: Materialise the pinned Rust toolchain
+        run: |
+          rustup toolchain install --no-self-update --profile minimal
+          rustup target add wasm32-unknown-unknown
+          rustup show active-toolchain
+          rustup target list --installed | grep -qx wasm32-unknown-unknown
+
+      # A compiler warning stops the release, as it stops the gate.
+      - name: Build the library
+        env:
+          RUSTFLAGS: "-D warnings"
+        run: cargo build --locked --release -p amussis-decision
+
+      # The package step compiles the packed sources once more, so the crate
+      # file is known to build on its own.
+      - name: Package the library crate
+        env:
+          RUSTFLAGS: "-D warnings"
+        run: cargo package --locked -p amussis-decision
+
+      # The Go binding embeds the committed module; this rebuilds it from the
+      # tagged source and refuses a module that differs by one byte.
+      - name: Hold the committed module to its source
+        run: python3 -B tools/wasm_module.py check
+
+      # The crate file carries the version of the manifest in its name. A tag
+      # that names another version finds no such file, and the release stops
+      # here. A pre-release tag (`v0.1.0-rc.1`) names the manifest version
+      # before its first hyphen, and its files carry the manifest version.
+      - name: Stage the release files
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#v}"
+          version="${version%%-*}"
+          mkdir dist
+          cp "target/package/amussis-decision-${version}.crate" dist/
+          cp bindings/go/decision/amussis_decision.wasm \
+            "dist/amussis-decision-${version}.wasm"
+
+      - name: Install Syft
+        uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          syft-version: v1.54.1
+
+      # The inventory reads the unpacked crate, lock file included: the
+      # dependencies of what is shipped, not of the whole checkout.
+      - name: Write the dependency inventory
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#v}"
+          version="${version%%-*}"
+          syft scan "dir:target/package/amussis-decision-${version}" \
+            -o "cyclonedx-json=dist/amussis-decision-${version}.cyclonedx.json" \
+            -o "spdx-json=dist/amussis-decision-${version}.spdx.json"
+
+      - name: Write the checksums
+        working-directory: dist
+        run: |
+          sha256sum -- * > ../checksums.txt
+          mv ../checksums.txt checksums.txt
+          cat checksums.txt
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.1.3
+
+      - name: Sign the checksums
+        run: |
+          cosign sign-blob --yes \
+            --bundle dist/checksums.txt.sigstore.json \
+            dist/checksums.txt
+
+      - name: Attest the provenance of every checksummed file
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: dist/checksums.txt
+
+      - name: Hand the release files to the calling workflow
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-files
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
