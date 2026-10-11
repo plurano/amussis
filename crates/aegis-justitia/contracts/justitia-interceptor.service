@@ -1,0 +1,61 @@
+# SPDX-FileCopyrightText: 2026 Lusoris <lusoris@proton.me>
+# SPDX-License-Identifier: EUPL-1.2
+#
+# CONTRACT-ONLY. This file is a declarative contract, not an installed unit.
+#
+# Nothing in this repository copies this file into a systemd unit directory,
+# enables it, starts it or generates it. It is not a unit that happens to be
+# switched off: it is the recorded shape of the unit P06 will eventually ship,
+# kept next to the crate so a reader of aegis-justitia finds it, and reviewed by
+# library code in src/contracts/unit.rs so its hardening cannot be deleted
+# silently. `aegis_justitia::contracts::unit::review` fails if any required
+# directive below is removed, and the crate's integration tests run that review
+# against this exact file.
+#
+# The ExecStart binary named below does not exist. The crate declares a library
+# and no [[bin]], so there is nothing here to start; building and installing the
+# interceptor daemon is later work, and so are the eBPF program (M19, M10) and
+# the TPM2 attestation this unit orders itself after (M20).
+#
+# The directive set is the contract this repository declares for P06. It is
+# derived from requirement REQ-P06-02 and its cited source (export-015,
+# fcbe2caed363), not transcribed from it, and each group below says why it is
+# here.
+
+[Unit]
+# Ordered after the TPM2 resource manager because audit records are meant to be
+# sealed by a TPM2 key (M20). Nothing is sealed today.
+Description=Project Justitia Action Interceptor Engine
+After=tpm2-abrmd.service
+
+# A gate that refuses to start is a gate that is not bypassed by rate limiting.
+StartLimitIntervalSec=0
+
+[Service]
+# Readiness is explicit: the interceptor reports itself ready rather than being
+# assumed ready the moment the process exists.
+Type=notify
+
+# The binary this names is not built by this milestone.
+ExecStart=/usr/bin/justitia-interceptor --mode=strict
+
+# A decision gate that has died must come back, or every gated action fails.
+Restart=always
+
+# The eBPF loader the gate will use needs this capability; nothing in the
+# repository loads an eBPF program yet.
+CapabilityBoundingSet=CAP_SYS_ADMIN
+
+# Hardening. IPAddressDeny=any is the directive the requirement ties to the
+# Zero-SaaS sovereign-app-engine rule: the compliance gate must not be able to
+# reach a network service, so it cannot be made to depend on one.
+ProtectSystem=strict
+ProtectHome=yes
+IPAddressDeny=any
+
+# Device access stays open because the TPM2 and eBPF paths will need it. It is
+# a deliberate exception to the hardening above, recorded rather than hidden.
+PrivateDevices=no
+
+[Install]
+WantedBy=multi-user.target

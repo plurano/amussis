@@ -1,0 +1,36 @@
+# SPDX-FileCopyrightText: 2026 Lusoris <lusoris@proton.me>
+# SPDX-License-Identifier: EUPL-1.2
+
+[package]
+name = "aegis-justitia"
+description = "Aegis OS P06 decision engine: risk tiers, maker-checker oversight and a hash-linked audit ledger."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+base16ct.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[features]
+default = []
+# The JSON Lines ledger renderer. It stays behind a feature because it is a
+# local operator convenience, not a consumer contract; the M14 consumer schemas
+# in `contracts` are unconditional, so the default gate covers them.
+jsonl = []
+
+[lints]
+workspace = true
