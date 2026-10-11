@@ -347,16 +347,16 @@ at most 90 days ahead. `tools/exceptions_check.py` fails on any other file that
 lowers the lint, on an entry whose file lowers nothing, and on an entry past its
 date: a lapsed exception excuses nothing.
 
-The second entry names `.github/rulesets/main.json`. The Praetor engine writes
-that file, and for the licence job, which calls the shared workflow of
-`plurano/shared-ci` (`.github/workflows/licence-check.yml`), it requires the
-check `Licence`. A run reports that job as `Licence / REUSE lint`, so the
-required name is never reported (cordanaLLM/praetor#1212). The same check reads
-every workflow's job names and the rule set: a required name that is the bare
-name of a calling job needs the live entry, a required name no job carries is
-refused with or without it, and the entry is refused once no such name is left.
-No rule set is live on the forge while the repository is private; the entry's
-reason states what has to hold before that changes.
+The same check holds `.github/rulesets/main.json` to the workflows. The Praetor
+engine writes that file, and for a job that calls another workflow it requires
+the calling job's own name. A run reports such a job as
+`<calling job> / <called job>`, so the required name is never reported
+(cordanaLLM/praetor#1212). The check reads every workflow's job names and the
+rule set: a required name that is the bare name of a calling job needs a live
+entry for the rule-set file, a required name no job carries is refused with or
+without one, and an entry is refused once no such name is left. No job here
+calls another workflow today, so the list holds no such entry; the selftest
+plants a calling job to keep the rule proven.
 
 ## Shared settings
 

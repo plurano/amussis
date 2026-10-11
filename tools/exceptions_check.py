@@ -29,6 +29,10 @@ the required name (cordanaLLM/praetor#1212):
     without an exception;
     an exception left after the last such name went excuses nothing.
 
+No job of this workspace calls another workflow today, so the list holds no
+entry for this rule. The selftest gives every planted tree one calling job,
+its required name and its entry, so the rule stays proven until a job needs it.
+
 An exception past its day excuses nothing: the file it names fails as if the
 entry were missing.
 
@@ -379,7 +383,16 @@ def lower_second_member(tree: Path) -> None:
 ENGINE = "crates/amussis-decision"
 WASM = "crates/amussis-decision-wasm"
 ABI = f"{WASM}/src/abi.rs"
-CALLER = f"{WORKFLOWS}/licence-check.yml"
+CALLER = f"{WORKFLOWS}/planted-caller.yml"
+CALLING_JOB = "Planted caller"
+CALLER_TEXT = f"""\
+name: Planted
+on: [push]
+jobs:
+  planted:
+    name: {CALLING_JOB}
+    uses: example/shared/.github/workflows/check.yml@0000000000000000000000000000000000000000
+"""
 GATE = f"{WORKFLOWS}/ci.yml"
 EXPIRES = re.compile(r'expires = "(\d{4}-\d{2}-\d{2})"')
 
@@ -474,7 +487,7 @@ PLANTS = {
     "calling job's name required without an entry": (
         drop_entry(RULESET),
         0,
-        f"{RULESET}: requires check 'Licence', which no run reports",
+        f"{RULESET}: requires check {CALLING_JOB!r}, which no run reports",
     ),
     "rule-set exception one day past its end": (
         None,
@@ -507,7 +520,7 @@ PLANTS = {
         f"the entry for {RULESET} excuses nothing",
     ),
     "job that neither runs nor calls": (
-        replace_in(CALLER, "    uses: plurano/shared-ci/", "    usez: plurano/shared-ci/"),
+        replace_in(CALLER, "    uses: example/shared/", "    usez: example/shared/"),
         0,
         "neither runs steps nor calls a workflow",
     ),
@@ -531,6 +544,21 @@ PLANTS = {
 }
 
 
+def plant_caller(tree: Path, end: datetime.date) -> None:
+    """Give a copy one calling job, its required name and its entry."""
+    (tree / CALLER).write_text(CALLER_TEXT, encoding="utf-8")
+    try:
+        document = json.loads(read_text(tree / RULESET))
+        for rule in document["rules"]:
+            if rule["type"] == "required_status_checks":
+                rule["parameters"]["required_status_checks"].append({"context": CALLING_JOB})
+    except (json.JSONDecodeError, KeyError, TypeError) as error:
+        raise CheckError(f"selftest plant: {RULESET} cannot be read as a rule set: {error!r}") from error
+    (tree / RULESET).write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+    entry = f'\n[[exception]]\nrule = "{REPORTED}"\npath = "{RULESET}"\nreason = "planted"\nexpires = "{end}"\n'
+    append_to(LIST, entry)(tree)
+
+
 def planted(root: Path, end: datetime.date, edit) -> Path:
     """A throwaway copy of the manifests, the list, the rule set, the workflows and the member sources."""
     tree = Path(tempfile.mkdtemp(prefix="exceptions-check-"))
@@ -539,6 +567,7 @@ def planted(root: Path, end: datetime.date, edit) -> Path:
         shutil.copyfile(root / name, tree / name)
     for top in (WORKFLOWS, *source_roots(members(root)[1])):
         shutil.copytree(root / top, tree / top, ignore=shutil.ignore_patterns("target"))
+    plant_caller(tree, end)
     same_end(tree, end)
     if edit is not None:
         edit(tree)
@@ -560,10 +589,11 @@ def selftest(root: Path, today: datetime.date) -> list[str]:
     """Each plant must be refused, and for the reason it was planted for."""
     failures = [f"the unplanted tree is refused: {line}" for line in check(root, today)]
     ends = sorted(EXPIRES.findall(read_text(root / LIST)))
-    if len(ends) != len(RULES):
-        return [*failures, f"the selftest is written for one exception a rule; {LIST} holds {len(ends)}"]
-    # Every planted tree carries the earliest end on all entries: a date plant
-    # is read relative to that day, an edit plant on it.
+    if len(ends) != 1:
+        return [*failures, f"the selftest is written for one exception in {LIST}; it holds {len(ends)}"]
+    # Every planted tree carries that end on both entries, the committed one
+    # and the planted one: a date plant is read relative to that day, an edit
+    # plant on it.
     end = datetime.date.fromisoformat(ends[0])
     last_day = refusals(root, end, None, end)
     failures.extend(f"the exceptions do not hold on their last day: {line}" for line in last_day)
