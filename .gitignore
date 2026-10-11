@@ -2,6 +2,9 @@
 __pycache__/
 *.pyc
 
+# The pre-push gate's local receipt.
+/.standards-receipt.json
+
 # BEGIN praetor private artifacts (praetorctl adopt)
 /.workingdir/
 /.workingdir2/
