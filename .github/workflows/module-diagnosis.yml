@@ -4,9 +4,10 @@
 # Module diagnosis: builds the WebAssembly module on Linux, macOS and Windows
 # the way the gate builds it and keeps cargo's record of every compiler call,
 # so the three hosts can be compared argument by argument. A Windows host
-# builds other bytes than the committed module (issue 2); a run of this found
-# the cause, and the workflow stays for the fix. It is started by hand, it
-# gates nothing, and it goes when that issue is closed.
+# builds other bytes than the committed module, and a macOS host does with
+# some lock files (issue 2); a run of this found the cause, and the workflow
+# stays for the fix. It is started by hand, it gates nothing, and it goes when
+# that issue is closed.
 name: Module diagnosis
 
 on:
@@ -51,14 +52,18 @@ jobs:
         run: cargo fetch --locked
 
       # The checkout is fresh, so every crate is compiled and recorded. On a
-      # Windows host the check passes on its dated exception and still builds.
+      # Windows or macOS host the check passes on its dated exception and
+      # still builds. The module is kept before the check's verdict ends the
+      # step: a host that is refused is the one whose module is wanted.
       - name: Build the module and record every compiler call
         run: |
           mkdir record
           rustc -vV > record/rustc.txt
           cargo -vV > record/cargo.txt
-          python3 -B tools/wasm_module.py check --cargo-log record/cargo-build.log
+          verdict=0
+          python3 -B tools/wasm_module.py check --cargo-log record/cargo-build.log || verdict=$?
           cp target/wasm32-unknown-unknown/wasm/amussis_decision_wasm.wasm record/
+          exit "$verdict"
 
       - name: Keep the record
         if: ${{ !cancelled() }}
