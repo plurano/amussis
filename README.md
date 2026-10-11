@@ -285,9 +285,11 @@ The committed module is the build of the source beside it: `tools/wasm_module.py
 check` rebuilds it with the machine's paths rewritten and fails on one differing
 byte. After a change to the engine or the export crate, run
 `python3 tools/wasm_module.py update` and commit the module with the change.
-Linux and macOS build the same bytes. A Windows host does not, so there the
-check skips the comparison, prints the reason and tests the binding on the
-committed module; `update` is refused on that host (see
+The module is the build of a Linux x86_64 host, and only such a host is held
+to its bytes today. A Windows host never builds them, and a macOS host builds
+them with some lock files and not with others, so on those two the check skips
+the comparison when the bytes differ, prints the reason and tests the binding
+on the committed module; `update` is refused there (see
 [Exceptions](#exceptions)).
 
 ## Identities in the audit chain
@@ -368,17 +370,24 @@ calls another workflow today, so the list holds no such entry; the selftest
 plants a calling job to keep the rule proven.
 
 The third entry kind excuses the byte comparison of the committed module on a
-Windows host. `rustc` embeds five source paths with that host's separators,
-which no flag of the stable toolchain rewrites, and six functions come out in
-another order: the order follows the `-C metadata` values cargo passes to the
-compiler, which differ from host to host and which no stable setting fixes.
-The entry in `exceptions.toml` names the issue, which holds the measurement.
-While the entry is live, `tools/wasm_module.py check` on
-Windows skips that one comparison and says so in its output. It still refuses a
-build that is no module or holds a machine path, and a missing module. It
-refuses the entry itself once a Windows host builds the committed bytes, and
-past the entry's date the Windows job fails like the others would. No other
-host is ever excused.
+Windows host and on a macOS host. On Windows, `rustc` embeds five source paths
+with that host's separators, which no flag of the stable toolchain rewrites,
+and six functions come out in another order: the order follows the
+`-C metadata` values cargo passes to the compiler, which differ from host to
+host and which no stable setting fixes. A macOS host embeds the same paths as
+Linux, but it passes other values too. Its build was equal to the Linux build
+until one crate version changed in the lock file, and differed after: the
+equality was a coincidence of those values, never a property of the build. The
+entry in `exceptions.toml` names the issue, which holds the measurements.
+
+While the entry is live, `tools/wasm_module.py check` on those two hosts skips
+that one comparison when the bytes differ and says so in its output. It still
+refuses a build that is no module or holds a machine path, and a missing
+module. On Windows it refuses the entry itself once the host builds the
+committed bytes; on macOS an equal build passes and proves nothing about the
+entry. Past the entry's date both jobs fail like the Linux job would. The host
+rule names those two hosts and no group of hosts: every other host is held to
+the bytes.
 
 The cause of the other order was found with the *Module diagnosis* workflow
 (`.github/workflows/module-diagnosis.yml`). It is started by hand, builds the
