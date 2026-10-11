@@ -376,6 +376,13 @@ refuses the entry itself once a Windows host builds the committed bytes, and
 past the entry's date the Windows job fails like the others would. No other
 host is ever excused.
 
+The cause is looked for with the *Module diagnosis* workflow
+(`.github/workflows/module-diagnosis.yml`). It is started by hand, builds the
+module on the three hosts with `tools/wasm_module.py check --cargo-log FILE`
+and keeps cargo's record of every compiler call as an artifact of the run, so
+the hosts can be compared argument by argument. It gates nothing and is
+removed when the issue is closed.
+
 ## Shared settings
 
 The toolchain pin, the formatter and lint configuration and the workspace lint

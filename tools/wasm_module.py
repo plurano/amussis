@@ -25,6 +25,11 @@ build equals the module.
     update      build, then replace the committed module
     selftest    plant one defect per rule and require each to be refused
 
+`--cargo-log FILE` writes cargo's record of the build to FILE: every compiler
+call with its arguments, which is what two hosts are compared by when they
+build other bytes. A build that compiled nothing records no call and is
+refused, so the option needs an empty target directory.
+
 Exit status: 0 equal, 1 the module differs, 2 the check itself could not run.
 """
 
@@ -45,6 +50,8 @@ TARGET = "wasm32-unknown-unknown"
 PROFILE = "wasm"
 PACKAGE = "amussis-decision-wasm"
 BUILT_NAME = "amussis_decision_wasm.wasm"
+# How cargo's verbose record names the compiler call that builds the module.
+MODULE_CALL = "--crate-name amussis_decision_wasm "
 COMMITTED = exceptions_check.MODULE
 MAGIC = b"\x00asm\x01\x00\x00\x00"
 BUILD_DEADLINE_SECONDS = 900
@@ -58,7 +65,9 @@ class CheckError(Exception):
     """The check could not run; distinct from a module that differs."""
 
 
-def run(args: list[str], root: Path, env: dict[str, str], deadline: int) -> str:
+def finished(
+    args: list[str], root: Path, env: dict[str, str], deadline: int
+) -> subprocess.CompletedProcess[str]:
     try:
         done = subprocess.run(
             args, cwd=root, env=env, capture_output=True, text=True, timeout=deadline, check=False
@@ -67,7 +76,11 @@ def run(args: list[str], root: Path, env: dict[str, str], deadline: int) -> str:
         raise CheckError(f"{' '.join(args)} could not run: {error}") from error
     if done.returncode != 0:
         raise CheckError(f"{' '.join(args)} exited {done.returncode}:\n{done.stderr.strip()}")
-    return done.stdout
+    return done
+
+
+def run(args: list[str], root: Path, env: dict[str, str], deadline: int) -> str:
+    return finished(args, root, env, deadline).stdout
 
 
 def toolchain(root: Path, env: dict[str, str]) -> tuple[str, str]:
@@ -99,7 +112,20 @@ def machine_prefixes(root: Path, env: dict[str, str], commit: str) -> list[tuple
     ]
 
 
-def build(root: Path) -> tuple[bytes, list[bytes], str]:
+def record_calls(log: Path, record: str) -> None:
+    """Write cargo's record of the build; a record without the module's compiler call is refused."""
+    if MODULE_CALL not in record:
+        raise CheckError(
+            f"the build compiled nothing, so its record names no compiler call of the module "
+            f"({MODULE_CALL}); build into an empty target directory"
+        )
+    try:
+        log.write_text(record, encoding="utf-8")
+    except OSError as error:
+        raise CheckError(f"cannot write {log}: {error}") from error
+
+
+def build(root: Path, log: Path | None = None) -> tuple[bytes, list[bytes], str]:
     """The module built from the tree, the machine paths it must not hold, and the host triple."""
     env = dict(os.environ)
     env.pop("CARGO_ENCODED_RUSTFLAGS", None)
@@ -108,8 +134,11 @@ def build(root: Path) -> tuple[bytes, list[bytes], str]:
     env["RUSTFLAGS"] = " ".join(f"--remap-path-prefix={path}={name}" for path, name in prefixes)
     if any(" " in str(path) for path, _ in prefixes):
         raise CheckError("a machine path holds a space; RUSTFLAGS cannot carry it")
-    cargo = ["cargo", "build", "--locked", "--offline", "-p", PACKAGE]
-    run([*cargo, "--target", TARGET, "--profile", PROFILE], root, env, BUILD_DEADLINE_SECONDS)
+    cargo = ["cargo", "build", "--locked", "--offline", "-p", PACKAGE, "--target", TARGET, "--profile", PROFILE]
+    if log is None:
+        run(cargo, root, env, BUILD_DEADLINE_SECONDS)
+    else:
+        record_calls(log, finished([*cargo, "--verbose"], root, env, BUILD_DEADLINE_SECONDS).stderr)
     target_dir = Path(env.get("CARGO_TARGET_DIR") or root / "target")
     built = target_dir / TARGET / PROFILE / BUILT_NAME
     try:
@@ -244,10 +273,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("command", choices=("check", "update", "selftest"))
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parent.parent)
+    parser.add_argument("--cargo-log", type=Path, help="write cargo's record of every compiler call here")
     args = parser.parse_args()
     root = args.root.resolve()
     try:
-        built, forbidden, host = build(root)
+        built, forbidden, host = build(root, args.cargo_log)
         excused = excuse(root, host)
         if args.command == "update":
             if excused is not None:
