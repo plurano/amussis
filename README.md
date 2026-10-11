@@ -16,9 +16,9 @@ integrity, and the debt ratchet.
 generated agent context against `AGENTS.md`.
 
 **Debt Baseline**: `.standards-baseline.json` anchors the debt ratchet at
-1 recorded infraction; audit forbids growth.
+0 recorded infractions; audit forbids growth.
 
-[praetor-hiss-badge]: https://img.shields.io/badge/Standards-HISS%20Adopted%20(1%20baselined)-yellow
+[praetor-hiss-badge]: https://img.shields.io/badge/Standards-HISS%20Adopted-blue
 [praetor-hiss-agents]: https://github.com/plurano/amussis/blob/HEAD/AGENTS.md
 <!-- praetor:readme-governance:end -->
 
@@ -28,6 +28,10 @@ Shared Rust crates of the Plurano framework family, kept in one workspace.
 
 Latin *amussis*, the mason's levelling board; *ad amussim* means "exactly".
 Pronounced ah-MOOS-sis.
+
+A crate is named after what it does, with the family name in front:
+`amussis-decision` is the decision engine. The deity names (Justitia, Minerva,
+Vesta) stay the operating system's names for its components.
 
 ## Status
 
@@ -40,7 +44,7 @@ kill switch) that moves here from the operating-system repository.
 | Path | Holds |
 | :--- | :--- |
 | `crates/` | One directory per library crate; each joins the workspace by a written-out line in `Cargo.toml`. |
-| `crates/aegis-justitia/` | The decision engine, imported with its history. It keeps its original name until the crate naming scheme is decided. |
+| `crates/amussis-decision/` | The decision engine, imported with its history from the operating-system repository, where it is the crate `aegis-justitia`. |
 | `tools/settings_sync.py` | Holds the shared toolchain and lint settings to their recorded source. |
 | `settings-source.json` | The record: source repository, commit, file hashes and manifest settings. |
 | `LICENSES/`, `REUSE.toml` | Licence text and the annotations for files that cannot carry a header. |
