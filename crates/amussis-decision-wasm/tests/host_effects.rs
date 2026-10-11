@@ -17,12 +17,12 @@ use std::rc::Rc;
 use amussis_decision::{
     AUDIT_DOMAIN, BlockReason, CONTRACT_VERSION, ChainAnchor, DIGEST_LEN, Digest32, HaltReason,
     KillswitchState, LedgerHasher, MAX_IDENTITY_LEN, MAX_LEDGER_RECORDS, MAX_PROPOSAL_BYTES,
-    MAX_SIGNATURE_BYTES, Sha256Hasher,
+    MAX_SIGNATURE_BYTES, RecordStatus, RiskLevel, Sha256Hasher,
 };
 use amussis_decision_wasm::{
     ABI_VERSION, Binding, Class, Continuation, FRAME_VERSION, FrameParts, HOST_MODULE,
-    HOST_UNAVAILABLE, HostClock, HostSigner, HostSink, InitError, Latch, MAX_FRAME_BYTES,
-    OutcomeCode, Refusal, SINK_STORED,
+    HOST_UNAVAILABLE, HostClock, HostSigner, HostSink, InitError, MAX_FRAME_BYTES,
+    MAX_RELEASE_BYTES, MAX_RELEASE_PERSONS, OutcomeCode, Refusal, ReleaseParts, SINK_STORED,
 };
 
 type Fallible<T> = Result<T, String>;
@@ -35,9 +35,21 @@ const START: i64 = 1_000;
 const ALGORITHM_AT: usize = AUDIT_DOMAIN.len() + 4 + CONTRACT_VERSION.len();
 /// Offset of the digest of the record before.
 const PREVIOUS_AT: usize = ALGORITHM_AT + 1 + 8;
-/// Offset of the halt-latch flag; the halt reason is nine bytes behind it.
-const LATCH_AT: usize = PREVIOUS_AT + DIGEST_LEN + 8 + 4;
+/// Offset of the record status, behind the previous digest and the time.
+const STATUS_AT: usize = PREVIOUS_AT + DIGEST_LEN + 8;
+/// Offset of the halt-latch flag; the halt reason is nine bytes behind it and
+/// the risk level of the halt ten.
+const LATCH_AT: usize = STATUS_AT + 4;
 const REASON_AT: usize = LATCH_AT + 9;
+const LEVEL_AT: usize = LATCH_AT + 10;
+
+/// The proposal spellings of an action one checker approves and of one two
+/// checkers approve.
+const TIER_A: (&str, &str) = ("tier-c-routine-bounded", "tier-a-consequential");
+const ANNEX_III: (&str, &str) = (
+    r#""oversight":"standard""#,
+    r#""oversight":"annex-iii-biometric""#,
+);
 
 const ROUTINE: &str = concat!(
     r#"{"schema":"amussis.decision.proposal.v1","id":"intent-0001","agent":"agent-01","#,
@@ -269,12 +281,14 @@ fn each_tier_yields_its_class() -> Fallible<()> {
 /// Positive: the constants a host is written against.
 #[test]
 fn the_interface_names_are_fixed() {
-    assert_eq!(ABI_VERSION, 2);
+    assert_eq!(ABI_VERSION, 3);
     assert_eq!(HOST_MODULE, "amussis_host_v1");
     assert_eq!(SINK_STORED, 0);
     assert_eq!(HOST_UNAVAILABLE, -1);
     assert_eq!(FRAME_VERSION, 1);
     assert_eq!(MAX_FRAME_BYTES, 1126);
+    assert_eq!(MAX_RELEASE_PERSONS, 3);
+    assert_eq!(MAX_RELEASE_BYTES, 196);
 }
 
 // --- Planted: the clock -----------------------------------------------------
@@ -368,6 +382,8 @@ fn a_signature_is_taken_at_the_length_the_host_states() -> Fallible<()> {
 /// Planted: a host that cannot store the record, in every answer but the one
 /// that means stored. The action is blocked, the engine keeps no record the
 /// host does not hold, and a sink that works again does not lift the halt.
+/// The sink is offered two records: the one of the decision, and the one of
+/// the halt that follows.
 #[test]
 fn a_sink_that_cannot_store_blocks_and_nothing_is_kept() -> Fallible<()> {
     for answer in [1, 2, HOST_UNAVAILABLE, i32::MIN, i32::MAX] {
@@ -380,7 +396,8 @@ fn a_sink_that_cannot_store_blocks_and_nothing_is_kept() -> Fallible<()> {
             block(BlockReason::AuditUnavailable),
             "answer {answer}"
         );
-        assert_eq!(world.offered.get(), 1, "answer {answer}");
+        assert_eq!(world.offered.get(), 2, "answer {answer}");
+        assert!(world.stored.borrow().is_empty(), "answer {answer}");
         assert!(binding.engine().ledger().is_empty(), "answer {answer}");
         world.sink_answer.set(SINK_STORED);
         let after = binding.decide(ROUTINE.as_bytes());
@@ -458,7 +475,10 @@ fn the_numbers_of_a_refused_continuation_are_fixed() {
     assert_eq!(InitError::Head as u32, 5);
     assert_eq!(InitError::HeadDigest as u32, 6);
     assert_eq!(InitError::Compromised as u32, 7);
-    assert_eq!(InitError::Latch as u32, 8);
+    assert_eq!(InitError::Release as u32, 8);
+    assert_eq!(InitError::NotHalted as u32, 9);
+    assert_eq!(InitError::Approval as u32, 10);
+    assert_eq!(InitError::ReleaseFailed as u32, 11);
 }
 
 // --- The chain past the window, and across a new engine ------------------------
@@ -513,21 +533,40 @@ fn last_stored(world: &World) -> Fallible<Vec<u8>> {
         .ok_or_else(|| "the sink holds no record".to_owned())
 }
 
+/// The bytes of a release: the releasing person first, then the checkers.
+fn release(persons: &[&str]) -> Fallible<Vec<u8>> {
+    let count = u8::try_from(persons.len()).map_err(|error| error.to_string())?;
+    let mut bytes = vec![count];
+    for person in persons {
+        bytes.push(u8::try_from(person.len()).map_err(|error| error.to_string())?);
+        bytes.extend_from_slice(person.as_bytes());
+    }
+    Ok(bytes)
+}
+
+/// No release: the chain continues in the state its head carries.
+const KEEP: &[u8] = &[];
+
 /// A new binding over the same host, continuing from `head`.
-fn continued(world: &Rc<World>, head: &[u8], latch: Latch) -> Result<TestBinding, InitError> {
+fn continued(world: &Rc<World>, head: &[u8], release: &[u8]) -> Result<TestBinding, InitError> {
     let handle = Handle(Rc::clone(world));
     Binding::continue_from(
         KEY_ID.as_bytes(),
         DEADLINE_MS,
-        Continuation::new(head, latch),
+        Continuation::new(head, release),
         handle.clone(),
         handle.clone(),
         handle,
     )
 }
 
-fn resumed(world: &Rc<World>, head: &[u8], latch: Latch) -> Fallible<TestBinding> {
-    continued(world, head, latch).map_err(|error| format!("the head was refused: {error:?}"))
+fn resumed(world: &Rc<World>, head: &[u8], release: &[u8]) -> Fallible<TestBinding> {
+    continued(world, head, release).map_err(|error| format!("the head was refused: {error:?}"))
+}
+
+/// What a release of the stored chain by `persons` yields.
+fn released(world: &Rc<World>, persons: &[&str]) -> Fallible<Result<TestBinding, InitError>> {
+    Ok(continued(world, &last_stored(world)?, &release(persons)?))
 }
 
 /// Walks the host's store as one chain: every record hashes to its digest,
@@ -587,12 +626,10 @@ fn the_chain_runs_past_the_window_as_one_chain() -> Fallible<()> {
 fn a_new_binding_continues_the_chain_from_its_stored_head() -> Fallible<()> {
     let world = world();
     allow(&mut binding(&world)?, 3)?;
-    let mut second = resumed(&world, &last_stored(&world)?, Latch::Keep)?;
+    let mut second = resumed(&world, &last_stored(&world)?, KEEP)?;
     assert!(second.engine().ledger().is_empty());
     allow(&mut second, 2)?;
     assert_eq!(walk_store(&world), Ok(5));
-    let third = resumed(&world, &last_stored(&world)?, Latch::Release)?;
-    assert_eq!(third.engine().killswitch(), KillswitchState::Armed);
     Ok(())
 }
 
@@ -619,7 +656,7 @@ fn a_continuation_from_another_record_than_the_head_breaks_the_stored_chain() ->
     let world = world();
     allow(&mut binding(&world)?, 3)?;
     let not_the_head = stored(&world, 1)?;
-    allow(&mut resumed(&world, &not_the_head, Latch::Keep)?, 1)?;
+    allow(&mut resumed(&world, &not_the_head, KEEP)?, 1)?;
     assert_eq!(
         walk_store(&world),
         Err("record 4 does not follow the one before".to_owned())
@@ -642,7 +679,7 @@ fn a_head_that_does_not_hash_to_its_digest_is_refused() -> Fallible<()> {
         preimage_len.saturating_add(2),
         first_digest_byte,
     ] {
-        let refused = continued(&world, &edited(&head, at)?, Latch::Keep);
+        let refused = continued(&world, &edited(&head, at)?, KEEP);
         assert_eq!(refused.err(), Some(InitError::HeadDigest), "byte {at}");
     }
     assert_eq!(world.stored.borrow().len(), 1);
@@ -682,9 +719,12 @@ fn bytes_that_are_no_head_frame_are_refused() -> Fallible<()> {
             rehashed(&rehashed(&head, LATCH_AT, 1)?, REASON_AT, 9)?,
         ),
     ];
+    let olga = release(&["olga"])?;
     for (name, bytes) in cases {
-        let refused = continued(&world, &bytes, Latch::Release);
-        assert_eq!(refused.err(), Some(InitError::Head), "{name}");
+        for asked in [KEEP, olga.as_slice()] {
+            let refused = continued(&world, &bytes, asked);
+            assert_eq!(refused.err(), Some(InitError::Head), "{name}");
+        }
     }
     Ok(())
 }
@@ -712,14 +752,15 @@ fn a_frame_is_read_up_to_the_bounds_of_its_parts() -> Fallible<()> {
     Ok(())
 }
 
-/// A host whose clock failed once: the store ends on the record of that
-/// block, written with the halt latch engaged.
-fn halted_world() -> Fallible<Rc<World>> {
+/// A host whose clock failed once, while the engine decided `proposal`: the
+/// store ends on the record of that block, written with the halt latch
+/// engaged at the risk level of that proposal.
+fn halted_over(proposal: &str) -> Fallible<Rc<World>> {
     let world = world();
     let mut binding = binding(&world)?;
     allow(&mut binding, 1)?;
     world.time.set(-1);
-    let code = binding.decide(ROUTINE.as_bytes());
+    let code = binding.decide(proposal.as_bytes());
     world.time.set(START);
     if parts(code) == block(BlockReason::ClockUnavailable) && world.stored.borrow().len() == 2 {
         Ok(world)
@@ -728,49 +769,284 @@ fn halted_world() -> Fallible<Rc<World>> {
     }
 }
 
+/// A chain halted at the lowest level: one person releases it.
+fn halted_world() -> Fallible<Rc<World>> {
+    halted_over(ROUTINE)
+}
+
+/// A chain halted at a level whose actions take `change` of the routine
+/// proposal to spell.
+fn halted_at(change: (&str, &str)) -> Fallible<Rc<World>> {
+    halted_over(&routine_with(change.0, change.1)?)
+}
+
+/// The level byte of the last stored record.
+fn stored_level(world: &World) -> Fallible<u8> {
+    let head = last_stored(world)?;
+    parse(&head)?
+        .preimage
+        .get(LEVEL_AT)
+        .copied()
+        .ok_or_else(|| "the record has no level byte".to_owned())
+}
+
+/// A host effect that fails: its name, what plants the fault, what mends it.
+type Fault = (&'static str, fn(&World), fn(&World));
+
+/// A refused release leaves the store as it was and the chain halted.
+fn assert_still_halted(world: &Rc<World>, records: usize) -> Fallible<()> {
+    assert_eq!(world.stored.borrow().len(), records);
+    let kept = resumed(world, &last_stored(world)?, KEEP)?;
+    assert_ne!(kept.engine().killswitch(), KillswitchState::Armed);
+    Ok(())
+}
+
 /// Planted: a chain that ends halted. A new binding over it blocks as the old
 /// one did; a restart is no release.
 #[test]
 fn a_chain_that_ends_halted_continues_halted() -> Fallible<()> {
     let world = halted_world()?;
-    let mut binding = resumed(&world, &last_stored(&world)?, Latch::Keep)?;
+    let mut binding = resumed(&world, &last_stored(&world)?, KEEP)?;
     let code = binding.decide(ROUTINE.as_bytes());
     assert_eq!(
         parts(code),
         block(BlockReason::KillswitchEngaged(HaltReason::ClockUnavailable))
     );
     assert!(!code.permits_execution());
-    let again = resumed(&world, &last_stored(&world)?, Latch::Keep)?;
+    let again = resumed(&world, &last_stored(&world)?, KEEP)?;
     assert_ne!(again.engine().killswitch(), KillswitchState::Armed);
     Ok(())
 }
 
-/// Positive: the named release. The engine decides again, and the store
-/// shows the step from a halted record to an armed one in one chain.
+/// Positive: the lowest level is released by one person. The release is a
+/// record of its own, the engine decides again, and the store shows the halt,
+/// the release and the next decision in one chain.
 #[test]
-fn a_halted_chain_is_continued_armed_only_by_the_named_release() -> Fallible<()> {
+fn the_lowest_level_is_released_by_one_person() -> Fallible<()> {
     let world = halted_world()?;
-    let mut binding = resumed(&world, &last_stored(&world)?, Latch::Release)?;
+    assert_eq!(stored_level(&world)?, RiskLevel::LOWEST.tag());
+    let mut binding = released(&world, &["olga"])?.map_err(|error| format!("{error:?}"))?;
     assert_eq!(binding.engine().killswitch(), KillswitchState::Armed);
+    assert_eq!(world.stored.borrow().len(), 3);
     allow(&mut binding, 1)?;
-    assert_eq!(walk_store(&world), Ok(3));
+    assert_eq!(walk_store(&world), Ok(4));
     let halted = stored(&world, 1)?;
-    let armed = stored(&world, 2)?;
+    let release = stored(&world, 2)?;
     assert_eq!(parse(&halted)?.preimage.get(LATCH_AT), Some(&1));
-    assert_eq!(parse(&armed)?.preimage.get(LATCH_AT), Some(&0));
+    let release = parse(&release)?.preimage;
+    assert_eq!(
+        release.get(STATUS_AT),
+        Some(&RecordStatus::HaltReleased.tag())
+    );
+    assert_eq!(release.get(LATCH_AT), Some(&0));
+    Ok(())
+}
+
+/// Planted, both ways: a release without the approval the halted level
+/// demands is refused, and the same release with it passes. One checker for
+/// a level whose actions take one, two for a level whose actions take two;
+/// the releasing person is no checker of the own release, and one person is
+/// not two checkers.
+#[test]
+fn a_release_without_the_needed_approval_is_refused() -> Fallible<()> {
+    let single: [&[&str]; 2] = [&["olga"], &["olga", "olga"]];
+    let dual: [&[&str]; 5] = [
+        &["olga"],
+        &["olga", "petra"],
+        &["olga", "petra", "petra"],
+        &["olga", "petra", "olga"],
+        &["olga", "olga", "petra"],
+    ];
+    let cases: [(_, &[&[&str]], &[&str]); 2] = [
+        (TIER_A, &single, &["olga", "petra"]),
+        (ANNEX_III, &dual, &["olga", "petra", "quinn"]),
+    ];
+    for (level, lacking, enough) in cases {
+        let world = halted_at(level)?;
+        for persons in lacking {
+            let refused = released(&world, persons)?;
+            assert_eq!(refused.err(), Some(InitError::Approval), "{persons:?}");
+            assert_still_halted(&world, 2)?;
+        }
+        let mut binding = released(&world, enough)?.map_err(|error| format!("{error:?}"))?;
+        assert_eq!(binding.engine().killswitch(), KillswitchState::Armed);
+        allow(&mut binding, 1)?;
+        assert_eq!(walk_store(&world), Ok(4));
+    }
+    Ok(())
+}
+
+/// Boundary: the level of a halt is what the head record states, and the
+/// highest level takes two checkers whatever the action was. A head halted
+/// at the lowest level, with the level byte set to the highest and hashed
+/// again, is no longer released by one person or with one checker.
+#[test]
+fn the_level_of_the_head_record_decides_the_approval() -> Fallible<()> {
+    let world = halted_world()?;
+    let halted = last_stored(&world)?;
+    let head = rehashed(&halted, LEVEL_AT, RiskLevel::HIGHEST.tag())?;
+    for persons in [&["olga"][..], &["olga", "petra"]] {
+        let refused = continued(&world, &head, &release(persons)?);
+        assert_eq!(refused.err(), Some(InitError::Approval), "{persons:?}");
+    }
+    let passed = continued(&world, &head, &release(&["olga", "petra", "quinn"])?);
+    assert!(passed.is_ok());
+    for none in [0, RiskLevel::HIGHEST.tag().saturating_add(1)] {
+        let head = rehashed(&halted, LEVEL_AT, none)?;
+        let refused = continued(&world, &head, KEEP);
+        assert_eq!(refused.err(), Some(InitError::Head), "level {none}");
+    }
+    Ok(())
+}
+
+/// Planted: the level of a halt travels with every record written under it.
+/// A chain halted at a level that takes one checker is continued halted,
+/// refuses a routine action there, and is continued again from the record of
+/// that refusal: the release still takes the checker.
+#[test]
+fn the_level_of_a_halt_is_carried_over_every_continuation() -> Fallible<()> {
+    let world = halted_at(TIER_A)?;
+    let level = stored_level(&world)?;
+    assert_ne!(level, RiskLevel::LOWEST.tag());
+    let mut kept = resumed(&world, &last_stored(&world)?, KEEP)?;
+    assert_eq!(kept.decide(ROUTINE.as_bytes()).class(), Class::Block);
+    assert_eq!(world.stored.borrow().len(), 3);
+    assert_eq!(stored_level(&world)?, level);
+    let refused = released(&world, &["olga"])?;
+    assert_eq!(refused.err(), Some(InitError::Approval));
+    assert!(released(&world, &["olga", "petra"])?.is_ok());
+    Ok(())
+}
+
+/// Negative: a release asked for a chain that is not halted is refused, and
+/// nothing is written.
+#[test]
+fn a_release_of_a_chain_that_is_not_halted_is_refused() -> Fallible<()> {
+    let world = world();
+    allow(&mut binding(&world)?, 2)?;
+    for persons in [&["olga"][..], &["olga", "petra", "quinn"]] {
+        let refused = released(&world, persons)?;
+        assert_eq!(refused.err(), Some(InitError::NotHalted), "{persons:?}");
+    }
+    assert_eq!(world.stored.borrow().len(), 2);
+    Ok(())
+}
+
+/// Planted: a release the engine approved and could not record. Each effect
+/// fails in turn; no binding is set up, the store is as it was, and the same
+/// release from the same head passes once the host delivers.
+#[test]
+fn a_release_that_cannot_be_recorded_sets_up_no_binding() -> Fallible<()> {
+    let world = halted_world()?;
+    let faults: [Fault; 3] = [
+        ("clock", |w| w.time.set(-1), |w| w.time.set(START)),
+        (
+            "signer",
+            |w| w.sign_answer.set(Some(0)),
+            |w| w.sign_answer.set(None),
+        ),
+        (
+            "sink",
+            |w| w.sink_answer.set(1),
+            |w| w.sink_answer.set(SINK_STORED),
+        ),
+    ];
+    for (name, plant, mend) in faults {
+        plant(&world);
+        let refused = released(&world, &["olga"])?;
+        mend(&world);
+        assert_eq!(refused.err(), Some(InitError::ReleaseFailed), "{name}");
+        assert_still_halted(&world, 2)?;
+    }
+    assert!(released(&world, &["olga"])?.is_ok());
+    assert_eq!(walk_store(&world), Ok(3));
+    Ok(())
+}
+
+/// Negative: release bytes that are no release set up no binding, whatever
+/// the chain.
+#[test]
+fn release_bytes_that_are_no_release_are_refused() -> Fallible<()> {
+    let world = halted_world()?;
+    let long = "p".repeat(MAX_IDENTITY_LEN.saturating_add(1));
+    let cases: [(&str, Vec<u8>); 10] = [
+        ("no person", vec![0]),
+        ("a count of zero before one person", vec![0, 1, b'a']),
+        (
+            "a count of four before three persons",
+            vec![4, 1, b'a', 1, b'b', 1, b'c'],
+        ),
+        ("four persons", release(&["a", "b", "c", "d"])?),
+        (
+            "a count beyond the persons",
+            vec![2, 4, b'o', b'l', b'g', b'a'],
+        ),
+        (
+            "bytes behind the last person",
+            [release(&["olga"])?, vec![0]].concat(),
+        ),
+        ("an empty identity", vec![1, 0]),
+        ("an identity past its bound", release(&[long.as_str()])?),
+        ("an identity that is no text", vec![1, 2, 0xff, 0xfe]),
+        (
+            "an identity outside the character set",
+            release(&["bad name!"])?,
+        ),
+    ];
+    for (name, bytes) in cases {
+        let refused = continued(&world, &last_stored(&world)?, &bytes);
+        assert_eq!(refused.err(), Some(InitError::Release), "{name}");
+    }
+    assert_still_halted(&world, 2)
+}
+
+/// Boundary: release bytes split into one to three persons, each identity up
+/// to its bound, and into nothing else.
+#[test]
+fn release_bytes_split_into_their_persons() -> Fallible<()> {
+    let widest = "p".repeat(MAX_IDENTITY_LEN);
+    let one = release(&["olga"])?;
+    let parts = ReleaseParts::split(&one).ok_or("one person was not read")?;
+    assert_eq!(parts.releaser(), b"olga");
+    assert_eq!(parts.checkers(), [None, None]);
+    let two = release(&["olga", "petra"])?;
+    let parts = ReleaseParts::split(&two).ok_or("two persons were not read")?;
+    assert_eq!(parts.checkers(), [Some(&b"petra"[..]), None]);
+    let three = release(&[widest.as_str(), widest.as_str(), widest.as_str()])?;
+    assert_eq!(three.len(), MAX_RELEASE_BYTES);
+    let parts = ReleaseParts::split(&three).ok_or("three persons were not read")?;
+    assert_eq!(parts.releaser(), widest.as_bytes());
+    assert_eq!(parts.checkers(), [Some(widest.as_bytes()); 2]);
+    let too_wide = "p".repeat(MAX_IDENTITY_LEN.saturating_add(1));
+    for bytes in [
+        Vec::new(),
+        vec![0],
+        vec![0, 1, b'a'],
+        vec![4, 1, b'a', 1, b'b', 1, b'c'],
+        vec![1],
+        vec![1, 0],
+        vec![1, 5, b'o'],
+        release(&[too_wide.as_str()])?,
+        release(&["a", "b", "c", "d"])?,
+        [one.as_slice(), &[0]].concat(),
+    ] {
+        assert_eq!(ReleaseParts::split(&bytes), None, "{bytes:?}");
+    }
     Ok(())
 }
 
 /// Planted: a chain halted as compromised. It continues halted, and the
-/// release is refused.
+/// release is refused whoever approves it.
 #[test]
 fn a_chain_halted_as_compromised_is_not_released() -> Fallible<()> {
     let world = halted_world()?;
     let tag = HaltReason::LedgerCompromised.tag();
     let head = rehashed(&last_stored(&world)?, REASON_AT, tag)?;
-    let refused = continued(&world, &head, Latch::Release);
-    assert_eq!(refused.err(), Some(InitError::Compromised));
-    let mut kept = resumed(&world, &head, Latch::Keep)?;
+    for persons in [&["olga"][..], &["olga", "petra", "quinn"]] {
+        let refused = continued(&world, &head, &release(persons)?);
+        assert_eq!(refused.err(), Some(InitError::Compromised), "{persons:?}");
+    }
+    let mut kept = resumed(&world, &head, KEEP)?;
     assert_eq!(
         parts(kept.decide(ROUTINE.as_bytes())),
         block(BlockReason::KillswitchEngaged(
@@ -783,7 +1059,8 @@ fn a_chain_halted_as_compromised_is_not_released() -> Fallible<()> {
 /// Boundary: a halt whose record never reached the store. The sink failed, so
 /// the store ends on a record written with the latch armed, and a
 /// continuation from it starts armed: the chain cannot carry what it was
-/// never given (issue #14 keeps this open).
+/// never given. Once the sink stores again, the next record the halted engine
+/// writes carries the halt, and a continuation from that record is halted.
 #[test]
 fn a_halt_that_reached_no_record_is_not_carried_over() -> Fallible<()> {
     let world = world();
@@ -794,8 +1071,12 @@ fn a_halt_that_reached_no_record_is_not_carried_over() -> Fallible<()> {
     assert_eq!(parts(code), block(BlockReason::AuditUnavailable));
     assert_ne!(first.engine().killswitch(), KillswitchState::Armed);
     world.sink_answer.set(SINK_STORED);
-    let second = resumed(&world, &last_stored(&world)?, Latch::Keep)?;
+    let second = resumed(&world, &last_stored(&world)?, KEEP)?;
     assert_eq!(second.engine().killswitch(), KillswitchState::Armed);
+    assert_eq!(first.decide(ROUTINE.as_bytes()).class(), Class::Block);
+    assert_eq!(world.stored.borrow().len(), 2);
+    let third = resumed(&world, &last_stored(&world)?, KEEP)?;
+    assert_ne!(third.engine().killswitch(), KillswitchState::Armed);
     Ok(())
 }
 
@@ -807,23 +1088,12 @@ fn a_continuation_refuses_a_bad_key_identifier_and_a_zero_deadline() -> Fallible
     allow(&mut binding(&world)?, 1)?;
     let head = stored(&world, 0)?;
     let handle = || Handle(Rc::clone(&world));
-    let from = Continuation::new(&head, Latch::Keep);
-    assert_eq!((from.head(), from.latch()), (head.as_slice(), Latch::Keep));
+    let from = Continuation::new(&head, KEEP);
+    assert_eq!((from.head(), from.release()), (head.as_slice(), KEEP));
     let refused = Binding::continue_from(b"", DEADLINE_MS, from, handle(), handle(), handle());
     assert_eq!(refused.err(), Some(InitError::KeyId));
     let key_id = KEY_ID.as_bytes();
     let refused = Binding::continue_from(key_id, 0, from, handle(), handle(), handle());
     assert_eq!(refused.err(), Some(InitError::Deadline));
     Ok(())
-}
-
-/// Boundary: the latch flag has two values and no default.
-#[test]
-fn the_latch_flag_names_keep_or_release_and_nothing_else() {
-    assert_eq!(Latch::from_flag(0), Some(Latch::Keep));
-    assert_eq!(Latch::from_flag(1), Some(Latch::Release));
-    assert_eq!(Latch::from_flag(2), None);
-    assert_eq!(Latch::from_flag(u32::MAX), None);
-    assert_eq!(Latch::Keep as u32, 0);
-    assert_eq!(Latch::Release as u32, 1);
 }

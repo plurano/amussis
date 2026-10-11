@@ -11,7 +11,7 @@ mod common;
 use amussis_decision::{
     ActionType, Adjudication, BlockReason, CheckerId, CheckerSet, DecisionError, HaltReason,
     InterceptorOutcome, MakerId, OversightClass, OversightError, RequestId, RequiredApproval,
-    RiskTier, UnixSeconds, Vote,
+    RiskLevel, RiskTier, UnixSeconds, Vote,
 };
 
 use common::{Fallible, FixtureError, engine, intent};
@@ -128,7 +128,7 @@ fn due_equal_to_now_and_now_minus_one_fail_closed_and_killswitch_blocks_tier_c()
     );
 
     let mut halted = engine(60, 8)?;
-    halted.halt(HaltReason::OperatorStop);
+    halted.halt(HaltReason::OperatorStop, RiskLevel::LOWEST)?;
     let routine = intent(
         "intent-tier-c-halted",
         "maker-alice",

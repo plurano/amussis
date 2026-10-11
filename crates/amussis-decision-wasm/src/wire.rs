@@ -21,6 +21,19 @@
 //! The same bytes come back once: a host that continues a chain hands in the
 //! frame of the last record its store holds, and [`FrameParts::split`] reads
 //! it.
+//!
+//! A host that releases the halt of the chain it continues names the persons
+//! of the release in bytes of their own, which [`ReleaseParts::split`] reads:
+//!
+//! ```text
+//! u8        number of persons, 1 to MAX_RELEASE_PERSONS
+//! per person:
+//!   u8      length of the identity, 1 to the identity bound
+//!   bytes   identity
+//! ```
+//!
+//! The first person releases the halt; the others are the checkers who
+//! approve the release.
 
 use amussis_decision::{
     AuditRecord, DIGEST_LEN, MAX_IDENTITY_LEN, MAX_PREIMAGE_BYTES, MAX_SIGNATURE_BYTES,
@@ -32,6 +45,12 @@ pub const FRAME_VERSION: u8 = 1;
 /// Largest frame: every variable part at its bound.
 pub const MAX_FRAME_BYTES: usize =
     1 + 2 + MAX_PREIMAGE_BYTES + DIGEST_LEN + 1 + MAX_IDENTITY_LEN + 2 + MAX_SIGNATURE_BYTES;
+
+/// Most persons a release names: the releasing person and two checkers.
+pub const MAX_RELEASE_PERSONS: usize = 3;
+
+/// Largest release: the count byte and every identity at its bound.
+pub const MAX_RELEASE_BYTES: usize = 1 + MAX_RELEASE_PERSONS * (1 + MAX_IDENTITY_LEN);
 
 /// One framed record in a fixed buffer.
 #[derive(Debug, Clone, Copy)]
@@ -149,6 +168,59 @@ impl<'a> FrameParts<'a> {
     pub const fn signature(&self) -> &'a [u8] {
         self.signature
     }
+}
+
+/// The persons of one release of a halt, borrowed from its bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReleaseParts<'a> {
+    releaser: &'a [u8],
+    checkers: [Option<&'a [u8]>; 2],
+}
+
+impl<'a> ReleaseParts<'a> {
+    /// Splits `release` into its persons, or returns `None` when the bytes
+    /// are not one release: no person or more than [`MAX_RELEASE_PERSONS`],
+    /// an identity that is empty, runs past the end or past its bound, or
+    /// bytes after the last person.
+    ///
+    /// Only the layout is checked. Whether the bytes of a person are an
+    /// identity, and whether the checkers satisfy the approval rule, is the
+    /// engine's check.
+    #[must_use]
+    pub fn split(release: &'a [u8]) -> Option<Self> {
+        let mut rest = release;
+        let persons = usize::from(*take(&mut rest, 1)?.first()?);
+        if !(1..=MAX_RELEASE_PERSONS).contains(&persons) {
+            return None;
+        }
+        let releaser = person(&mut rest)?;
+        let mut checkers = [None; 2];
+        for slot in checkers.iter_mut().take(persons.saturating_sub(1)) {
+            *slot = Some(person(&mut rest)?);
+        }
+        rest.is_empty().then_some(Self { releaser, checkers })
+    }
+
+    /// Returns the identity of the person who releases the halt.
+    #[must_use]
+    pub const fn releaser(&self) -> &'a [u8] {
+        self.releaser
+    }
+
+    /// Returns the identities of the checkers, the first slot filled first.
+    #[must_use]
+    pub const fn checkers(&self) -> [Option<&'a [u8]>; 2] {
+        self.checkers
+    }
+}
+
+/// Takes one length-prefixed identity off `rest`.
+fn person<'a>(rest: &mut &'a [u8]) -> Option<&'a [u8]> {
+    let len = usize::from(*take(rest, 1)?.first()?);
+    let identity = take(rest, len)?;
+    (1..=MAX_IDENTITY_LEN)
+        .contains(&identity.len())
+        .then_some(identity)
 }
 
 /// Takes the next `len` bytes of `rest`, or returns `None` when fewer are left.

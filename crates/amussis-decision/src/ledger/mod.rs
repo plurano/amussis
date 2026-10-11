@@ -11,6 +11,18 @@
 //! [`BlockReason`] that produced it whenever one exists, so a refused action is
 //! reconstructible from the chain alone.
 //!
+//! # Two kinds of record
+//!
+//! Most records decide a proposed action and name it: the intent, the agent
+//! and what the action does ([`RecordSubject`]). A record of the halt latch
+//! itself has no proposal behind it and names none: the halt
+//! ([`RecordStatus::HaltEngaged`]) and its release
+//! ([`RecordStatus::HaltReleased`]). The canonical pre-image keeps one layout
+//! for both; a latch record writes a zero action tag and two empty
+//! identifiers, which no decision record has. A draft whose status and fields
+//! do not belong together has no canonical pre-image
+//! ([`PreimageError::Shape`]), so it is neither sealed nor verified.
+//!
 //! Both retention buffers -- [`AuditLedger`]'s own record list and
 //! [`InMemorySink`]'s -- are reserved to their scalar bound at construction and
 //! refuse a push at that bound, so neither reallocates on the decision path.
@@ -244,6 +256,8 @@ impl Position {
 ///
 /// `Blocked` and `Halted` extend the three-value vocabulary of the imported
 /// oversight sketch; M14 must take the superset into the versioned schema.
+/// `HaltEngaged` and `HaltReleased` are the two records of the halt latch
+/// itself; they decide no action.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum RecordStatus {
@@ -257,6 +271,10 @@ pub enum RecordStatus {
     Blocked,
     /// Refused because the system is halted.
     Halted,
+    /// The halt latch engaged. The record decides no action.
+    HaltEngaged,
+    /// The halt latch was released. The record decides no action.
+    HaltReleased,
 }
 
 impl RecordStatus {
@@ -269,7 +287,16 @@ impl RecordStatus {
             Self::Rejected => 3,
             Self::Blocked => 4,
             Self::Halted => 5,
+            Self::HaltEngaged => 6,
+            Self::HaltReleased => 7,
         }
+    }
+
+    /// Returns `true` for the two records of the halt latch itself, which
+    /// decide no action and name no subject.
+    #[must_use]
+    pub const fn is_of_latch(self) -> bool {
+        matches!(self, Self::HaltEngaged | Self::HaltReleased)
     }
 
     /// Returns the record status name used in records and diagnostics.
@@ -281,19 +308,31 @@ impl RecordStatus {
             Self::Rejected => "rejected",
             Self::Blocked => "blocked",
             Self::Halted => "halted",
+            Self::HaltEngaged => "halt-engaged",
+            Self::HaltReleased => "halt-released",
         }
     }
 }
 
-/// The caller-supplied fields of one audit record.
+/// The proposed action a record decides.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RecordDraft {
+pub struct RecordSubject {
     /// The intent the record describes.
     pub intent_id: IntentId,
     /// The agent that proposed the action.
     pub agent: AgentId,
     /// What the action does.
     pub action_type: ActionType,
+}
+
+/// The caller-supplied fields of one audit record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RecordDraft {
+    /// The action the record decides.
+    ///
+    /// `None` for a record of the halt latch itself and for no other record:
+    /// see [`Self::is_well_formed`].
+    pub subject: Option<RecordSubject>,
     /// The decision recorded.
     pub status: RecordStatus,
     /// Why the action was refused, when it was.
@@ -307,6 +346,45 @@ pub struct RecordDraft {
     pub killswitch: KillswitchState,
     /// When the decision was taken.
     pub at: UnixSeconds,
+}
+
+impl RecordDraft {
+    /// Drafts the record of the halt latch itself in the state `killswitch`,
+    /// written at `at`: the halt for an engaged latch, the release for an
+    /// armed one.
+    #[must_use]
+    pub const fn of_latch(killswitch: KillswitchState, at: UnixSeconds) -> Self {
+        let status = match killswitch {
+            KillswitchState::Engaged { .. } => RecordStatus::HaltEngaged,
+            KillswitchState::Armed => RecordStatus::HaltReleased,
+        };
+        Self {
+            subject: None,
+            status,
+            block_reason: None,
+            killswitch,
+            at,
+        }
+    }
+
+    /// Returns whether the status and the other fields belong together.
+    ///
+    /// A record that decides an action names it. A record of the halt latch
+    /// names no action and no refusal reason, and carries the latch state its
+    /// status states: engaged for the halt, armed for the release.
+    #[must_use]
+    pub const fn is_well_formed(&self) -> bool {
+        let unnamed = self.subject.is_none() && self.block_reason.is_none();
+        match self.status {
+            RecordStatus::HaltEngaged => unnamed && self.killswitch.is_engaged(),
+            RecordStatus::HaltReleased => unnamed && !self.killswitch.is_engaged(),
+            RecordStatus::PendingApproval
+            | RecordStatus::Approved
+            | RecordStatus::Rejected
+            | RecordStatus::Blocked
+            | RecordStatus::Halted => self.subject.is_some(),
+        }
+    }
 }
 
 /// One sealed audit-record body, including its chain position.
@@ -374,9 +452,14 @@ impl RecordBody {
     ///
     /// # Errors
     ///
-    /// Returns [`PreimageError::Overflow`] when the encoding would exceed the
-    /// fixed buffer. The encoding never truncates.
+    /// Returns [`PreimageError::Shape`] for a draft whose status and fields do
+    /// not belong together ([`RecordDraft::is_well_formed`]), and
+    /// [`PreimageError::Overflow`] when the encoding would exceed the fixed
+    /// buffer. The encoding never truncates.
     pub fn canonical_preimage(&self) -> Result<CanonicalBuffer, PreimageError> {
+        if !self.draft.is_well_formed() {
+            return Err(PreimageError::Shape);
+        }
         let mut buffer = CanonicalBuffer::new();
         buffer.write_tag(AUDIT_DOMAIN)?;
         buffer.write_framed(CONTRACT_VERSION.as_bytes())?;
@@ -385,11 +468,10 @@ impl RecordBody {
         buffer.write_digest(&self.previous)?;
         buffer.write_u64(self.draft.at.get())?;
         buffer.write_u8(self.draft.status.tag())?;
-        buffer.write_u8(self.draft.action_type.tag())?;
+        buffer.write_u8(action_tag(self.draft.subject.as_ref()))?;
         write_block_reason(&mut buffer, self.draft.block_reason)?;
         write_killswitch(&mut buffer, self.draft.killswitch)?;
-        buffer.write_framed(self.draft.intent_id.as_bytes())?;
-        buffer.write_framed(self.draft.agent.as_bytes())?;
+        write_names(&mut buffer, self.draft.subject.as_ref())?;
         Ok(buffer)
     }
 
@@ -402,6 +484,32 @@ impl RecordBody {
     pub fn digest<H: LedgerHasher>(&self) -> Result<Digest32, LedgerError> {
         let preimage = self.canonical_preimage()?;
         Ok(H::digest(preimage.as_slice())?)
+    }
+}
+
+/// Returns the action tag of a record: zero, which no action has, for a
+/// record that decides none.
+const fn action_tag(subject: Option<&RecordSubject>) -> u8 {
+    match subject {
+        Some(subject) => subject.action_type.tag(),
+        None => 0,
+    }
+}
+
+/// Encodes the intent and the agent a record names, each behind its length.
+///
+/// A record that names none writes two empty fields, which no identifier
+/// encodes to, so the layout is one for every record.
+fn write_names(
+    buffer: &mut CanonicalBuffer,
+    subject: Option<&RecordSubject>,
+) -> Result<(), PreimageError> {
+    if let Some(subject) = subject {
+        buffer.write_framed(subject.intent_id.as_bytes())?;
+        buffer.write_framed(subject.agent.as_bytes())
+    } else {
+        buffer.write_framed(&[])?;
+        buffer.write_framed(&[])
     }
 }
 
@@ -434,12 +542,14 @@ fn write_killswitch(
         KillswitchState::Armed => {
             buffer.write_u8(0)?;
             buffer.write_u64(0)?;
+            buffer.write_u8(0)?;
             buffer.write_u8(0)
         }
-        KillswitchState::Engaged { at, reason } => {
+        KillswitchState::Engaged { at, reason, level } => {
             buffer.write_u8(1)?;
             buffer.write_u64(at.get())?;
-            buffer.write_u8(reason.tag())
+            buffer.write_u8(reason.tag())?;
+            buffer.write_u8(level.tag())
         }
     }
 }

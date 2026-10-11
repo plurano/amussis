@@ -128,11 +128,43 @@ engine, err := decision.Continue(ctx, config, decision.Continuation{Head: lastSt
 The module recomputes the digest of that record and reads the chain position
 and the halt state out of its content; a record that does not hash to its
 digest is refused with `decision.ErrHead`. A chain that ends halted continues
-halted, so a restart is no release. `Continuation.ReleaseHalt` is the one
-release of a halt the binding has. It is refused with `decision.ErrCompromised`
-for a chain halted as compromised, and the chain shows it as the step from a
-halted record to one that is not. The release rule is provisional and may
-change before the first release.
+halted, so a restart is no release.
+
+A halt is a record of the chain and stands at a risk level: the level of the
+action the engine had in hand when a fault halted it, and the highest level
+where no action names one. `Continuation.Release` is the one release of a halt
+the binding has. It names the person who releases and the checkers, and the
+engine holds it to the approval rule it holds an action of that level to:
+
+```go
+from := decision.Continuation{
+	Head:    lastStored,
+	Release: &decision.Release{Releaser: "olga", Checkers: []string{"petra"}},
+}
+engine, err := decision.Continue(ctx, config, from)
+```
+
+| Level of the halt | Who releases it |
+| :--- | :--- |
+| Routine or material action, standard oversight | The releaser alone. |
+| Consequential action, standard oversight | The releaser and one checker. |
+| Any action under Annex III oversight, and a halt with no level of an action | The releaser and two distinct checkers. |
+
+No checker is the releaser. The release is written into the chain as a record
+of its own before the first decision, and a release that is refused writes
+nothing and sets up no engine:
+
+| Error | The release is refused because |
+| :--- | :--- |
+| `decision.ErrApproval` | a checker the level demands is missing, named twice, or is the releaser |
+| `decision.ErrNotHalted` | the chain does not end halted |
+| `decision.ErrCompromised` | the chain is halted as compromised; that halt is not released |
+| `decision.ErrRelease` | a person is no identity of the engine, or more than two checkers are named |
+| `decision.ErrReleaseFailed` | the clock, the signer or the sink did not deliver the release record |
+
+The cases are replayed both ways in `bindings/go/decision/continue_test.go`
+(`TestTheLowestLevelIsReleasedByOnePerson`,
+`TestAReleaseWithoutTheNeededApprovalIsRefused`).
 
 Limits as of this state:
 
@@ -145,9 +177,13 @@ Limits as of this state:
   in the store, which a walk over the store shows
   (`TestAContinuationFromAnotherRecordThanTheHeadShowsInTheStore`); the module
   does not prevent it.
+- No record names a person. The chain shows that a halt was released, and the
+  halted records before the release show at which level it stood; it does not
+  show who released it or who approved. A host that has to show that keeps it
+  itself.
 - A halt whose record never reached the sink (a signer or a sink that failed) is
   not in the stored chain, so a continuation from the stored head starts without
-  it ([#14](https://github.com/plurano/amussis/issues/14)).
+  it. The halted engine writes the halt with the next record the sink stores.
 - The binding has run on Linux amd64 only.
 
 The committed module is the build of the source beside it: `tools/wasm_module.py

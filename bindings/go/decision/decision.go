@@ -19,6 +19,12 @@
 // chain. A program that starts again does not start a second one: Continue
 // takes the last record the Sink stored and links the next record onto it. A
 // chain that ends halted continues halted; a restart is no release.
+//
+// A halt stands at a risk level, and its one release is part of a
+// continuation: Continuation.Release names the person who releases it and the
+// checkers that level demands of an action. The release is a record of its
+// own in the chain. That record names no person; a host that has to show who
+// released a halt keeps that itself.
 package decision
 
 import (
@@ -93,11 +99,32 @@ type Continuation struct {
 	// continuation from any other record leaves two records with one
 	// sequence number in the store, which a walk over the store shows.
 	Head Record
-	// ReleaseHalt continues a chain that ends halted with the halt lifted.
-	// It is the only release of a halt this package has. Left false, a chain
-	// that ends halted continues halted and every decision is Blocked.
-	ReleaseHalt bool
+	// Release continues a chain that ends halted with the halt lifted. It is
+	// the only release of a halt this package has. Left nil, a chain that
+	// ends halted continues halted and every decision is Blocked.
+	Release *Release
 }
+
+// Release names the persons who lift a halt. The engine holds it to the
+// approval rule it holds an action of the halt's risk level to, with the
+// releaser in the place of the maker: no checker for the lowest level, one
+// checker or two distinct ones above it, none of them the releaser. The
+// level is the one the head record states.
+type Release struct {
+	// Releaser is the person who releases the halt, 1 to MaxPersonBytes
+	// bytes of the engine's identity alphabet.
+	Releaser string
+	// Checkers are the persons who approve the release, at most
+	// MaxCheckers, each written as the releaser is.
+	Checkers []string
+}
+
+const (
+	// MaxPersonBytes is the longest name of a person in a Release.
+	MaxPersonBytes = 64
+	// MaxCheckers is the largest number of checkers a Release names.
+	MaxCheckers = 2
+)
 
 // Errors of Continue; test for them with errors.Is.
 var (
@@ -105,25 +132,75 @@ var (
 	// content does not hash to its digest.
 	ErrHead = errors.New("decision: the head record is refused")
 	// ErrCompromised: the chain ends halted as compromised. Its halt is not
-	// released; without ReleaseHalt it continues halted.
+	// released; without a Release it continues halted.
 	ErrCompromised = errors.New("decision: a chain halted as compromised is not released")
+	// ErrRelease: the Release cannot be read: a person that is no identity
+	// of the engine, or more checkers than MaxCheckers.
+	ErrRelease = errors.New("decision: the release is refused")
+	// ErrNotHalted: a Release was given for a chain that does not end
+	// halted.
+	ErrNotHalted = errors.New("decision: a chain that is not halted is not released")
+	// ErrApproval: the Release lacks the approval the risk level of the halt
+	// demands: a checker is missing, is named twice or is the releaser.
+	ErrApproval = errors.New("decision: the release lacks the approval its risk level demands")
+	// ErrReleaseFailed: the release was approved and its record could not be
+	// written: the clock, the signer or the sink did not deliver. The chain
+	// is as it was and still ends halted.
+	ErrReleaseFailed = errors.New("decision: the release could not be recorded")
 )
 
 // chain is a Continuation as the module takes it: the frame of the head
-// record and the latch flag.
+// record and the bytes of the release, none for a chain that keeps its
+// state.
 type chain struct {
-	head  []byte
-	latch uint32
+	head    []byte
+	release []byte
 }
 
-// The latch flag and the set-up statuses of the module's interface.
+// The set-up statuses of the module's interface.
 const (
-	latchKeep         = 0
-	latchRelease      = 1
-	statusHead        = 5
-	statusHeadDigest  = 6
-	statusCompromised = 7
+	statusHead          = 5
+	statusHeadDigest    = 6
+	statusCompromised   = 7
+	statusRelease       = 8
+	statusNotHalted     = 9
+	statusApproval      = 10
+	statusReleaseFailed = 11
 )
+
+// refusals maps a set-up status of the module onto the error of Continue.
+var refusals = map[uint32]error{
+	statusHead:          ErrHead,
+	statusHeadDigest:    ErrHead,
+	statusCompromised:   ErrCompromised,
+	statusRelease:       ErrRelease,
+	statusNotHalted:     ErrNotHalted,
+	statusApproval:      ErrApproval,
+	statusReleaseFailed: ErrReleaseFailed,
+}
+
+// encodeRelease writes a Release as the module reads it: the number of
+// persons, then each as a length byte and its name, the releaser first. What
+// a name may spell is the module's to judge; its length is checked here,
+// because it has to fit its prefix.
+func encodeRelease(release *Release) ([]byte, error) {
+	if release == nil {
+		return nil, nil
+	}
+	if len(release.Checkers) > MaxCheckers {
+		return nil, fmt.Errorf("%w: it names %d checkers, at most %d", ErrRelease, len(release.Checkers), MaxCheckers)
+	}
+	persons := append([]string{release.Releaser}, release.Checkers...)
+	encoded := []byte{byte(len(persons))}
+	for _, person := range persons {
+		if len(person) == 0 || len(person) > MaxPersonBytes {
+			return nil, fmt.Errorf("%w: a person has %d bytes, outside 1 to %d", ErrRelease, len(person), MaxPersonBytes)
+		}
+		encoded = append(encoded, byte(len(person)))
+		encoded = append(encoded, person...)
+	}
+	return encoded, nil
+}
 
 // Engine is one decision engine with its own chain of audit records. It is
 // safe for use by several goroutines; decisions run one at a time. An effect
@@ -150,18 +227,23 @@ func New(ctx context.Context, config Config) (*Engine, error) {
 // its first record links onto from.Head and carries the next sequence number.
 // Actions the earlier engine held are not carried over and stay unreleased.
 //
-// It returns ErrHead when the head record is refused and ErrCompromised when
-// from.ReleaseHalt is set for a chain halted as compromised.
+// It returns ErrHead when the head record is refused. With from.Release it
+// returns ErrRelease for a release that cannot be read, ErrNotHalted for a
+// chain that does not end halted, ErrCompromised for a chain halted as
+// compromised, ErrApproval for a release without the approval the halt's
+// risk level demands and ErrReleaseFailed when the release cannot be
+// recorded. No engine is set up in any of these cases, and none of them
+// writes a record.
 func Continue(ctx context.Context, config Config, from Continuation) (*Engine, error) {
 	head, err := encodeFrame(from.Head)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrHead, err)
 	}
-	stored := &chain{head: head, latch: latchKeep}
-	if from.ReleaseHalt {
-		stored.latch = latchRelease
+	release, err := encodeRelease(from.Release)
+	if err != nil {
+		return nil, err
 	}
-	return start(ctx, config, stored)
+	return start(ctx, config, &chain{head: head, release: release})
 }
 
 // start loads the embedded module over the caller's effects.
@@ -281,7 +363,11 @@ func (e *Engine) setUp(ctx context.Context, keyID string, millis uint32, from *c
 	if uint64(len(input)) > uint64(e.inputCapacity) {
 		return fmt.Errorf("%w: its %d bytes do not fit the module's input buffer", ErrHead, len(from.head))
 	}
-	return e.begin(ctx, exportContinue, input, uint64(len(keyID)), uint64(len(from.head)), uint64(millis), uint64(from.latch))
+	input = append(input, from.release...)
+	if uint64(len(input)) > uint64(e.inputCapacity) {
+		return fmt.Errorf("%w: its %d bytes do not fit the module's input buffer", ErrRelease, len(from.release))
+	}
+	return e.begin(ctx, exportContinue, input, uint64(len(keyID)), uint64(len(from.head)), uint64(len(from.release)), uint64(millis))
 }
 
 // begin writes the set-up input to the module and calls one of its two
@@ -294,16 +380,13 @@ func (e *Engine) begin(ctx context.Context, export string, input []byte, params 
 	if err != nil {
 		return err
 	}
-	switch status {
-	case 0:
+	if status == 0 {
 		return nil
-	case statusHead, statusHeadDigest:
-		return fmt.Errorf("%w (status %d)", ErrHead, status)
-	case statusCompromised:
-		return ErrCompromised
-	default:
-		return fmt.Errorf("decision: the module refused its set-up with status %d", status)
 	}
+	if refusal, known := refusals[status]; known {
+		return fmt.Errorf("%w (status %d)", refusal, status)
+	}
+	return fmt.Errorf("decision: the module refused its set-up with status %d", status)
 }
 
 // call runs one exported function that returns a single 32-bit value.

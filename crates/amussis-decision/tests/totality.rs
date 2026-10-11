@@ -7,8 +7,8 @@
 mod common;
 
 use amussis_decision::{
-    ActionType, BlockReason, HaltReason, InterceptorOutcome, OversightClass, RiskTier, UnixSeconds,
-    WarningCode,
+    ActionType, BlockReason, HaltReason, InterceptorOutcome, OversightClass, RiskLevel, RiskTier,
+    UnixSeconds, WarningCode,
 };
 
 use common::{Fallible, engine, intent};
@@ -44,7 +44,7 @@ fn decide_is_total_over_tier_class_and_halt_state() -> Fallible<()> {
 fn exercise(tier: RiskTier, class: OversightClass, halted: bool) -> Fallible<()> {
     let mut engine = engine(60, 8)?;
     if halted {
-        engine.halt(HaltReason::OperatorStop);
+        engine.halt(HaltReason::OperatorStop, RiskLevel::LOWEST)?;
     }
     let proposal = intent(
         "intent-total",
@@ -57,8 +57,8 @@ fn exercise(tier: RiskTier, class: OversightClass, halted: bool) -> Fallible<()>
     check_outcome(outcome, tier, class, halted);
     assert_eq!(
         engine.ledger().len(),
-        1,
-        "every input writes exactly one audit record, refusals included"
+        if halted { 2 } else { 1 },
+        "every input writes exactly one audit record, refusals included, after the record of the halt"
     );
     Ok(())
 }

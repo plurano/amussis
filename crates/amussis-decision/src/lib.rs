@@ -212,7 +212,7 @@ pub use crate::identity::{
     SignerKeyId, TargetResource,
 };
 pub use crate::intent::{ActionIntent, IntentError, IntentSpec};
-pub use crate::killswitch::{HaltReason, Killswitch, KillswitchState};
+pub use crate::killswitch::{HaltReason, Killswitch, KillswitchState, ReleaseError};
 pub use crate::ledger::anchor::{AnchorError, ChainAnchor};
 pub use crate::ledger::hash::{
     CanonicalBuffer, Digest32, HashAlgorithm, HashError, LedgerHasher, PreimageError,
@@ -221,8 +221,8 @@ pub use crate::ledger::sha256::Sha256Hasher;
 pub use crate::ledger::signer::{RecordSigner, SignError, Signature, SignerBinding};
 pub use crate::ledger::{
     AUDIT_DOMAIN, AuditLedger, AuditRecord, InMemorySink, IoDeadline, LedgerError, LedgerSink,
-    RecordBody, RecordDraft, RecordStatus, Sequence, Sha256Ledger, SinkError, UnavailableSink,
-    verify_chain, verify_chain_bounded, verify_continuation,
+    RecordBody, RecordDraft, RecordStatus, RecordSubject, Sequence, Sha256Ledger, SinkError,
+    UnavailableSink, verify_chain, verify_chain_bounded, verify_continuation,
 };
 pub use crate::outcome::{BlockReason, InterceptorOutcome, WarningCode};
 pub use crate::oversight::{
@@ -232,7 +232,7 @@ pub use crate::proposal::{
     MAX_PROPOSAL_BYTES, PROPOSAL_SCHEMA, Proposal, ProposalError, ProposalVersion,
 };
 pub use crate::registry::{PendingRegistry, RegistryError, RequestState};
-pub use crate::risk::{ActionType, OversightClass, RequiredApproval, RiskTier};
+pub use crate::risk::{ActionType, OversightClass, RequiredApproval, RiskLevel, RiskTier};
 pub use crate::time::{
     Clock, ClockError, Deadline, DeadlineError, DeadlineStatus, FixedClock, MonotonicGuard, Ttl,
     UnixSeconds,

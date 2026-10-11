@@ -8,8 +8,8 @@ mod common;
 use amussis_decision::{
     ActionType, AgentId, AuditLedger, AuditRecord, BlockReason, DecisionError, Digest32,
     HaltReason, HashAlgorithm, InMemorySink, IntentId, KillswitchState, LedgerError, LedgerHasher,
-    MAX_SIGNATURE_BYTES, OversightClass, RecordDraft, RecordStatus, RiskTier, Sha256Hasher,
-    SignError, SignerBinding, UnavailableSink, UnixSeconds, verify_chain,
+    MAX_SIGNATURE_BYTES, OversightClass, RecordDraft, RecordStatus, RecordSubject, RiskLevel,
+    RiskTier, Sha256Hasher, SignError, SignerBinding, UnavailableSink, UnixSeconds, verify_chain,
 };
 
 use common::{
@@ -42,9 +42,11 @@ fn ledger() -> Result<Ledger, DecisionError> {
 /// Builds a draft at `at` seconds with the given status.
 fn draft(id: &str, status: RecordStatus, at: u64) -> Result<RecordDraft, DecisionError> {
     Ok(RecordDraft {
-        intent_id: IntentId::parse(id)?,
-        agent: AgentId::parse("agent-01")?,
-        action_type: ActionType::FileModification,
+        subject: Some(RecordSubject {
+            intent_id: IntentId::parse(id)?,
+            agent: AgentId::parse("agent-01")?,
+            action_type: ActionType::FileModification,
+        }),
         status,
         block_reason: None,
         killswitch: KillswitchState::Armed,
@@ -340,7 +342,7 @@ fn md5_is_absent_from_the_crate() -> Fallible<()> {
 #[test]
 fn the_observed_killswitch_state_is_recorded() -> Fallible<()> {
     let mut engine = engine(60, 8)?;
-    engine.halt(HaltReason::OperatorStop);
+    engine.halt(HaltReason::OperatorStop, RiskLevel::LOWEST)?;
     let routine = intent(
         "intent-recorded-halt",
         "maker-alice",
@@ -349,11 +351,11 @@ fn the_observed_killswitch_state_is_recorded() -> Fallible<()> {
         OversightClass::Standard,
     )?;
     let _blocked = engine.decide(&routine);
-    let record = engine
-        .ledger()
-        .records()
-        .first()
-        .ok_or(FixtureError::NoRecord)?;
+    let records = engine.ledger().records();
+    let halt = records.first().ok_or(FixtureError::NoRecord)?;
+    assert_eq!(halt.body().draft().status, RecordStatus::HaltEngaged);
+    assert!(halt.body().draft().killswitch.is_engaged());
+    let record = records.last().ok_or(FixtureError::NoRecord)?;
     assert_eq!(record.body().draft().status, RecordStatus::Halted);
     assert!(record.body().draft().killswitch.is_engaged());
     assert_eq!(

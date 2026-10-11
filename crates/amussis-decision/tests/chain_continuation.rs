@@ -19,13 +19,15 @@ use amussis_decision::{
     BlockReason, CONTRACT_VERSION, ChainAnchor, CheckerId, CheckerSet, ClockError, DIGEST_LEN,
     DecisionEngine, DecisionError, Digest32, EngineConfig, FixedClock, HaltReason, HashAlgorithm,
     HashError, InMemorySink, IntentId, InterceptorOutcome, IoDeadline, Killswitch, KillswitchState,
-    LedgerError, LedgerHasher, LedgerSink, MAX_LEDGER_RECORDS, MAX_PREIMAGE_BYTES, MonotonicGuard,
-    OversightClass, OversightError, PreimageError, RecordBody, RecordDraft, RecordSigner,
-    RecordStatus, RiskTier, Sequence, Sha256Hasher, SignerBinding, SinkError, UnixSeconds, Vote,
-    verify_chain_bounded, verify_continuation,
+    LedgerError, LedgerHasher, LedgerSink, MAX_LEDGER_RECORDS, MAX_PREIMAGE_BYTES, MakerId,
+    MonotonicGuard, OversightClass, OversightError, PreimageError, RecordBody, RecordDraft,
+    RecordSigner, RecordStatus, RecordSubject, ReleaseError, RiskLevel, RiskTier, Sequence,
+    Sha256Hasher, SignerBinding, SinkError, UnixSeconds, Vote, verify_chain_bounded,
+    verify_continuation,
 };
 use common::{
-    Fallible, FixtureError, FixtureSigner, START, TestEngine, config, intent, io_deadline,
+    Fallible, FixtureError, FixtureSigner, START, TestEngine, anchor_of, config, intent,
+    io_deadline, stored_head,
 };
 
 /// The audit window the fixtures use: small, so a test crosses it in a few
@@ -104,19 +106,6 @@ fn allow<H: LedgerHasher, K: LedgerSink>(
     Ok(())
 }
 
-/// The last record the engine's store holds.
-fn stored_head(engine: &TestEngine) -> Fallible<AuditRecord> {
-    let stored = engine.ledger().sink().accepted();
-    Ok(*stored.last().ok_or(FixtureError::NoRecord)?)
-}
-
-/// The anchor of the chain the engine's store holds.
-fn anchor_of(engine: &TestEngine) -> Fallible<ChainAnchor> {
-    Ok(ChainAnchor::from_record::<Sha256Hasher>(&stored_head(
-        engine,
-    )?)?)
-}
-
 /// The stores of several engines, in order, as one chain.
 fn joined(parts: &[&TestEngine]) -> Vec<AuditRecord> {
     parts
@@ -142,9 +131,11 @@ fn record_at(sequence: u64) -> Fallible<AuditRecord> {
 /// The draft of an approved routine action at `at`.
 fn draft_at(at: UnixSeconds) -> Fallible<RecordDraft> {
     Ok(RecordDraft {
-        intent_id: IntentId::parse("intent-drafted")?,
-        agent: AgentId::parse("agent-01")?,
-        action_type: ActionType::FileModification,
+        subject: Some(RecordSubject {
+            intent_id: IntentId::parse("intent-drafted")?,
+            agent: AgentId::parse("agent-01")?,
+            action_type: ActionType::FileModification,
+        }),
         status: RecordStatus::Approved,
         block_reason: None,
         killswitch: KillswitchState::Armed,
@@ -334,7 +325,7 @@ fn the_anchor_names_the_head_record() -> Fallible<()> {
 #[test]
 fn the_anchor_of_stored_bytes_is_the_anchor_of_the_record() -> Fallible<()> {
     let mut engine = fresh(WINDOW)?;
-    engine.halt(HaltReason::OperatorStop);
+    engine.halt(HaltReason::OperatorStop, RiskLevel::LOWEST)?;
     let _refused = engine.decide(&routine("intent-halted")?);
     let record = stored_head(&engine)?;
     let preimage = record.body().canonical_preimage()?;
@@ -357,13 +348,13 @@ fn the_anchor_of_stored_bytes_is_the_anchor_of_the_record() -> Fallible<()> {
 }
 
 /// Positive and negative: a chain that ends halted continues halted, with the
-/// first reason and time, until the latch is released on the anchor; the
-/// chain then shows the step from engaged to armed.
+/// time, reason and level of its head record, until the engine that continued
+/// it releases the halt; the halt and the release are records of the chain.
 #[test]
 fn a_chain_that_ends_halted_continues_halted_until_released() -> Fallible<()> {
     let mut first = fresh(WINDOW)?;
     allow(&mut first, "first", 1)?;
-    first.halt(HaltReason::OperatorStop);
+    first.halt(HaltReason::OperatorStop, RiskLevel::LOWEST)?;
     let refused = first.decide(&routine("intent-stopped")?);
     let halted = BlockReason::KillswitchEngaged(HaltReason::OperatorStop);
     assert_eq!(refused.block_reason(), Some(halted));
@@ -379,17 +370,28 @@ fn a_chain_that_ends_halted_continues_halted_until_released() -> Fallible<()> {
         "a continuation does not drop the latch"
     );
 
-    let released = anchor.release_latch()?;
-    assert_eq!(released.head(), anchor.head());
-    let mut resumed = continued(&released, START)?;
-    allow(&mut resumed, "resumed", 1)?;
-    let chain = joined(&[&first, &resumed]);
+    let released = carried.release_halt(&MakerId::parse("maker-olga")?, None)?;
+    assert_eq!(released, carried.ledger().head());
+    assert_eq!(carried.killswitch(), KillswitchState::Armed);
+    allow(&mut carried, "resumed", 1)?;
+    let chain = joined(&[&first, &carried]);
     verify_chain_bounded::<Sha256Hasher>(&chain, STORE)?;
-    let step: Vec<bool> = chain
+    let statuses: Vec<RecordStatus> = chain
         .iter()
-        .map(|record| record.body().draft().killswitch.is_engaged())
+        .map(|record| record.body().draft().status)
         .collect();
-    assert_eq!(step, [false, true, false], "the release is in the chain");
+    assert_eq!(
+        statuses,
+        [
+            RecordStatus::Approved,
+            RecordStatus::HaltEngaged,
+            RecordStatus::Halted,
+            RecordStatus::Halted,
+            RecordStatus::HaltReleased,
+            RecordStatus::Approved,
+        ],
+        "the halt and the release are records of the chain"
+    );
     Ok(())
 }
 
@@ -528,7 +530,7 @@ fn stored_bytes_that_are_not_a_canonical_pre_image_are_refused() -> Fallible<()>
     let bytes = canonical.as_slice();
     assert!(read_under_own_digest(bytes)?.is_ok(), "the control is read");
 
-    let edits: [(&str, usize, u8); 7] = [
+    let edits: [(&str, usize, u8); 8] = [
         ("domain tag", 0, b'x'),
         (
             "contract version",
@@ -540,6 +542,7 @@ fn stored_bytes_that_are_not_a_canonical_pre_image_are_refused() -> Fallible<()>
         ("latch flag", LATCH_AT, 2),
         ("armed with a time", LATCH_AT.saturating_add(8), 1),
         ("armed with a reason", LATCH_AT.saturating_add(9), 1),
+        ("armed with a level", LATCH_AT.saturating_add(10), 1),
     ];
     for (name, at, to) in edits {
         assert_eq!(
@@ -562,12 +565,14 @@ fn stored_bytes_that_are_not_a_canonical_pre_image_are_refused() -> Fallible<()>
     Ok(())
 }
 
-/// Negative: an engaged latch with a reason tag no reason has is refused, and
-/// a hash backend that fails is an error and never an anchor.
+/// Negative: an engaged latch with a reason tag no reason has, or with a
+/// level tag no level has, is refused: a halt whose level cannot be read is
+/// no head, and is read as neither the lowest nor the highest. A hash backend
+/// that fails is an error and never an anchor.
 #[test]
 fn an_unknown_halt_reason_and_a_failed_hash_are_refused() -> Fallible<()> {
     let mut engine = fresh(WINDOW)?;
-    engine.halt(HaltReason::ClockUnavailable);
+    engine.halt(HaltReason::ClockUnavailable, RiskLevel::LOWEST)?;
     let _refused = engine.decide(&routine("intent-halted")?);
     let record = stored_head(&engine)?;
     let canonical = record.body().canonical_preimage()?;
@@ -576,6 +581,19 @@ fn an_unknown_halt_reason_and_a_failed_hash_are_refused() -> Fallible<()> {
     assert_eq!(
         read_under_own_digest(&with_byte(bytes, LATCH_AT.saturating_add(9), 9))?,
         Err(AnchorError::Malformed)
+    );
+    for level in [0, 7, u8::MAX] {
+        assert_eq!(
+            read_under_own_digest(&with_byte(bytes, LATCH_AT.saturating_add(10), level))?,
+            Err(AnchorError::Malformed),
+            "level tag {level}"
+        );
+    }
+    let highest = with_byte(bytes, LATCH_AT.saturating_add(10), 6);
+    assert_eq!(
+        read_under_own_digest(&highest)?.map(|anchor| anchor.killswitch().level()),
+        Ok(Some(RiskLevel::HIGHEST)),
+        "the last tag a level has"
     );
 
     let width = HashError::Width {
@@ -594,20 +612,27 @@ fn an_unknown_halt_reason_and_a_failed_hash_are_refused() -> Fallible<()> {
 }
 
 /// Negative: a chain halted as compromised is not released, and continues
-/// halted. Boundary: releasing an armed anchor changes nothing.
+/// halted. Boundary: an engine that is not halted has nothing to release.
 #[test]
 fn a_compromised_chain_is_not_released() -> Fallible<()> {
+    let releaser = MakerId::parse("maker-olga")?;
     let mut engine = fresh(WINDOW)?;
     allow(&mut engine, "first", 1)?;
-    let armed = anchor_of(&engine)?;
-    assert_eq!(armed.release_latch(), Ok(armed));
+    let mut armed = continued(&anchor_of(&engine)?, START)?;
+    assert_eq!(
+        armed.release_halt(&releaser, None),
+        Err(ReleaseError::NotHalted)
+    );
 
-    engine.halt(HaltReason::LedgerCompromised);
+    engine.halt(HaltReason::LedgerCompromised, RiskLevel::LOWEST)?;
     let _refused = engine.decide(&routine("intent-compromised")?);
     let anchor = anchor_of(&engine)?;
-    assert_eq!(anchor.release_latch(), Err(AnchorError::Compromised));
 
     let mut carried = continued(&anchor, START)?;
+    assert_eq!(
+        carried.release_halt(&releaser, None),
+        Err(ReleaseError::Compromised)
+    );
     assert_eq!(
         carried.decide(&routine("intent-carried")?).block_reason(),
         Some(BlockReason::KillswitchEngaged(
@@ -667,12 +692,54 @@ fn a_window_that_no_longer_verifies_is_not_dropped() -> Fallible<()> {
     SKEWED.set(false);
 
     assert_eq!(rotated, Err(LedgerError::DigestMismatch { at: 1 }));
-    assert_eq!(engine.ledger().len(), 2, "the window is kept");
+    assert_eq!(
+        engine.ledger().len(),
+        3,
+        "the window is kept, and the halt is one more record"
+    );
     assert_eq!(engine.ledger().sink().syncs(), 0, "nothing was flushed");
     assert_eq!(
         engine.killswitch().reason(),
         Some(HaltReason::LedgerCompromised)
     );
+    assert_eq!(
+        engine.killswitch().level(),
+        Some(RiskLevel::HIGHEST),
+        "a halt with no action in hand stands at the highest level"
+    );
+    let last = engine
+        .ledger()
+        .records()
+        .last()
+        .ok_or(FixtureError::NoRecord)?;
+    assert_eq!(last.body().draft().status, RecordStatus::HaltEngaged);
+    Ok(())
+}
+
+/// Negative, planted: a chain that is walked again and no longer hashes to
+/// its digests halts the engine as compromised, at the highest level: the
+/// fault has no action in hand.
+#[test]
+fn a_chain_that_no_longer_verifies_halts_at_the_highest_level() -> Fallible<()> {
+    let mut engine: EngineOver<SkewHasher, InMemorySink> = DecisionEngine::new(
+        settings(WINDOW)?,
+        SignerBinding::Bound(FixtureSigner::new()?),
+        InMemorySink::with_bound(STORE),
+        io_deadline(),
+        FixedClock::new(START),
+    );
+    allow(&mut engine, "first", 2)?;
+    engine.verify_ledger()?;
+    SKEWED.set(true);
+    let walked = engine.verify_ledger();
+    SKEWED.set(false);
+
+    assert_eq!(walked, Err(LedgerError::DigestMismatch { at: 1 }));
+    assert_eq!(
+        engine.killswitch().reason(),
+        Some(HaltReason::LedgerCompromised)
+    );
+    assert_eq!(engine.killswitch().level(), Some(RiskLevel::HIGHEST));
     Ok(())
 }
 
@@ -856,10 +923,15 @@ fn the_latch_and_the_guard_start_where_the_chain_stopped() {
     let engaged = KillswitchState::Engaged {
         at: UnixSeconds::new(10),
         reason: HaltReason::OperatorStop,
+        level: RiskLevel::LOWEST,
     };
     let mut latch = Killswitch::from_state(engaged);
     assert_eq!(latch.state(), engaged);
-    latch.engage(UnixSeconds::new(20), HaltReason::AuditUnavailable);
+    latch.engage(
+        UnixSeconds::new(20),
+        HaltReason::AuditUnavailable,
+        RiskLevel::LOWEST,
+    );
     assert_eq!(latch.state(), engaged, "the first reason and time stay");
     assert_eq!(
         Killswitch::from_state(KillswitchState::Armed),

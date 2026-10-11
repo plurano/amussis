@@ -133,3 +133,110 @@ impl RequiredApproval {
         self.checker_count() > 0
     }
 }
+
+/// A risk level: a tier within an oversight class.
+///
+/// It is what the approval rule reads. An action has one, and so has a halt:
+/// the level of the action the halt answers, which its release is held to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct RiskLevel {
+    tier: RiskTier,
+    class: OversightClass,
+}
+
+impl RiskLevel {
+    /// The level that demands least: a routine action with no sector
+    /// oversight.
+    pub const LOWEST: Self = Self::new(RiskTier::TierCRoutineBounded, OversightClass::Standard);
+
+    /// The level that demands most. A halt takes it when the level of what
+    /// it answers is not known.
+    pub const HIGHEST: Self = Self::new(
+        RiskTier::TierAConsequential,
+        OversightClass::AnnexIiiBiometric,
+    );
+
+    /// Names a level by its tier and oversight class.
+    #[must_use]
+    pub const fn new(tier: RiskTier, class: OversightClass) -> Self {
+        Self { tier, class }
+    }
+
+    /// Returns the tier.
+    #[must_use]
+    pub const fn tier(self) -> RiskTier {
+        self.tier
+    }
+
+    /// Returns the oversight class.
+    #[must_use]
+    pub const fn class(self) -> OversightClass {
+        self.class
+    }
+
+    /// Returns the approval the level demands, by the one approval rule.
+    #[must_use]
+    pub const fn required_approval(self) -> RequiredApproval {
+        RequiredApproval::for_action(self.tier, self.class)
+    }
+
+    /// Returns the stricter of two levels: the one that demands more
+    /// checkers, then the one in the higher oversight class, then the one of
+    /// the higher tier.
+    #[must_use]
+    pub fn stricter(self, other: Self) -> Self {
+        if other.strictness() > self.strictness() {
+            other
+        } else {
+            self
+        }
+    }
+
+    /// The order [`Self::stricter`] compares by.
+    fn strictness(self) -> (usize, bool, RiskTier) {
+        (
+            self.required_approval().checker_count(),
+            matches!(self.class, OversightClass::AnnexIiiBiometric),
+            self.tier,
+        )
+    }
+
+    /// Returns the stable tag mixed into the canonical audit pre-image. Zero
+    /// is no level: it is what an armed latch writes.
+    #[must_use]
+    pub const fn tag(self) -> u8 {
+        match (self.class, self.tier) {
+            (OversightClass::Standard, RiskTier::TierCRoutineBounded) => 1,
+            (OversightClass::Standard, RiskTier::TierBMaterialReversible) => 2,
+            (OversightClass::Standard, RiskTier::TierAConsequential) => 3,
+            (OversightClass::AnnexIiiBiometric, RiskTier::TierCRoutineBounded) => 4,
+            (OversightClass::AnnexIiiBiometric, RiskTier::TierBMaterialReversible) => 5,
+            (OversightClass::AnnexIiiBiometric, RiskTier::TierAConsequential) => 6,
+        }
+    }
+
+    /// Returns the level a stable tag stands for, or `None` for a tag no
+    /// level has. The inverse of [`Self::tag`].
+    #[must_use]
+    pub const fn from_tag(tag: u8) -> Option<Self> {
+        let (class, tier) = match tag {
+            1 => (OversightClass::Standard, RiskTier::TierCRoutineBounded),
+            2 => (OversightClass::Standard, RiskTier::TierBMaterialReversible),
+            3 => (OversightClass::Standard, RiskTier::TierAConsequential),
+            4 => (
+                OversightClass::AnnexIiiBiometric,
+                RiskTier::TierCRoutineBounded,
+            ),
+            5 => (
+                OversightClass::AnnexIiiBiometric,
+                RiskTier::TierBMaterialReversible,
+            ),
+            6 => (
+                OversightClass::AnnexIiiBiometric,
+                RiskTier::TierAConsequential,
+            ),
+            _ => return None,
+        };
+        Some(Self::new(tier, class))
+    }
+}

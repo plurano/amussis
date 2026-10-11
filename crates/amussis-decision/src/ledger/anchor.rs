@@ -27,15 +27,15 @@
 //! Every record carries the halt-latch state observed when it was written. An
 //! anchor carries the state of its head record, and an engine that continues
 //! from it starts in that state: a chain that ends halted continues halted.
-//! [`ChainAnchor::release_latch`] is the one way to continue such a chain with
-//! the latch armed. It is a separate, named call so that a release cannot
-//! happen by building a value; the chain shows it as the step from a record
-//! with the latch engaged to a record with the latch armed. A chain halted as
-//! compromised is not released.
+//! An anchor has no release. The one release is a call on the engine that
+//! continued the chain,
+//! [`DecisionEngine::release_halt`](crate::DecisionEngine::release_halt),
+//! and it is a record of the chain.
 
 use crate::killswitch::{HaltReason, KillswitchState};
 use crate::ledger::hash::{Digest32, HashError, LedgerHasher, PreimageError};
 use crate::ledger::{AUDIT_DOMAIN, AuditRecord, Sequence};
+use crate::risk::RiskLevel;
 use crate::time::UnixSeconds;
 use crate::{CONTRACT_VERSION, DIGEST_LEN, MAX_PREIMAGE_BYTES};
 
@@ -54,9 +54,6 @@ pub enum AnchorError {
     /// and hash algorithm, or carry something after the last field.
     #[error("the head bytes are not a canonical audit pre-image of this contract")]
     Malformed,
-    /// The chain ends halted as compromised; its latch is not released.
-    #[error("a chain halted as compromised is not continued with the latch released")]
-    Compromised,
     /// The canonical pre-image of the head record could not be built.
     #[error("canonical pre-image: {0}")]
     Preimage(#[from] PreimageError),
@@ -132,25 +129,6 @@ impl ChainAnchor {
     pub const fn killswitch(&self) -> KillswitchState {
         self.killswitch
     }
-
-    /// Returns this anchor with the halt latch armed.
-    ///
-    /// This is the only release of a halt latch the library has. An anchor
-    /// whose latch is already armed is returned unchanged.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`AnchorError::Compromised`] when the chain ends halted with
-    /// [`HaltReason::LedgerCompromised`].
-    pub const fn release_latch(self) -> Result<Self, AnchorError> {
-        match self.killswitch.reason() {
-            Some(HaltReason::LedgerCompromised) => Err(AnchorError::Compromised),
-            Some(_) | None => Ok(Self {
-                killswitch: KillswitchState::Armed,
-                ..self
-            }),
-        }
-    }
 }
 
 /// Reads a canonical pre-image front to back. Every read is bounded by the
@@ -212,17 +190,20 @@ fn read_anchor<H: LedgerHasher>(preimage: &[u8], head: Digest32) -> Option<Chain
     })
 }
 
-/// Reads the halt-latch state. An armed latch is written with a zero time and
-/// a zero reason; anything else in those bytes is not canonical.
+/// Reads the halt-latch state. An armed latch is written with a zero time, a
+/// zero reason and a zero level; anything else in those bytes is not
+/// canonical.
 fn read_killswitch(reader: &mut Reader<'_>) -> Option<KillswitchState> {
     let engaged = reader.byte()?;
     let at = reader.word()?;
     let reason = reader.byte()?;
+    let level = reader.byte()?;
     match engaged {
-        0 => (at == 0 && reason == 0).then_some(KillswitchState::Armed),
+        0 => (at == 0 && reason == 0 && level == 0).then_some(KillswitchState::Armed),
         1 => Some(KillswitchState::Engaged {
             at: UnixSeconds::new(at),
             reason: HaltReason::from_tag(reason)?,
+            level: RiskLevel::from_tag(level)?,
         }),
         _ => None,
     }

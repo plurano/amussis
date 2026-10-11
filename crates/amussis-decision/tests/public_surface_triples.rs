@@ -24,10 +24,10 @@ use amussis_decision::{
     DIGEST_LEN, DecisionError, Digest32, EngineConfig, HaltReason, HashAlgorithm, HashError,
     Identity, InMemorySink, IntentError, IntentId, InterceptorOutcome, IoDeadline, KillswitchState,
     LedgerError, LedgerHasher, LedgerSink, MAX_IDENTITY_LEN, MAX_PREIMAGE_BYTES, OversightClass,
-    OversightError, PreimageError, RecordBody, RecordDraft, RecordStatus, RegistryError, RequestId,
-    RequestState, RequiredApproval, RiskTier, Sequence, Sha256Hasher, Sha256Ledger, SignError,
-    SignerBinding, SinkError, Ttl, UnavailableSink, UnixSeconds, VerifiedCheckerSet, Vote,
-    verify_chain,
+    OversightError, PreimageError, RecordBody, RecordDraft, RecordStatus, RecordSubject,
+    RegistryError, RequestId, RequestState, RequiredApproval, RiskLevel, RiskTier, Sequence,
+    Sha256Hasher, Sha256Ledger, SignError, SignerBinding, SinkError, Ttl, UnavailableSink,
+    UnixSeconds, VerifiedCheckerSet, Vote, verify_chain,
 };
 
 use common::{
@@ -47,9 +47,11 @@ fn ledger() -> Result<Sha256Ledger<FixtureSigner, InMemorySink>, DecisionError> 
 /// Builds an approved draft for `id` at `at` seconds.
 fn sample_draft(id: &str, at: u64) -> Result<RecordDraft, DecisionError> {
     Ok(RecordDraft {
-        intent_id: IntentId::parse(id)?,
-        agent: AgentId::parse("agent-01")?,
-        action_type: ActionType::FileModification,
+        subject: Some(RecordSubject {
+            intent_id: IntentId::parse(id)?,
+            agent: AgentId::parse("agent-01")?,
+            action_type: ActionType::FileModification,
+        }),
         status: RecordStatus::Approved,
         block_reason: None,
         killswitch: KillswitchState::Armed,
@@ -374,7 +376,7 @@ fn every_outcome_variant_is_matched_by_shape() -> Fallible<()> {
         "a Tier A action must be held on a single-checker ticket, found {outcome:?}"
     );
 
-    unit.halt(HaltReason::OperatorStop);
+    unit.halt(HaltReason::OperatorStop, RiskLevel::LOWEST)?;
     let after = intent(
         "intent-shape-block",
         "maker-alice",
@@ -526,7 +528,7 @@ fn a_halted_unit_accepts_no_human_decision() -> Fallible<()> {
         .decide(&proposal)
         .ticket()
         .ok_or(FixtureError::NoTicket)?;
-    unit.halt(HaltReason::OperatorStop);
+    unit.halt(HaltReason::OperatorStop, RiskLevel::LOWEST)?;
 
     let panel = CheckerSet::single(CheckerId::parse("checker-bo")?);
     assert_eq!(

@@ -31,7 +31,7 @@
 //! | `amussis_input` | `() -> i32` | Address of the input buffer. |
 //! | `amussis_input_capacity` | `() -> i32` | Its size in bytes, the proposal bound. |
 //! | `amussis_init` | `(key_id_len: i32, io_deadline_ms: i32) -> i32` | Sets up the engine; the signer key identifier is in the input buffer. `0`, or an [`InitError`] number. |
-//! | `amussis_continue` | `(key_id_len: i32, head_len: i32, io_deadline_ms: i32, latch: i32) -> i32` | Sets up the engine as the continuation of a stored chain; the input buffer holds the signer key identifier followed by the frame ([`wire`]) of the chain's last stored record. `latch` is a [`Latch`] number. `0`, or an [`InitError`] number. |
+//! | `amussis_continue` | `(key_id_len: i32, head_len: i32, release_len: i32, io_deadline_ms: i32) -> i32` | Sets up the engine as the continuation of a stored chain; the input buffer holds the signer key identifier, the frame ([`wire`]) of the chain's last stored record and the release of its halt ([`ReleaseParts`]; `release_len` zero keeps the halt). `0`, or an [`InitError`] number. |
 //! | `amussis_decide` | `(len: i32) -> i32` | Decides the proposal text in the input buffer; returns the outcome code. |
 //!
 //! # Outcome code
@@ -65,9 +65,27 @@
 //! with one sequence number in the store, which a walk over the store
 //! refuses.
 //!
-//! A chain that ends halted continues halted ([`Latch::Keep`]).
-//! [`Latch::Release`] is the one release of a halt this interface has; it is
-//! refused for a chain halted as compromised.
+//! # Halt and release
+//!
+//! A halt is a record of the chain, and it stands at a risk level: the level
+//! of the action the engine had in hand when an effect failed, or the highest
+//! level when it had none. A chain that ends halted continues halted; a
+//! restart is no release.
+//!
+//! The one release of a halt is part of a continuation. The host names the
+//! person who releases and the checkers who approve ([`ReleaseParts`]), and
+//! the engine holds the release to the approval rule it holds actions of the
+//! halted level to, the releasing person in the place of the maker: a level
+//! whose actions need no checker is released by that person alone, a level
+//! whose actions need one or two checkers only with that many, none of them
+//! the releasing person. The release is a record, the first one the new
+//! engine writes. A chain halted as compromised is not released, and a
+//! release asked for a chain that is not halted is refused.
+//!
+//! The release record states that the halt was released and when. It names
+//! neither the releasing person nor the checkers; no record of the chain
+//! names a person. A host that has to show who released a halt keeps that
+//! itself.
 //!
 //! # Limits
 //!
@@ -79,8 +97,9 @@
 //!   record of the host's own store is the host's statement.
 //! - A halt is carried over a continuation only as far as the store shows
 //!   it. A halt whose record never reached the store (the sink or the signer
-//!   failed) is not in the head record, so a continuation from that head
-//!   starts armed.
+//!   failed and did not recover before the host stopped) is not in the head
+//!   record, so a continuation from that head starts armed. The host saw the
+//!   block that halt answered with, and is the one who can keep it.
 //!
 //! # Unsafe code
 //!
@@ -95,16 +114,17 @@ pub mod wire;
 #[cfg(target_family = "wasm")]
 mod abi;
 
-pub use crate::binding::{
-    Binding, Class, Continuation, Engine, InitError, Latch, OutcomeCode, Refusal,
-};
+pub use crate::binding::{Binding, Class, Continuation, Engine, InitError, OutcomeCode, Refusal};
 pub use crate::host::{
     ClockAdapter, HostClock, HostSigner, HostSink, SINK_STORED, SignerAdapter, SinkAdapter,
 };
-pub use crate::wire::{FRAME_VERSION, Frame, FrameParts, MAX_FRAME_BYTES};
+pub use crate::wire::{
+    FRAME_VERSION, Frame, FrameParts, MAX_FRAME_BYTES, MAX_RELEASE_BYTES, MAX_RELEASE_PERSONS,
+    ReleaseParts,
+};
 
 /// Version of the import and export interface described above.
-pub const ABI_VERSION: u32 = 2;
+pub const ABI_VERSION: u32 = 3;
 
 /// Name of the import module the host functions live in.
 pub const HOST_MODULE: &str = "amussis_host_v1";

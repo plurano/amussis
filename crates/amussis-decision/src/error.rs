@@ -10,6 +10,7 @@
 
 use crate::identity::IdentityError;
 use crate::intent::IntentError;
+use crate::killswitch::ReleaseError;
 use crate::ledger::hash::{HashError, PreimageError};
 use crate::ledger::signer::SignError;
 use crate::ledger::{LedgerError, SinkError};
@@ -53,4 +54,7 @@ pub enum DecisionError {
     /// A sink refused a record.
     #[error("sink: {0}")]
     Sink(#[from] SinkError),
+    /// A halt was not released.
+    #[error("release: {0}")]
+    Release(#[from] ReleaseError),
 }

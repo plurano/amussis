@@ -12,7 +12,7 @@ import (
 )
 
 // abiVersion is the interface version this loader speaks.
-const abiVersion = 2
+const abiVersion = 3
 
 const (
 	exportMemory        = "memory"

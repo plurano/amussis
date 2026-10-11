@@ -4,7 +4,7 @@
 //! A validated proposal to act.
 
 use crate::identity::{AgentId, IntentId, MakerId, TargetResource};
-use crate::risk::{ActionType, OversightClass, RiskTier};
+use crate::risk::{ActionType, OversightClass, RiskLevel, RiskTier};
 
 /// Reasons a proposed action is refused before classification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -126,5 +126,12 @@ impl ActionIntent {
     #[must_use]
     pub fn effective_tier(&self) -> RiskTier {
         core::cmp::max(self.declared_tier, self.action.minimum_tier())
+    }
+
+    /// Returns the risk level the engine classifies at: the effective tier
+    /// within the oversight class.
+    #[must_use]
+    pub fn level(&self) -> RiskLevel {
+        RiskLevel::new(self.effective_tier(), self.oversight)
     }
 }

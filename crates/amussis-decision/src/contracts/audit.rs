@@ -122,7 +122,9 @@ impl SignedAuditRecord {
     ///
     /// # Errors
     ///
-    /// Returns [`ContractError::Malformed`] for a payload naming another edge,
+    /// Returns [`ContractError::Malformed`] for a payload naming another edge
+    /// and for a record of the halt latch itself, which decides no action and
+    /// so has no action type and no actor to carry here,
     /// [`ContractError::MissingGenesisLink`] and
     /// [`ContractError::GenesisLinkOutOfPlace`] for a link that does not match
     /// the record's chain position, [`ContractError::RefusalWithoutReason`] and
@@ -131,7 +133,7 @@ impl SignedAuditRecord {
     /// carries no seal or an empty one.
     pub fn validate(&self) -> Result<(), ContractError> {
         let correlation = self.correlation();
-        if self.edge != Self::EDGE {
+        if self.edge != Self::EDGE || self.status.is_of_latch() {
             return Err(ContractError::Malformed { correlation });
         }
         self.validate_link(correlation)?;

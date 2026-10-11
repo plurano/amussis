@@ -18,7 +18,7 @@ use std::sync::Mutex;
 
 use amussis_decision::{DIGEST_LEN, MAX_PROPOSAL_BYTES, MAX_SIGNATURE_BYTES};
 
-use crate::binding::{Binding, Continuation, InitError, Latch, OutcomeCode, Refusal};
+use crate::binding::{Binding, Continuation, InitError, OutcomeCode, Refusal};
 use crate::host::{HostClock, HostSigner, HostSink};
 use crate::wire::MAX_FRAME_BYTES;
 use crate::{ABI_VERSION, HOST_UNAVAILABLE};
@@ -111,8 +111,8 @@ pub extern "C" fn amussis_abi_version() -> u32 {
     ABI_VERSION
 }
 
-/// The address the host writes the key identifier, the head frame of a chain
-/// and the proposal text to.
+/// The address the host writes the key identifier, the head frame of a chain,
+/// the release of its halt and the proposal text to.
 // SAFETY: as for `amussis_abi_version`.
 #[unsafe(no_mangle)]
 pub extern "C" fn amussis_input() -> u32 {
@@ -155,18 +155,20 @@ fn init(key_id_len: u32, io_deadline_ms: u32) -> Result<(), InitError> {
 }
 
 /// Sets up the engine as the continuation of a stored chain. The input buffer
-/// holds the signer key identifier in its first `key_id_len` bytes and, behind
-/// it, the `head_len` bytes of the frame of the chain's last stored record.
-/// `latch` is a [`Latch`] number. Returns zero, or an [`InitError`] number.
+/// holds the signer key identifier in its first `key_id_len` bytes, behind it
+/// the `head_len` bytes of the frame of the chain's last stored record, and
+/// behind that the `release_len` bytes of the release of the chain's halt;
+/// `release_len` is zero when the halt is kept. Returns zero, or an
+/// [`InitError`] number.
 // SAFETY: as for `amussis_abi_version`.
 #[unsafe(no_mangle)]
 pub extern "C" fn amussis_continue(
     key_id_len: u32,
     head_len: u32,
+    release_len: u32,
     io_deadline_ms: u32,
-    latch: u32,
 ) -> u32 {
-    match resume(key_id_len, head_len, io_deadline_ms, latch) {
+    match resume(key_id_len, head_len, release_len, io_deadline_ms) {
         Ok(()) => 0,
         Err(error) => error as u32,
     }
@@ -175,32 +177,38 @@ pub extern "C" fn amussis_continue(
 fn resume(
     key_id_len: u32,
     head_len: u32,
+    release_len: u32,
     io_deadline_ms: u32,
-    latch: u32,
 ) -> Result<(), InitError> {
     let mut guard = BINDING.try_lock().map_err(|_| InitError::Busy)?;
     if guard.is_some() {
         return Err(InitError::AlreadyInitialised);
     }
-    let latch = Latch::from_flag(latch).ok_or(InitError::Latch)?;
     let mut text = [0u8; MAX_PROPOSAL_BYTES];
-    let both = key_id_len
+    let stored = key_id_len
         .checked_add(head_len)
-        .and_then(|len| input(len, &mut text))
+        .filter(|len| *len <= capacity(&INPUT))
         .ok_or(InitError::Head)?;
-    let (key_id, head) = usize::try_from(key_id_len)
-        .ok()
-        .and_then(|at| both.split_at_checked(at))
-        .ok_or(InitError::KeyId)?;
+    let all = stored
+        .checked_add(release_len)
+        .and_then(|len| input(len, &mut text))
+        .ok_or(InitError::Release)?;
+    let (key_id, rest) = cut(all, key_id_len).ok_or(InitError::KeyId)?;
+    let (head, release) = cut(rest, head_len).ok_or(InitError::Head)?;
     *guard = Some(Binding::continue_from(
         key_id,
         io_deadline_ms,
-        Continuation::new(head, latch),
+        Continuation::new(head, release),
         Imports,
         Imports,
         Imports,
     )?);
     Ok(())
+}
+
+/// Splits `bytes` behind its first `at` bytes.
+fn cut(bytes: &[u8], at: u32) -> Option<(&[u8], &[u8])> {
+    bytes.split_at_checked(usize::try_from(at).ok()?)
 }
 
 /// Decides the proposal whose text is the first `len` bytes of the input

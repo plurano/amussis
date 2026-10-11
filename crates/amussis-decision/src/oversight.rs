@@ -10,7 +10,7 @@
 //! was separated from the maker.
 
 use crate::identity::{AgentId, CheckerId, MakerId, RequestId};
-use crate::risk::{ActionType, RequiredApproval};
+use crate::risk::{ActionType, RequiredApproval, RiskLevel};
 use crate::time::Deadline;
 
 /// Reasons an oversight step is refused.
@@ -174,7 +174,7 @@ pub struct ApprovalTicket {
     maker: MakerId,
     agent: AgentId,
     action: ActionType,
-    required: RequiredApproval,
+    level: RiskLevel,
     deadline: Deadline,
 }
 
@@ -186,7 +186,7 @@ impl ApprovalTicket {
         maker: MakerId,
         agent: AgentId,
         action: ActionType,
-        required: RequiredApproval,
+        level: RiskLevel,
         deadline: Deadline,
     ) -> Self {
         Self {
@@ -194,7 +194,7 @@ impl ApprovalTicket {
             maker,
             agent,
             action,
-            required,
+            level,
             deadline,
         }
     }
@@ -223,10 +223,16 @@ impl ApprovalTicket {
         &self.maker
     }
 
-    /// Returns the approval the request demands.
+    /// Returns the risk level the held action was classified at.
+    #[must_use]
+    pub const fn level(&self) -> RiskLevel {
+        self.level
+    }
+
+    /// Returns the approval the request demands: the one its level demands.
     #[must_use]
     pub const fn required(&self) -> RequiredApproval {
-        self.required
+        self.level.required_approval()
     }
 
     /// Returns the approval window.

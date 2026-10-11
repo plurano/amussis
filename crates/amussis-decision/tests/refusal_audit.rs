@@ -13,7 +13,8 @@ mod common;
 
 use amussis_decision::{
     ActionType, BlockReason, CheckerId, CheckerSet, ClockError, DecisionError, HaltReason,
-    LedgerError, OversightClass, RecordStatus, RegistryError, RiskTier, UnixSeconds, Vote,
+    LedgerError, OversightClass, RecordStatus, RegistryError, RiskLevel, RiskTier, UnixSeconds,
+    Vote,
 };
 
 use common::{
@@ -64,8 +65,12 @@ fn an_engine_refusal_is_recorded_with_its_reason() -> Fallible<()> {
         "the record names the reason the action was refused"
     );
     assert_eq!(
-        record.body().draft().intent_id.to_string(),
-        "intent-audited-2"
+        record
+            .body()
+            .draft()
+            .subject
+            .map(|subject| subject.intent_id.to_string()),
+        Some("intent-audited-2".to_owned())
     );
     engine.verify_ledger()?;
     Ok(())
@@ -76,7 +81,7 @@ fn an_engine_refusal_is_recorded_with_its_reason() -> Fallible<()> {
 #[test]
 fn a_halted_refusal_is_recorded_with_the_halt_reason() -> Fallible<()> {
     let mut engine = engine(600, 4)?;
-    engine.halt(HaltReason::OperatorStop);
+    engine.halt(HaltReason::OperatorStop, RiskLevel::LOWEST)?;
     let proposal = intent(
         "intent-halted",
         "maker-alice",
@@ -92,7 +97,7 @@ fn a_halted_refusal_is_recorded_with_the_halt_reason() -> Fallible<()> {
     let record = engine
         .ledger()
         .records()
-        .first()
+        .last()
         .ok_or(FixtureError::NoRecord)?;
     assert_eq!(record.body().draft().status, RecordStatus::Halted);
     assert_eq!(

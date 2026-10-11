@@ -4,12 +4,13 @@
 //! One decision behind one call: proposal text in, outcome code out.
 
 use amussis_decision::{
-    AnchorError, ChainAnchor, DecisionEngine, Digest32, EngineConfig, InterceptorOutcome,
-    IoDeadline, Proposal, ProposalError, Sha256Hasher, SignerBinding, SignerKeyId, WarningCode,
+    AnchorError, ChainAnchor, CheckerId, CheckerSet, DecisionEngine, Digest32, EngineConfig,
+    Identity, InterceptorOutcome, IoDeadline, MakerId, Proposal, ProposalError, ReleaseError,
+    Sha256Hasher, SignerBinding, SignerKeyId, WarningCode,
 };
 
 use crate::host::{ClockAdapter, HostClock, HostSigner, HostSink, SignerAdapter, SinkAdapter};
-use crate::wire::FrameParts;
+use crate::wire::{FrameParts, ReleaseParts};
 
 /// The engine a binding runs: SHA-256 chain, host signer, host sink, host clock.
 pub type Engine<C, S, K> =
@@ -70,33 +71,18 @@ pub enum InitError {
     HeadDigest = 6,
     /// The chain ends halted as compromised; its halt is not released.
     Compromised = 7,
-    /// The latch flag is neither [`Latch::Keep`] nor [`Latch::Release`].
-    Latch = 8,
-}
-
-/// What a continuation does with the halt latch of the chain it continues.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u32)]
-pub enum Latch {
-    /// The engine starts in the state the head record carries: a chain that
-    /// ends halted continues halted.
-    Keep = 0,
-    /// The engine starts with the latch armed. This is the release of a halt;
-    /// the chain shows it as the step from a halted record to an armed one.
-    Release = 1,
-}
-
-impl Latch {
-    /// Reads the flag that crosses the interface, or returns `None` for a
-    /// number that names neither choice.
-    #[must_use]
-    pub const fn from_flag(flag: u32) -> Option<Self> {
-        match flag {
-            0 => Some(Self::Keep),
-            1 => Some(Self::Release),
-            _ => None,
-        }
-    }
+    /// The release bytes are not a release: they name no person or more than
+    /// three, or the bytes of a person are not an identity.
+    Release = 8,
+    /// A release was asked for a chain that does not end halted.
+    NotHalted = 9,
+    /// The release lacks the approval the halted level demands: checkers are
+    /// missing or too few, one person fills two places, or a checker is the
+    /// releasing person.
+    Approval = 10,
+    /// The release was approved and could not be written into the chain: the
+    /// clock, the signer or the sink failed. The chain stays halted.
+    ReleaseFailed = 11,
 }
 
 /// One outcome as the three bytes that cross to the host.
@@ -172,18 +158,24 @@ impl OutcomeCode {
 }
 
 /// The chain a new engine continues: the frame of the last record the host's
-/// store holds, and what becomes of the halt latch that record carries.
+/// store holds, and the release of the halt that record carries, if the halt
+/// is to be released.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Continuation<'a> {
     head: &'a [u8],
-    latch: Latch,
+    release: &'a [u8],
 }
 
 impl<'a> Continuation<'a> {
-    /// Names the head frame of a chain and the choice for its halt latch.
+    /// Names the head frame of a chain and the release of its halt.
+    ///
+    /// `release` is empty, or the bytes [`ReleaseParts`] reads: the person
+    /// who releases the halt and the checkers who approve it. With an empty
+    /// `release` the engine starts in the state the head record carries, so a
+    /// chain that ends halted continues halted.
     #[must_use]
-    pub const fn new(head: &'a [u8], latch: Latch) -> Self {
-        Self { head, latch }
+    pub const fn new(head: &'a [u8], release: &'a [u8]) -> Self {
+        Self { head, release }
     }
 
     /// Returns the head frame.
@@ -192,10 +184,10 @@ impl<'a> Continuation<'a> {
         self.head
     }
 
-    /// Returns the choice for the halt latch.
+    /// Returns the release bytes; empty when the halt is kept.
     #[must_use]
-    pub const fn latch(&self) -> Latch {
-        self.latch
+    pub const fn release(&self) -> &'a [u8] {
+        self.release
     }
 }
 
@@ -244,9 +236,15 @@ impl<C: HostClock, S: HostSigner, K: HostSink> Binding<C, S, K> {
     ///
     /// The first record of the new engine links onto the head record and
     /// carries the next sequence number. The engine starts in the halt-latch
-    /// state the head record carries unless `from` asks for [`Latch::Release`].
-    /// Held actions of the engine that wrote the head record are not carried
-    /// over: they stay unreleased.
+    /// state the head record carries. Held actions of the engine that wrote
+    /// the head record are not carried over: they stay unreleased.
+    ///
+    /// When `from` carries a release, the engine is asked to release the halt
+    /// before the binding exists: the release is held to the approval rule of
+    /// the level the halt stands at, and its record is the first record of
+    /// the new engine. A release that is refused or cannot be recorded sets
+    /// up no binding; the store is as it was, and the host may continue from
+    /// the same head again.
     ///
     /// The head is checked for integrity, not for origin: its content must
     /// hash to its digest, and its signature is not verified. That the frame
@@ -257,9 +255,13 @@ impl<C: HostClock, S: HostSigner, K: HostSink> Binding<C, S, K> {
     ///
     /// Returns [`InitError::KeyId`] and [`InitError::Deadline`] as
     /// [`Self::new`] does, [`InitError::Head`] when the head is not a record
-    /// frame of this contract, [`InitError::HeadDigest`] when the record does
-    /// not hash to its digest, and [`InitError::Compromised`] when a release
-    /// is asked for a chain halted as compromised.
+    /// frame of this contract and [`InitError::HeadDigest`] when the record
+    /// does not hash to its digest. A release adds [`InitError::Release`]
+    /// when its bytes are not a release, [`InitError::NotHalted`] when the
+    /// chain does not end halted, [`InitError::Compromised`] when it ends
+    /// halted as compromised, [`InitError::Approval`] when the checkers do
+    /// not satisfy the approval rule of the halted level, and
+    /// [`InitError::ReleaseFailed`] when the release cannot be recorded.
     pub fn continue_from(
         key_id: &[u8],
         io_deadline_ms: u32,
@@ -269,17 +271,22 @@ impl<C: HostClock, S: HostSigner, K: HostSink> Binding<C, S, K> {
         sink: K,
     ) -> Result<Self, InitError> {
         let (key_id, deadline) = settings(key_id, io_deadline_ms)?;
-        let anchor = anchor_of(from)?;
-        Ok(Self {
-            engine: DecisionEngine::continue_from(
-                EngineConfig::default(),
-                SignerBinding::Bound(SignerAdapter::new(key_id, signer)),
-                SinkAdapter::new(sink),
-                deadline,
-                ClockAdapter::new(clock),
-                &anchor,
-            ),
-        })
+        let anchor = anchor_of(from.head())?;
+        let release = release_of(from.release())?;
+        let mut engine = DecisionEngine::continue_from(
+            EngineConfig::default(),
+            SignerBinding::Bound(SignerAdapter::new(key_id, signer)),
+            SinkAdapter::new(sink),
+            deadline,
+            ClockAdapter::new(clock),
+            &anchor,
+        );
+        if let Some((releaser, panel)) = release {
+            engine
+                .release_halt(&releaser, panel)
+                .map_err(release_refusal)?;
+        }
+        Ok(Self { engine })
     }
 
     /// Returns the engine, for reading its ledger and halt latch.
@@ -331,18 +338,57 @@ fn settings(key_id: &[u8], io_deadline_ms: u32) -> Result<(SignerKeyId, IoDeadli
 }
 
 /// Reads the head frame of a chain as the point to continue it from.
-fn anchor_of(from: Continuation<'_>) -> Result<ChainAnchor, InitError> {
-    let parts = FrameParts::split(from.head()).ok_or(InitError::Head)?;
+fn anchor_of(head: &[u8]) -> Result<ChainAnchor, InitError> {
+    let parts = FrameParts::split(head).ok_or(InitError::Head)?;
     let digest = Digest32::from_bytes(parts.digest());
-    let anchor =
-        ChainAnchor::from_preimage::<Sha256Hasher>(parts.preimage(), &digest).map_err(|error| {
-            match error {
-                AnchorError::DigestMismatch => InitError::HeadDigest,
-                _ => InitError::Head,
-            }
-        })?;
-    match from.latch() {
-        Latch::Keep => Ok(anchor),
-        Latch::Release => anchor.release_latch().map_err(|_| InitError::Compromised),
+    ChainAnchor::from_preimage::<Sha256Hasher>(parts.preimage(), &digest).map_err(|error| {
+        match error {
+            AnchorError::DigestMismatch => InitError::HeadDigest,
+            _ => InitError::Head,
+        }
+    })
+}
+
+/// The persons of a release: who releases, and the checkers who approve.
+type Release = (MakerId, Option<CheckerSet>);
+
+/// Reads the release bytes of a continuation; empty bytes ask for none.
+fn release_of(release: &[u8]) -> Result<Option<Release>, InitError> {
+    if release.is_empty() {
+        return Ok(None);
+    }
+    let parts = ReleaseParts::split(release).ok_or(InitError::Release)?;
+    let releaser = MakerId::from_identity(identity(parts.releaser())?);
+    let panel = match parts.checkers() {
+        [None, _] => None,
+        [Some(only), None] => Some(CheckerSet::single(checker(only)?)),
+        [Some(first), Some(second)] => Some(
+            CheckerSet::dual(checker(first)?, checker(second)?).map_err(|_| InitError::Approval)?,
+        ),
+    };
+    Ok(Some((releaser, panel)))
+}
+
+/// Reads the bytes of one person as an identity.
+fn identity(bytes: &[u8]) -> Result<Identity, InitError> {
+    core::str::from_utf8(bytes)
+        .ok()
+        .and_then(|text| Identity::parse(text).ok())
+        .ok_or(InitError::Release)
+}
+
+fn checker(bytes: &[u8]) -> Result<CheckerId, InitError> {
+    identity(bytes).map(CheckerId::from_identity)
+}
+
+/// The set-up error of a release the engine refused.
+const fn release_refusal(error: ReleaseError) -> InitError {
+    match error {
+        ReleaseError::NotHalted => InitError::NotHalted,
+        ReleaseError::Compromised => InitError::Compromised,
+        ReleaseError::ApprovalMissing { .. } | ReleaseError::Approval(_) => InitError::Approval,
+        // A halt that is not the inherited one cannot occur on an engine that
+        // decided nothing yet; were it to occur, the release failed.
+        _ => InitError::ReleaseFailed,
     }
 }

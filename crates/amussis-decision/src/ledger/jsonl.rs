@@ -31,10 +31,11 @@ pub struct LedgerLine {
     pub previous: String,
     /// This record's digest, lower-case hexadecimal.
     pub digest: String,
-    /// The intent the record describes.
-    pub intent_id: String,
-    /// The agent that proposed the action.
-    pub agent: String,
+    /// The intent the record describes; `None` for a record of the halt
+    /// latch itself, which decides no action.
+    pub intent_id: Option<String>,
+    /// The agent that proposed the action; `None` as for the intent.
+    pub agent: Option<String>,
     /// Whether the halt latch was engaged when the decision was taken.
     pub killswitch_engaged: bool,
 }
@@ -65,12 +66,13 @@ pub fn project(record: &AuditRecord) -> Result<LedgerLine, RenderError> {
     let mut digest_buffer = [0u8; 64];
     let previous = body.previous().encode_hex(&mut previous_buffer)?.to_owned();
     let digest = record.digest().encode_hex(&mut digest_buffer)?.to_owned();
-    let intent_id = core::str::from_utf8(draft.intent_id.as_bytes())
-        .map_err(|_| RenderError::Encoding)?
-        .to_owned();
-    let agent = core::str::from_utf8(draft.agent.as_bytes())
-        .map_err(|_| RenderError::Encoding)?
-        .to_owned();
+    let (intent_id, agent) = match &draft.subject {
+        Some(subject) => (
+            Some(text_of(subject.intent_id.as_bytes())?),
+            Some(text_of(subject.agent.as_bytes())?),
+        ),
+        None => (None, None),
+    };
     Ok(LedgerLine {
         sequence: body.sequence().get(),
         algorithm: body.algorithm(),
@@ -83,6 +85,13 @@ pub fn project(record: &AuditRecord) -> Result<LedgerLine, RenderError> {
         agent,
         killswitch_engaged: draft.killswitch.is_engaged(),
     })
+}
+
+/// Reads an identifier as text.
+fn text_of(bytes: &[u8]) -> Result<String, RenderError> {
+    core::str::from_utf8(bytes)
+        .map(str::to_owned)
+        .map_err(|_| RenderError::Encoding)
 }
 
 /// Renders one record as a single JSON line, without the trailing newline.

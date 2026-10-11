@@ -199,13 +199,13 @@ func TestAModuleWithAnotherSurfaceIsRefused(t *testing.T) {
 		{"the exports of interface version 1, which cannot continue a chain", func(s *shape) {
 			s.exports = slices.DeleteFunc(s.exports, func(f shapeFunction) bool { return f.name == exportContinue })
 		}, "exports 5 of the 6"},
-		{"a continue function without its latch flag", func(s *shape) { s.export(exportContinue).params = []byte{i32, i32, i32} }, "another type"},
+		{"a continue function without the length of its release", func(s *shape) { s.export(exportContinue).params = []byte{i32, i32, i32} }, "another type"},
 		{"a decide function of another type", func(s *shape) { s.export(exportDecide).params = []byte{i32, i32} }, "another type"},
 		{"a decide function with a wide result", func(s *shape) { s.export(exportDecide).results = []byte{i64} }, "another type"},
 		{"no exported memory", func(s *shape) { s.memoryName = "" }, "exactly one memory"},
 		{"a memory under another name", func(s *shape) { s.memoryName = "mem" }, "exactly one memory"},
-		{"the interface version before this one", func(s *shape) { s.export(exportABIVersion).value = 1 }, "interface version 1"},
-		{"the interface version after this one", func(s *shape) { s.export(exportABIVersion).value = 3 }, "interface version 3"},
+		{"the interface version before this one", func(s *shape) { s.export(exportABIVersion).value = 2 }, "interface version 2"},
+		{"the interface version after this one", func(s *shape) { s.export(exportABIVersion).value = 4 }, "interface version 4"},
 		{"interface version zero", func(s *shape) { s.export(exportABIVersion).value = 0 }, "interface version 0"},
 		{"an input buffer past the memory", func(s *shape) { s.export(exportInput).value = 65536 - 100 }, "not in its memory"},
 		{"an input buffer at the highest address", func(s *shape) { s.export(exportInput).value = -1 }, "not in its memory"},

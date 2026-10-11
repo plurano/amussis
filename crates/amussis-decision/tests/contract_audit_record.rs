@@ -114,6 +114,26 @@ fn a_record_naming_the_excluded_hash_algorithm_is_refused() -> Fallible<()> {
     Ok(())
 }
 
+/// Negative, planted: a record of the halt latch decides no action, so this
+/// schema, which names an action and an actor in every record, refuses it.
+#[test]
+fn a_record_of_the_halt_latch_is_refused() -> Fallible<()> {
+    let refusal = ContractError::Malformed {
+        correlation: expected_correlation()?,
+    };
+    for status in [RecordStatus::HaltEngaged, RecordStatus::HaltReleased] {
+        let mut latch = audit_record(1)?;
+        latch.status = status;
+        assert!(status.is_of_latch());
+        assert_eq!(latch.validate(), Err(refusal), "{status:?}");
+        assert_eq!(SignedAuditRecord::decode(&render(&latch)?), Err(refusal));
+    }
+    let decided = audit_record(1)?;
+    assert!(!decided.status.is_of_latch());
+    assert_eq!(decided.validate(), Ok(()), "a decided action is admitted");
+    Ok(())
+}
+
 /// Negative: an unsealed record is refused, and so is one whose seal is empty.
 #[test]
 fn an_unsealed_record_is_refused() -> Fallible<()> {

@@ -33,6 +33,29 @@
 //! later call blocks on the latch. A refusal is therefore never silent: it is
 //! either in the chain or the engine is visibly halted.
 //!
+//! # A halt is a record
+//!
+//! [`DecisionEngine::halt`] engages the latch and writes one record of the
+//! halt itself ([`RecordStatus::HaltEngaged`]), which names no action. The
+//! latch is engaged in every case; the call reports whether the record was
+//! written. The engine's own halts do the same where they can: a clock fault
+//! while adjudicating, a chain that fails its re-walk, a record that could
+//! not be written. For the last of these the halt record usually cannot be
+//! written either, and the halt then reaches the chain with the next record
+//! that is: every record carries the latch state. A clock fault in `decide`
+//! writes no halt record of its own, because the refusal it records carries
+//! the engaged latch already.
+//!
+//! The chain holds one halt record per state of the halt: once a record
+//! carries the engaged latch, another call of `halt` writes nothing, unless
+//! it made the halt stricter (a higher risk level, or a compromised chain
+//! found under another reason), which is written as a record of its own.
+//!
+//! A halt stands at a risk level, written into the latch block of every
+//! record: the level [`DecisionEngine::halt`] is given, and for the engine's
+//! own halts the level of the action in hand, or [`RiskLevel::HIGHEST`] where
+//! there is none.
+//!
 //! # The clock
 //!
 //! The engine owns a [`Clock`] and reads it itself; no caller passes a
@@ -71,38 +94,54 @@
 //! * the time: a clock reading earlier than the head record is a clock fault,
 //!   from the first reading on;
 //! * the halt latch: an engine that continues a chain that ends halted starts
-//!   halted, with the first reason and time.
+//!   halted, with the time, reason and risk level the head record carries.
 //!
 //! Open holds do not carry over. A held action of the earlier engine cannot
 //! be adjudicated in the new one; it stays unreleased.
 //!
 //! # Releasing the halt latch
 //!
-//! No call releases the latch of an engine value, and rotating the window
-//! does not either. The one release is [`ChainAnchor::release_latch`], on the
-//! anchor a new engine is continued from: a named step, taken outside the
-//! halted engine, which the chain shows as a record with the latch engaged
-//! followed by one with the latch armed. A chain halted as compromised is not
-//! released.
+//! An engine that halted stays halted for its life, and rotating the window
+//! changes nothing about that. The one release is
+//! [`DecisionEngine::release_halt`], and it works only on an engine that was
+//! continued from a chain that ends halted and has not halted anything
+//! itself since: a release takes a new engine on the stored chain. The
+//! release is one record of its own ([`RecordStatus::HaltReleased`]), and it
+//! is the commit point: when the record cannot be written, the engine stays
+//! halted. A chain halted as compromised is not released.
 //!
-//! A halt is in the chain from the first decision refused under it. A halt
-//! after which nothing was decided left no record, so the anchor of that
-//! chain is armed: the latch is a property of the engine value, and the chain
-//! records what was observed at each decision.
+//! A release is approved the way an action is. The halt stands at a risk
+//! level, and the release asks the approval rule of that level
+//! ([`RiskLevel::required_approval`]) with the releasing person in the place
+//! of the maker: a level whose actions need no checker is released by that
+//! person alone, a level whose actions need one or two checkers is released
+//! only with that many, none of them the releasing person. There is no
+//! second rule.
+//!
+//! The release record states that the halt was released and when. It does
+//! not name the releasing person or the checkers: no record of the chain
+//! names a person. Who released a halt is for the caller to keep.
+//!
+//! A halt whose record could not be written, and under which nothing was
+//! recorded afterwards, is not in the stored chain. An engine continued from
+//! that chain starts armed; the caller of [`DecisionEngine::halt`] is told
+//! so by the error the call returns.
 
-use crate::identity::{IntentId, RequestId};
+use crate::identity::{IntentId, MakerId, RequestId};
 use crate::intent::ActionIntent;
-use crate::killswitch::{HaltReason, Killswitch, KillswitchState};
+use crate::killswitch::{HaltReason, Killswitch, KillswitchState, ReleaseError};
 use crate::ledger::anchor::ChainAnchor;
-use crate::ledger::hash::LedgerHasher;
+use crate::ledger::hash::{Digest32, LedgerHasher};
 use crate::ledger::signer::{RecordSigner, SignerBinding};
-use crate::ledger::{AuditLedger, IoDeadline, LedgerError, LedgerSink, RecordDraft, RecordStatus};
+use crate::ledger::{
+    AuditLedger, IoDeadline, LedgerError, LedgerSink, RecordDraft, RecordStatus, RecordSubject,
+};
 use crate::outcome::{BlockReason, InterceptorOutcome, WarningCode};
 use crate::oversight::{
     Adjudication, ApprovalTicket, CheckerSet, OversightError, VerifiedCheckerSet, Vote,
 };
 use crate::registry::{PendingRegistry, RegistryError};
-use crate::risk::{OversightClass, RequiredApproval};
+use crate::risk::{OversightClass, RequiredApproval, RiskLevel};
 use crate::time::{Clock, ClockError, Deadline, DeadlineStatus, MonotonicGuard, Ttl, UnixSeconds};
 use crate::{DEFAULT_APPROVAL_TTL_SECS, DecisionError, MAX_LEDGER_RECORDS, MAX_PENDING_REQUESTS};
 
@@ -143,6 +182,12 @@ pub struct DecisionEngine<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Cl
     ledger: AuditLedger<H, S, K>,
     clock: C,
     guard: MonotonicGuard,
+    /// Whether a record of the chain carries the halt the latch is engaged
+    /// with.
+    halt_recorded: bool,
+    /// Whether the engaged latch is the one the continued chain handed over,
+    /// with no halt of this engine's own on top of it.
+    halt_inherited: bool,
 }
 
 impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Clock> DecisionEngine<H, S, K, C> {
@@ -165,6 +210,8 @@ impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Clock> DecisionEngine<H
             killswitch: Killswitch::new(),
             clock,
             guard: MonotonicGuard::new(),
+            halt_recorded: false,
+            halt_inherited: false,
         }
     }
 
@@ -196,6 +243,8 @@ impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Clock> DecisionEngine<H
             killswitch: Killswitch::from_state(anchor.killswitch()),
             clock,
             guard: MonotonicGuard::after(anchor.at()),
+            halt_recorded: anchor.killswitch().is_engaged(),
+            halt_inherited: anchor.killswitch().is_engaged(),
         }
     }
 
@@ -240,14 +289,127 @@ impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Clock> DecisionEngine<H
         self.guard.last()
     }
 
-    /// Engages the halt latch. There is no way to disengage it.
+    /// Engages the halt latch and writes the halt into the audit chain.
     ///
-    /// The time is taken from the engine's own clock, falling back to the last
-    /// accepted reading when the clock is the thing that failed: halting must
-    /// never itself fail.
-    pub fn halt(&mut self, reason: HaltReason) {
+    /// The latch is engaged in every case, whatever this returns: halting
+    /// never itself fails. The time is taken from the engine's own clock,
+    /// falling back to the last accepted reading when the clock is the thing
+    /// that failed. `level` is the risk level the halt stands at, which its
+    /// release is held to; a caller that does not know it gives
+    /// [`RiskLevel::HIGHEST`]. An engine that is halted already keeps its
+    /// first time and is never made weaker: see [`Killswitch::engage`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LedgerError`] when the halt record cannot be written. The
+    /// engine is halted all the same, and the stored chain does not show it
+    /// until a later record is written: a decision refused under the halt, or
+    /// this call repeated.
+    pub fn halt(&mut self, reason: HaltReason, level: RiskLevel) -> Result<(), LedgerError> {
         let at = self.best_effort_now();
-        self.killswitch.engage(at, reason);
+        self.latch(at, reason, level);
+        self.record_halt()
+    }
+
+    /// Releases a halt the continued chain handed over, and writes the
+    /// release into the audit chain. Returns the digest of that record.
+    ///
+    /// This is the only release of a halt latch the library has. The record
+    /// is the commit point: the latch is armed only once the record is
+    /// written.
+    ///
+    /// The release is held to the approval rule actions are held to, asked
+    /// for the risk level the halt stands at, with `releaser` in the place of
+    /// the maker. Where that level demands no checker, `releaser` alone
+    /// releases and `panel` may be `None`. Where it demands checkers, `panel`
+    /// names them, and none of them is `releaser`. A panel given where none
+    /// is demanded is still refused when it names `releaser`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ReleaseError::NotHalted`] for an armed latch,
+    /// [`ReleaseError::Compromised`] for a halt with
+    /// [`HaltReason::LedgerCompromised`], [`ReleaseError::NotInherited`] when
+    /// the halt is not one this engine took over at
+    /// [`Self::continue_from`], or when the engine halted again since,
+    /// [`ReleaseError::ApprovalMissing`] when the level demands checkers and
+    /// no panel is given, [`ReleaseError::Approval`] when the panel names the
+    /// releaser or is smaller than the level demands,
+    /// [`ReleaseError::Clock`] when the clock is unusable, and
+    /// [`ReleaseError::Ledger`] when the record cannot be written. The engine
+    /// stays halted in every one of them.
+    pub fn release_halt(
+        &mut self,
+        releaser: &MakerId,
+        panel: Option<CheckerSet>,
+    ) -> Result<Digest32, ReleaseError> {
+        let level = self.releasable_level()?;
+        approve_release(level, releaser, panel)?;
+        let at = self.now()?;
+        let draft = RecordDraft::of_latch(KillswitchState::Armed, at);
+        let sealed = self.ledger.append(draft)?;
+        self.killswitch = Killswitch::new();
+        self.halt_recorded = false;
+        self.halt_inherited = false;
+        Ok(sealed)
+    }
+
+    /// Returns the risk level of the halt when it is one a release may undo.
+    fn releasable_level(&self) -> Result<RiskLevel, ReleaseError> {
+        let KillswitchState::Engaged { reason, level, .. } = self.killswitch.state() else {
+            return Err(ReleaseError::NotHalted);
+        };
+        if reason == HaltReason::LedgerCompromised {
+            return Err(ReleaseError::Compromised);
+        }
+        if !self.halt_inherited {
+            return Err(ReleaseError::NotInherited);
+        }
+        Ok(level)
+    }
+
+    /// Engages the latch as this engine's own halt.
+    ///
+    /// An inherited halt stops being one here, also when the latch was
+    /// engaged already and keeps its first reason: a release must not undo a
+    /// halt it does not know of. A halt this call made stricter is one the
+    /// chain does not carry yet.
+    fn latch(&mut self, at: UnixSeconds, reason: HaltReason, level: RiskLevel) {
+        let before = self.killswitch.state();
+        self.halt_inherited = false;
+        self.killswitch.engage(at, reason, level);
+        if self.killswitch.state() != before {
+            self.halt_recorded = false;
+        }
+    }
+
+    /// Writes the record of the halt, unless the chain carries the halt
+    /// already.
+    fn record_halt(&mut self) -> Result<(), LedgerError> {
+        if self.halt_recorded {
+            return Ok(());
+        }
+        let draft = RecordDraft::of_latch(self.killswitch.state(), self.last_known_time());
+        self.append(draft).map(|_| ())
+    }
+
+    /// Engages the latch for a fault the engine found itself and writes the
+    /// halt record where that is possible.
+    fn halt_on_fault(&mut self, reason: HaltReason, level: RiskLevel) {
+        self.latch(self.last_known_time(), reason, level);
+        // The fault is often the audit path itself, and then this record
+        // cannot be written either. The latch is engaged all the same, and
+        // the next record that is written carries it.
+        let _unrecorded = self.record_halt();
+    }
+
+    /// Seals `draft`, and notes when the chain then carries the halt.
+    fn append(&mut self, draft: RecordDraft) -> Result<Digest32, LedgerError> {
+        let sealed = self.ledger.append(draft)?;
+        if draft.killswitch.is_engaged() {
+            self.halt_recorded = true;
+        }
+        Ok(sealed)
     }
 
     /// Re-walks the audit chain, halting the engine if it is compromised.
@@ -260,8 +422,7 @@ impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Clock> DecisionEngine<H
         match self.ledger.verify() {
             Ok(_) => Ok(()),
             Err(error) => {
-                let at = self.last_known_time();
-                self.killswitch.engage(at, HaltReason::LedgerCompromised);
+                self.halt_on_fault(HaltReason::LedgerCompromised, RiskLevel::HIGHEST);
                 Err(error)
             }
         }
@@ -271,7 +432,8 @@ impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Clock> DecisionEngine<H
     ///
     /// At zero the next decision cannot be recorded: it blocks and engages
     /// the halt latch. A caller that calls [`Self::rotate_ledger`] while this
-    /// is above zero never reaches that point.
+    /// is above zero never reaches that point. A halt and a release use one
+    /// record each, as a decision does.
     #[must_use]
     pub fn audit_room(&self) -> usize {
         self.ledger.remaining()
@@ -291,12 +453,13 @@ impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Clock> DecisionEngine<H
     /// the window and does not halt: no decision is lost by it, and a
     /// decision that then finds the window full halts as before.
     pub fn rotate_ledger(&mut self) -> Result<usize, LedgerError> {
-        self.ledger.rotate().inspect_err(|error| {
-            if block_reason_for(error) == BlockReason::LedgerCompromised {
-                let at = self.last_known_time();
-                self.killswitch.engage(at, HaltReason::LedgerCompromised);
-            }
-        })
+        let rotated = self.ledger.rotate();
+        if let Err(error) = &rotated
+            && block_reason_for(error) == BlockReason::LedgerCompromised
+        {
+            self.halt_on_fault(HaltReason::LedgerCompromised, RiskLevel::HIGHEST);
+        }
+        rotated
     }
 
     /// Reads the clock through the monotonic guard.
@@ -335,7 +498,7 @@ impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Clock> DecisionEngine<H
         let Ok(now) = self.now() else {
             return self.refuse_clock_fault(intent);
         };
-        let required = RequiredApproval::for_action(intent.effective_tier(), intent.oversight());
+        let required = intent.level().required_approval();
         match self.plan(intent, required, now) {
             Ok((candidate, status)) => self.seal_and_release(intent, candidate, status, now),
             Err(reason) => self.refuse(intent, reason, now),
@@ -355,18 +518,20 @@ impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Clock> DecisionEngine<H
         // A halted system still records the refusal. A seal failure cannot make
         // the block any weaker, and the latch is already engaged, so there is
         // nothing left to escalate to.
-        let _sealed = self.ledger.append(draft);
+        let _sealed = self.append(draft);
         InterceptorOutcome::Block { reason }
     }
 
     /// Fails closed on a clock fault: halts, records, and blocks.
     fn refuse_clock_fault(&mut self, intent: &ActionIntent) -> InterceptorOutcome {
         let at = self.last_known_time();
-        self.killswitch.engage(at, HaltReason::ClockUnavailable);
+        self.latch(at, HaltReason::ClockUnavailable, intent.level());
         let reason = BlockReason::ClockUnavailable;
         let observed = self.killswitch.state();
         let draft = draft_for(intent, RecordStatus::Blocked, observed, at, Some(reason));
-        let _sealed = self.ledger.append(draft);
+        // The refusal carries the engaged latch, so it is the record of this
+        // halt as well; no halt record is written beside it.
+        let _sealed = self.append(draft);
         InterceptorOutcome::Block { reason }
     }
 
@@ -379,18 +544,22 @@ impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Clock> DecisionEngine<H
     ) -> InterceptorOutcome {
         let observed = self.killswitch.state();
         let draft = draft_for(intent, RecordStatus::Blocked, observed, now, Some(reason));
-        match self.ledger.append(draft) {
+        match self.append(draft) {
             Ok(_) => InterceptorOutcome::Block { reason },
-            Err(error) => self.escalate_audit_failure(&error),
+            Err(error) => self.escalate_audit_failure(&error, intent.level()),
         }
     }
 
-    /// Halts on an unrecordable decision and reports why.
-    fn escalate_audit_failure(&mut self, error: &LedgerError) -> InterceptorOutcome {
+    /// Halts on an unrecordable decision, at the level of the action it was
+    /// taken on, and reports why.
+    fn escalate_audit_failure(
+        &mut self,
+        error: &LedgerError,
+        level: RiskLevel,
+    ) -> InterceptorOutcome {
         let reason = block_reason_for(error);
         if let Some(halt) = halt_reason_for(reason) {
-            let at = self.last_known_time();
-            self.killswitch.engage(at, halt);
+            self.halt_on_fault(halt, level);
         }
         InterceptorOutcome::Block { reason }
     }
@@ -411,7 +580,7 @@ impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Clock> DecisionEngine<H
                 RecordStatus::Approved,
             )),
             RequiredApproval::SingleChecker | RequiredApproval::DualDistinctCheckers => {
-                let ticket = self.open_ticket(intent, required, now)?;
+                let ticket = self.open_ticket(intent, now)?;
                 Ok((
                     InterceptorOutcome::RequireApproval(ticket),
                     RecordStatus::PendingApproval,
@@ -424,7 +593,6 @@ impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Clock> DecisionEngine<H
     fn open_ticket(
         &mut self,
         intent: &ActionIntent,
-        required: RequiredApproval,
         now: UnixSeconds,
     ) -> Result<ApprovalTicket, BlockReason> {
         let ttl = match intent.oversight() {
@@ -438,7 +606,7 @@ impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Clock> DecisionEngine<H
             *intent.maker(),
             *intent.agent(),
             intent.action(),
-            required,
+            intent.level(),
             deadline,
         );
         self.registry
@@ -459,14 +627,14 @@ impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Clock> DecisionEngine<H
     ) -> InterceptorOutcome {
         let observed = self.killswitch.state();
         let draft = draft_for(intent, status, observed, now, None);
-        match self.ledger.append(draft) {
+        match self.append(draft) {
             Ok(_) => candidate,
             Err(error) => {
                 if let Some(ticket) = candidate.ticket() {
                     let held = *ticket.request_id();
                     let _released = self.registry.release(&held);
                 }
-                self.escalate_audit_failure(&error)
+                self.escalate_audit_failure(&error, intent.level())
             }
         }
     }
@@ -495,8 +663,13 @@ impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Clock> DecisionEngine<H
         let now = match self.now() {
             Ok(now) => now,
             Err(error) => {
-                self.killswitch
-                    .engage(self.last_known_time(), HaltReason::ClockUnavailable);
+                // The level of the held action, or the highest when the
+                // request names none.
+                let level = self
+                    .registry
+                    .pending(request)
+                    .map_or(RiskLevel::HIGHEST, |held| held.level());
+                self.halt_on_fault(HaltReason::ClockUnavailable, level);
                 return Err(error.into());
             }
         };
@@ -542,16 +715,18 @@ impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Clock> DecisionEngine<H
             .map_err(map_registry)?;
         let by = verified.primary();
         let draft = RecordDraft {
-            intent_id: IntentId::from_identity(*ticket.request_id().identity()),
-            agent: *ticket.agent(),
-            action_type: ticket.action(),
+            subject: Some(RecordSubject {
+                intent_id: IntentId::from_identity(*ticket.request_id().identity()),
+                agent: *ticket.agent(),
+                action_type: ticket.action(),
+            }),
             status,
             block_reason: None,
             killswitch: self.killswitch.state(),
             at: now,
         };
-        if let Err(error) = self.ledger.append(draft) {
-            return Err(self.escalate_unrecorded_vote(ticket.request_id(), &error));
+        if let Err(error) = self.append(draft) {
+            return Err(self.escalate_unrecorded_vote(ticket, &error));
         }
         Ok(match vote {
             Vote::Approve => Adjudication::Approved { by, at: now },
@@ -567,15 +742,35 @@ impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Clock> DecisionEngine<H
     /// through [`block_reason_for`], so this always engages the latch.
     fn escalate_unrecorded_vote(
         &mut self,
-        request: &RequestId,
+        ticket: &ApprovalTicket,
         error: &LedgerError,
     ) -> DecisionError {
-        let _released = self.registry.release(request);
+        let _released = self.registry.release(ticket.request_id());
         if let Some(halt) = halt_reason_for(block_reason_for(error)) {
-            let at = self.last_known_time();
-            self.killswitch.engage(at, halt);
+            self.halt_on_fault(halt, ticket.level());
         }
         DecisionError::Ledger(*error)
+    }
+}
+
+/// Holds the release of a halt to the approval rule of its level, with the
+/// releasing person in the place of the maker.
+fn approve_release(
+    level: RiskLevel,
+    releaser: &MakerId,
+    panel: Option<CheckerSet>,
+) -> Result<(), ReleaseError> {
+    let required = level.required_approval();
+    match panel {
+        Some(panel) => {
+            let verified = panel.verify_against_maker(releaser)?;
+            if required.needs_human() {
+                verified.satisfies(required)?;
+            }
+            Ok(())
+        }
+        None if required.needs_human() => Err(ReleaseError::ApprovalMissing { required }),
+        None => Ok(()),
     }
 }
 
@@ -588,9 +783,11 @@ fn draft_for(
     block_reason: Option<BlockReason>,
 ) -> RecordDraft {
     RecordDraft {
-        intent_id: *intent.id(),
-        agent: *intent.agent(),
-        action_type: intent.action(),
+        subject: Some(RecordSubject {
+            intent_id: *intent.id(),
+            agent: *intent.agent(),
+            action_type: intent.action(),
+        }),
         status,
         block_reason,
         killswitch,

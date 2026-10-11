@@ -12,9 +12,9 @@ use amussis_decision::{
     HashError, Identity, IdentityError, InMemorySink, IntentError, IntentId, IntentSpec,
     IoDeadline, Killswitch, KillswitchState, LedgerSink, MAX_IDENTITY_LEN, MAX_SIGNATURE_BYTES,
     MAX_TARGET_LEN, MakerId, MonotonicGuard, OversightClass, OversightError, PendingRegistry,
-    RecordStatus, RegistryError, RequestId, RequestState, RequiredApproval, RiskTier, SignError,
-    Signature, SignerBinding, SignerKeyId, SinkError, TargetResource, Ttl, UnavailableSink,
-    UnixSeconds,
+    RecordStatus, RegistryError, RequestId, RequestState, RequiredApproval, RiskLevel, RiskTier,
+    SignError, Signature, SignerBinding, SignerKeyId, SinkError, TargetResource, Ttl,
+    UnavailableSink, UnixSeconds,
 };
 
 use common::{FIXTURE_AUDIT_BOUND, Fallible, FixtureError, FixtureSigner, io_deadline};
@@ -228,7 +228,40 @@ fn checker_sets_positive_negative_and_boundary() -> Fallible<()> {
 
 // --- Killswitch ------------------------------------------------------------
 
-/// The latch is one-way and idempotent: re-engaging keeps the first reason.
+/// Re-engaging never weakens a halt: a compromised chain found later
+/// replaces the first reason and is not replaced itself, and the level rises.
+#[test]
+fn a_later_halt_never_weakens_the_latch() {
+    let single = RiskLevel::new(RiskTier::TierAConsequential, OversightClass::Standard);
+    let mut latch = Killswitch::new();
+    latch.engage(UnixSeconds::new(10), HaltReason::OperatorStop, single);
+
+    latch.engage(
+        UnixSeconds::new(30),
+        HaltReason::LedgerCompromised,
+        RiskLevel::HIGHEST,
+    );
+    let compromised = KillswitchState::Engaged {
+        at: UnixSeconds::new(10),
+        reason: HaltReason::LedgerCompromised,
+        level: RiskLevel::HIGHEST,
+    };
+    assert_eq!(
+        latch.state(),
+        compromised,
+        "a compromised chain is not hidden by the first reason, and the level rises"
+    );
+
+    latch.engage(UnixSeconds::new(40), HaltReason::OperatorStop, single);
+    assert_eq!(
+        latch.state(),
+        compromised,
+        "a later halt does not take the compromised reason away"
+    );
+}
+
+/// The latch is one-way: re-engaging keeps the first time and reason, and a
+/// lower level does not lower the halt.
 #[test]
 fn killswitch_positive_negative_and_boundary() {
     let mut latch = Killswitch::new();
@@ -236,19 +269,27 @@ fn killswitch_positive_negative_and_boundary() {
     assert_eq!(latch.state(), KillswitchState::Armed);
     assert_eq!(latch.state().reason(), None);
 
-    latch.engage(UnixSeconds::new(10), HaltReason::OperatorStop);
+    let single = RiskLevel::new(RiskTier::TierAConsequential, OversightClass::Standard);
+    latch.engage(UnixSeconds::new(10), HaltReason::OperatorStop, single);
     assert!(latch.is_engaged());
     assert_eq!(latch.state().reason(), Some(HaltReason::OperatorStop));
+    assert_eq!(latch.state().level(), Some(single));
 
-    latch.engage(UnixSeconds::new(20), HaltReason::LedgerCompromised);
+    latch.engage(
+        UnixSeconds::new(20),
+        HaltReason::AuditUnavailable,
+        RiskLevel::LOWEST,
+    );
     assert_eq!(
         latch.state(),
         KillswitchState::Engaged {
             at: UnixSeconds::new(10),
-            reason: HaltReason::OperatorStop
+            reason: HaltReason::OperatorStop,
+            level: single,
         },
-        "a second engage keeps the first time and reason"
+        "a second engage keeps the first time and reason, and a lower level does not lower the halt"
     );
+
     assert_eq!(latch.state().engaged_at(), Some(UnixSeconds::new(10)));
 }
 
@@ -428,7 +469,7 @@ fn fixture_ticket(id: &str, ttl_secs: u32) -> Fallible<ApprovalTicket> {
         MakerId::parse("maker-a")?,
         AgentId::parse("agent-01")?,
         ActionType::PermissionEscalation,
-        RequiredApproval::SingleChecker,
+        RiskLevel::new(RiskTier::TierAConsequential, OversightClass::Standard),
         Deadline::open(UnixSeconds::new(1_000), ttl)?,
     ))
 }
@@ -560,9 +601,11 @@ fn in_memory_sink_positive_negative_and_boundary() -> Fallible<()> {
     );
     let draft = |id: &str, at: u64| -> Result<amussis_decision::RecordDraft, DecisionError> {
         Ok(amussis_decision::RecordDraft {
-            intent_id: IntentId::parse(id)?,
-            agent: AgentId::parse("agent-01")?,
-            action_type: ActionType::FileModification,
+            subject: Some(amussis_decision::RecordSubject {
+                intent_id: IntentId::parse(id)?,
+                agent: AgentId::parse("agent-01")?,
+                action_type: ActionType::FileModification,
+            }),
             status: RecordStatus::Approved,
             block_reason: None,
             killswitch: KillswitchState::Armed,
@@ -659,9 +702,11 @@ fn verify_chain_bound_positive_negative_and_boundary() -> Fallible<()> {
     );
     for step in 0u64..3 {
         ledger.append(amussis_decision::RecordDraft {
-            intent_id: IntentId::parse("intent-bound")?,
-            agent: AgentId::parse("agent-01")?,
-            action_type: ActionType::FileModification,
+            subject: Some(amussis_decision::RecordSubject {
+                intent_id: IntentId::parse("intent-bound")?,
+                agent: AgentId::parse("agent-01")?,
+                action_type: ActionType::FileModification,
+            }),
             status: RecordStatus::Approved,
             block_reason: None,
             killswitch: KillswitchState::Armed,

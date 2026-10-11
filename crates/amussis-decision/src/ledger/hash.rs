@@ -38,6 +38,10 @@ pub enum PreimageError {
         /// The scalar bound in bytes.
         max: usize,
     },
+    /// The record's status and its other fields do not belong together, so
+    /// the record has no canonical encoding.
+    #[error("the record's status does not fit its fields")]
+    Shape,
 }
 
 /// The hash algorithms the ledger admits. There is no `Md5` variant.

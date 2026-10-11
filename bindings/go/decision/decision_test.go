@@ -201,7 +201,9 @@ func TestRefusedInputReachesNoEffect(t *testing.T) {
 // its interface allows. Each time the decision is blocked, no record of a
 // permitted action is stored, and the engine stays halted once the effect
 // works again. The engine writes a record of its own block where the signer
-// and the sink still work: that is the one record a failed clock leaves.
+// and the sink still work: that is the one record a failed clock leaves. A
+// failed sink is offered two records, the one of the decision and the one of
+// the halt that follows, and stores neither.
 func TestAnEffectThatCannotDeliverBlocksAndTheEngineStaysHalted(t *testing.T) {
 	long := make([]byte, MaxSignatureBytes+1)
 	clock := Outcome{Class: Blocked, Detail: BlockClockUnavailable}
@@ -217,7 +219,7 @@ func TestAnEffectThatCannotDeliverBlocksAndTheEngineStaysHalted(t *testing.T) {
 		{"signer returns an error beside a signature", func(w *world) { w.signErr = errPlanted }, audit, halted(HaltAuditUnavailable), 0, 0},
 		{"signer returns nothing", func(w *world) { w.signature = func([DigestBytes]byte) []byte { return nil } }, audit, halted(HaltAuditUnavailable), 0, 0},
 		{"signer returns too much", func(w *world) { w.signature = func([DigestBytes]byte) []byte { return long } }, audit, halted(HaltAuditUnavailable), 0, 0},
-		{"sink returns an error", func(w *world) { w.sinkErr = errPlanted }, audit, halted(HaltAuditUnavailable), 0, 1},
+		{"sink returns an error", func(w *world) { w.sinkErr = errPlanted }, audit, halted(HaltAuditUnavailable), 0, 2},
 	}
 	for _, plant := range plants {
 		t.Run(plant.name, func(t *testing.T) {

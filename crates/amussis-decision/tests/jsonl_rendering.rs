@@ -12,33 +12,48 @@ mod common;
 
 use amussis_decision::ledger::jsonl::{self, LedgerLine, RenderError};
 use amussis_decision::{
-    ActionType, AgentId, AuditLedger, BlockReason, DecisionError, HashAlgorithm, InMemorySink,
-    IntentId, KillswitchState, RecordDraft, RecordStatus, Sha256Hasher, SignerBinding, UnixSeconds,
+    ActionType, AgentId, AuditLedger, BlockReason, DecisionError, HaltReason, HashAlgorithm,
+    InMemorySink, IntentId, KillswitchState, RecordDraft, RecordStatus, RecordSubject, RiskLevel,
+    Sha256Hasher, SignerBinding, UnixSeconds,
 };
 
 use common::{FIXTURE_AUDIT_BOUND, Fallible, FixtureError, FixtureSigner, io_deadline};
 
 type Ledger = AuditLedger<Sha256Hasher, FixtureSigner, InMemorySink>;
 
-/// Builds a fixture ledger holding one record with `status` and `reason`.
-fn one_record(status: RecordStatus, reason: Option<BlockReason>) -> Result<Ledger, DecisionError> {
+/// Builds a fixture ledger holding the one record `draft` seals to.
+fn ledger_of(draft: RecordDraft) -> Result<Ledger, DecisionError> {
     let mut ledger: Ledger = AuditLedger::with_bound(
         SignerBinding::Bound(FixtureSigner::new()?),
         InMemorySink::with_bound(FIXTURE_AUDIT_BOUND),
         io_deadline(),
         FIXTURE_AUDIT_BOUND,
     );
-    ledger.append(RecordDraft {
-        intent_id: IntentId::parse("intent-1")?,
-        agent: AgentId::parse("agent-01")?,
-        action_type: ActionType::FileModification,
+    ledger.append(draft)?;
+    Ok(ledger)
+}
+
+/// Builds a fixture ledger holding one record with `status` and `reason`.
+fn one_record(status: RecordStatus, reason: Option<BlockReason>) -> Result<Ledger, DecisionError> {
+    ledger_of(RecordDraft {
+        subject: Some(RecordSubject {
+            intent_id: IntentId::parse("intent-1")?,
+            agent: AgentId::parse("agent-01")?,
+            action_type: ActionType::FileModification,
+        }),
         status,
         block_reason: reason,
         killswitch: KillswitchState::Armed,
         at: UnixSeconds::new(100),
-    })?;
-    Ok(ledger)
+    })
 }
+
+/// The latch state of an operator halt at the highest risk level.
+const HALTED: KillswitchState = KillswitchState::Engaged {
+    at: UnixSeconds::new(100),
+    reason: HaltReason::OperatorStop,
+    level: RiskLevel::HIGHEST,
+};
 
 /// Positive: a sealed record renders and parses back unchanged.
 #[test]
@@ -90,6 +105,48 @@ fn a_record_projects_onto_the_line_it_renders_as() -> Fallible<()> {
         line,
         "rendering and parsing round-trip to the projection itself"
     );
+    Ok(())
+}
+
+/// Positive, fourth half: the two records of the halt latch render without an
+/// intent and an agent, which they do not have, and parse back unchanged.
+#[test]
+fn a_record_of_the_halt_latch_renders_without_an_action() -> Fallible<()> {
+    let cases = [
+        (HALTED, "halt-engaged", RecordStatus::HaltEngaged, true),
+        (
+            KillswitchState::Armed,
+            "halt-released",
+            RecordStatus::HaltReleased,
+            false,
+        ),
+    ];
+    for (state, spelling, status, engaged) in cases {
+        let ledger = ledger_of(RecordDraft::of_latch(state, UnixSeconds::new(100)))?;
+        let record = ledger.records().first().ok_or(FixtureError::NoRecord)?;
+        let text = jsonl::render_line(record).map_err(|_| FixtureError::Render)?;
+        assert!(text.contains(&format!("\"status\":\"{spelling}\"")));
+        assert!(text.contains("\"intent-id\":null"));
+        assert!(text.contains("\"agent\":null"));
+        let parsed = jsonl::parse_line(&text).map_err(|_| FixtureError::Render)?;
+        assert_eq!(parsed.status, status);
+        assert_eq!(parsed.intent_id, None);
+        assert_eq!(parsed.agent, None);
+        assert_eq!(parsed.killswitch_engaged, engaged);
+        assert_eq!(parsed.block_reason, None);
+    }
+    Ok(())
+}
+
+/// Boundary: a record that decides an action names its intent and its agent
+/// in the line, so the two kinds of record cannot be read for one another.
+#[test]
+fn a_decision_record_names_its_intent_and_agent() -> Fallible<()> {
+    let ledger = one_record(RecordStatus::Halted, Some(BlockReason::AuditUnavailable))?;
+    let record = ledger.records().first().ok_or(FixtureError::NoRecord)?;
+    let line = jsonl::project(record).map_err(|_| FixtureError::Render)?;
+    assert_eq!(line.intent_id.as_deref(), Some("intent-1"));
+    assert_eq!(line.agent.as_deref(), Some("agent-01"));
     Ok(())
 }
 

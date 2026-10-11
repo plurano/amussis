@@ -15,13 +15,14 @@
 #![allow(dead_code)]
 
 use amussis_decision::{
-    ActionIntent, ActionProposal, ActionProposalVersion, ActionType, AgentId, AuditRecordVersion,
-    ClockError, DIGEST_LEN, DecisionEngine, DecisionError, DecisionRequest, DecisionRequestVersion,
-    Digest32, EngineConfig, EventId, FixedClock, HashAlgorithm, Identity, InMemorySink, IntentId,
-    IntentSpec, IoDeadline, MAX_SIGNATURE_BYTES, MakerId, OversightClass, OversightSignature,
-    PayloadBuffer, RecordSigner, RecordStatus, RequestId, RequiredApproval, RiskTier, Sequence,
-    Sha256Hasher, SignError, Signature, SignatureAlgorithm, SignedAuditRecord, SignerBinding,
-    SignerKeyId, TargetResource, Ttl, UnixSeconds,
+    ActionIntent, ActionProposal, ActionProposalVersion, ActionType, AgentId, AuditRecord,
+    AuditRecordVersion, ChainAnchor, ClockError, DIGEST_LEN, DecisionEngine, DecisionError,
+    DecisionRequest, DecisionRequestVersion, Digest32, EngineConfig, EventId, FixedClock,
+    HashAlgorithm, Identity, InMemorySink, IntentId, IntentSpec, IoDeadline, MAX_SIGNATURE_BYTES,
+    MakerId, OversightClass, OversightSignature, PayloadBuffer, RecordSigner, RecordStatus,
+    RequestId, RequiredApproval, RiskTier, Sequence, Sha256Hasher, SignError, Signature,
+    SignatureAlgorithm, SignedAuditRecord, SignerBinding, SignerKeyId, TargetResource, Ttl,
+    UnixSeconds,
 };
 
 /// Anything that can go wrong building or reading a fixture.
@@ -219,6 +220,28 @@ pub fn faulty_clock_engine() -> Fallible<FaultyClockEngine> {
         io_deadline(),
         FaultyClock,
     ))
+}
+
+/// The last record the engine's store holds.
+///
+/// # Errors
+///
+/// Returns [`FixtureError::NoRecord`] for an empty store.
+pub fn stored_head(engine: &TestEngine) -> Fallible<AuditRecord> {
+    let stored = engine.ledger().sink().accepted();
+    Ok(*stored.last().ok_or(FixtureError::NoRecord)?)
+}
+
+/// The anchor of the chain the engine's store holds.
+///
+/// # Errors
+///
+/// Returns [`FixtureError::NoRecord`] for an empty store, and whatever the
+/// library refuses the head record for.
+pub fn anchor_of(engine: &TestEngine) -> Fallible<ChainAnchor> {
+    Ok(ChainAnchor::from_record::<Sha256Hasher>(&stored_head(
+        engine,
+    )?)?)
 }
 
 /// A one-second sink deadline, comfortably above the sink's service time.
