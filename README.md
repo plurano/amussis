@@ -35,9 +35,11 @@ Vesta) stay the operating system's names for its components.
 
 ## Status
 
-Private while the workspace is set up; nothing is released yet. The first crate
-is a decision engine (risk levels, second-person approval, tamper-evident log,
-kill switch) that moves here from the operating-system repository.
+Public since 2026-10-11. The first release is
+[`v0.1.0`](https://github.com/plurano/amussis/releases/tag/v0.1.0): a decision
+engine (risk levels, second-person approval, tamper-evident log, kill switch)
+that moves here from the operating-system repository. Its files are on the
+forge and on no package registry; see [Releases](#releases).
 
 ## Layout
 
@@ -368,20 +370,22 @@ plants a calling job to keep the rule proven.
 The third entry kind excuses the byte comparison of the committed module on a
 Windows host. `rustc` embeds five source paths with that host's separators,
 which no flag of the stable toolchain rewrites, and six functions come out in
-another order for a cause that is still open; the entry in `exceptions.toml`
-names the issue. While the entry is live, `tools/wasm_module.py check` on
+another order: the order follows the `-C metadata` values cargo passes to the
+compiler, which differ from host to host and which no stable setting fixes.
+The entry in `exceptions.toml` names the issue, which holds the measurement.
+While the entry is live, `tools/wasm_module.py check` on
 Windows skips that one comparison and says so in its output. It still refuses a
 build that is no module or holds a machine path, and a missing module. It
 refuses the entry itself once a Windows host builds the committed bytes, and
 past the entry's date the Windows job fails like the others would. No other
 host is ever excused.
 
-The cause is looked for with the *Module diagnosis* workflow
+The cause of the other order was found with the *Module diagnosis* workflow
 (`.github/workflows/module-diagnosis.yml`). It is started by hand, builds the
 module on the three hosts with `tools/wasm_module.py check --cargo-log FILE`
 and keeps cargo's record of every compiler call as an artifact of the run, so
-the hosts can be compared argument by argument. It gates nothing and is
-removed when the issue is closed.
+the hosts can be compared argument by argument. It stays for the fix, gates
+nothing and is removed when the issue is closed.
 
 ## Shared settings
 
@@ -409,10 +413,12 @@ gate runs it before the check.
 
 ## Releases
 
-Nothing is released yet, and the release workflow has not run: the path below
-is unproven until its first run. That run is a pre-release tag on the public
-repository, and `v0.1.0` is set only after it ends green. This section says
-what the workflow files do.
+`v0.1.0` is the first release. The path below was proven first on the
+pre-release tag `v0.1.0-rc.1`
+([run 38148288612](https://github.com/plurano/amussis/actions/runs/38148288612)),
+and `v0.1.0` was set after that run had ended green
+([run 38149459081](https://github.com/plurano/amussis/actions/runs/38149459081)).
+This section says what the workflow files do.
 
 A version tag, `v` and the version in `Cargo.toml` (`v0.1.0`), starts
 `.github/workflows/release.yml`. The run publishes nothing: it ends in a draft
@@ -457,9 +463,10 @@ change or against the wrong workflow, which has to be refused.
 
 Limits as of this state:
 
-- No run has signed or attested anything yet. `praetorctl audit` measures the
-  declared supply chain (build level 3, signed checksums, a dependency
-  inventory) from the two workflow files; it reads no published signature.
+- `praetorctl audit` measures the declared supply chain (build level 3, signed
+  checksums, a dependency inventory) from the two workflow files; it reads no
+  published signature. The signatures and attestations of a published release
+  are checked by the commands above, not by the gate.
 - Nothing goes to a package registry. Both crates carry `publish = false`, and
   the export crate ships as the module it builds, not as a crate file.
 - The run sets no tag for the Go module. A module in a subdirectory is fetched

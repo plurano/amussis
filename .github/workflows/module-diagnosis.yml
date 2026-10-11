@@ -4,9 +4,9 @@
 # Module diagnosis: builds the WebAssembly module on Linux, macOS and Windows
 # the way the gate builds it and keeps cargo's record of every compiler call,
 # so the three hosts can be compared argument by argument. A Windows host
-# builds other bytes than the committed module (issue 2); this run is how the
-# cause is looked for. It is started by hand, it gates nothing, and it goes
-# when that issue is closed.
+# builds other bytes than the committed module (issue 2); a run of this found
+# the cause, and the workflow stays for the fix. It is started by hand, it
+# gates nothing, and it goes when that issue is closed.
 name: Module diagnosis
 
 on:
