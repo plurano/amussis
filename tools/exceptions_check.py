@@ -34,10 +34,11 @@ entry for this rule. The selftest gives every planted tree one calling job,
 its required name and its entry, so the rule stays proven until a job needs it.
 
 The third is `module-byte-comparison`. A Windows host cannot build the bytes
-of the committed WebAssembly module, so tools/wasm_module.py skips its byte
-comparison there while a live entry names the module; this tool holds the entry
-to that one file and hands it to the module check (`live_exception`). Whether
-the entry still excuses anything is decided where it applies: on a host that
+of the committed WebAssembly module, and a macOS host builds them with some
+lock files only, so tools/wasm_module.py skips its byte comparison on those two
+hosts while a live entry names the module; this tool holds the entry to that
+one file and hands it to the module check (`live_exception`). Whether the entry
+still excuses anything is decided where it applies: on a Windows host that
 builds the module, the module check refuses the entry.
 
 An exception past its day excuses nothing: the file it names fails as if the

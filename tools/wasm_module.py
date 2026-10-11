@@ -13,13 +13,17 @@ library source, the cargo home and the checkout), so two machines that build
 the same commit get the same bytes; a module that still holds one of the three
 is refused.
 
-A Windows host cannot build those bytes: rustc embeds the rest of each source
-path with the host's separators, and six functions come out in another order.
-On such a host the comparison is skipped for as long as exceptions.toml holds a
-live entry for the module under the rule `module-byte-comparison`; the skip is
-printed with the entry's reason. Every other rule still binds there, an entry
-past its day excuses nothing, and an entry excuses nothing on a host whose
-build equals the module.
+Two hosts do not build those bytes. On a Windows host rustc embeds the rest of
+each source path with the host's separators, and six functions come out in
+another order. On a macOS host only the order differs, and only for some lock
+files: it follows values cargo derives on each host, so a macOS build equals
+the module with one set of crate versions and not with the next. On both hosts
+the comparison is skipped for as long as exceptions.toml holds a live entry for
+the module under the rule `module-byte-comparison`; the skip is printed with
+the entry's reason. Every other rule still binds there, and an entry past its
+day excuses nothing. On a Windows host the entry also excuses nothing once the
+build equals the module. On a macOS host an equal build passes and says
+nothing about the entry. Every other host is held to the bytes.
 
     check       build, then compare with the committed module; no network
     update      build, then replace the committed module
@@ -57,8 +61,12 @@ MAGIC = b"\x00asm\x01\x00\x00\x00"
 BUILD_DEADLINE_SECONDS = 900
 QUERY_DEADLINE_SECONDS = 30
 MAX_MODULE_BYTES = 4 * 1024 * 1024
-# The host triple of a toolchain that cannot build the committed bytes.
-DIFFERING_HOST = "-windows-"
+# The hosts whose toolchain does not build the committed bytes, by a part of
+# the host triple, and whether such a host never builds them. A Windows host
+# never does, so a Windows build that equals the module refutes the entry. A
+# macOS host does with one lock file and not with the next (plurano/amussis#2),
+# so an equal build there says nothing about the entry.
+DIFFERING_HOSTS = {"-windows-": True, "-apple-darwin": False}
 
 
 class CheckError(Exception):
@@ -152,9 +160,17 @@ def digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()[:16]
 
 
+def never_equal(host: str) -> bool | None:
+    """Whether `host` never builds the committed bytes; None for a host that is held to them."""
+    for part, never in DIFFERING_HOSTS.items():
+        if part in host:
+            return never
+    return None
+
+
 def excuse(root: Path, host: str) -> dict[str, str] | None:
-    """The live exception of a host that cannot build the committed bytes, or None."""
-    if DIFFERING_HOST not in host:
+    """The live exception of a host that does not build the committed bytes, or None."""
+    if never_equal(host) is None:
         return None
     today = datetime.datetime.now(datetime.UTC).date()
     try:
@@ -188,19 +204,23 @@ def committed_fault(built: bytes, committed: bytes | None) -> str:
 
 
 def differences(
-    built: bytes, committed: bytes | None, forbidden: list[bytes], excused: dict[str, str] | None
+    built: bytes, committed: bytes | None, forbidden: list[bytes], excused: dict[str, str] | None, never: bool | None
 ) -> tuple[list[str], str]:
     """Every reason the committed module is not the build of this tree, and the notice of a skipped comparison.
 
-    `excused` is the live exception of a host that cannot build the committed
+    `excused` is the live exception of a host that does not build the committed
     bytes. It skips the comparison of two modules that differ and nothing
-    else: a missing module and a faulty build are refused as on any host, and
-    so is the exception itself once the build equals the module.
+    else: a missing module and a faulty build are refused as on any host. On a
+    host that never builds the bytes (`never`), the exception itself is refused
+    once the build equals the module; on a host that builds them with some
+    lock files, an equal build passes.
     """
     found = build_faults(built, forbidden)
     fault = committed_fault(built, committed)
     if excused is None or committed is None:
         return ([*found, fault] if fault else found), ""
+    if not fault and not never:
+        return found, ""
     if not fault:
         nothing = f"{exceptions_check.LIST}: the entry for {COMMITTED} excuses nothing; this host builds the module"
         return [*found, nothing], ""
@@ -220,40 +240,68 @@ def committed_module(root: Path) -> bytes | None:
         raise CheckError(f"cannot read {COMMITTED}: {error}") from error
 
 
-def selftest(root: Path, built: bytes, forbidden: list[bytes]) -> tuple[list[str], int]:
+# What `never_equal` must answer for a host triple: the rule of the hosts.
+HOST_RULE = {
+    "x86_64-unknown-linux-gnu": None,
+    "aarch64-unknown-linux-gnu": None,
+    "x86_64-pc-windows-msvc": True,
+    "aarch64-apple-darwin": False,
+    "x86_64-apple-darwin": False,
+}
+
+
+def skip_failures(built: bytes, flipped: bytes, forbidden: list[bytes], excused: dict[str, str]) -> list[str]:
+    """The skips there are, and the hosts they are for; anything else is a failure of the selftest."""
+    failures = []
+    # Two modules that differ, on either kind of excused host: skipped, and
+    # the notice carries the entry's reason.
+    for never in (True, False):
+        found, notice = differences(built, flipped, forbidden, excused, never)
+        if found or excused["reason"] not in notice:
+            failures.append(f"an excused host is refused, or skips without its reason: {never} {found} {notice!r}")
+    # A host that builds the bytes with some lock files, and does with this
+    # one: nothing is skipped, so nothing is announced.
+    found, notice = differences(built, built, forbidden, excused, False)
+    if found or notice:
+        failures.append(f"a macOS host that builds the module is refused or announces a skip: {found} {notice!r}")
+    for host, expected in HOST_RULE.items():
+        if never_equal(host) is not expected:
+            failures.append(f"the host rule answers {never_equal(host)} for {host}, not {expected}")
+    return failures
+
+
+def selftest(built: bytes, forbidden: list[bytes]) -> tuple[list[str], int]:
     """Each plant must be refused, and for the reason it was planted for."""
     middle = len(built) // 2
     flipped = built[:middle] + bytes([built[middle] ^ 1]) + built[middle + 1 :]
     excused = {"reason": "planted reason", "expires": "9999-12-31"}
+    path, elf = built + forbidden[-1], b"\x7fELF" + built
     plants = {
-        "one bit of the committed module flipped": (built, flipped, None, "is not the build"),
-        "committed module cut short": (built, built[:-1], None, "is not the build"),
-        "committed module empty": (built, b"", None, "is not the build"),
-        "committed module missing": (built, None, None, "is missing"),
-        "build holds the checkout path": (built + forbidden[-1], built + forbidden[-1], None, "machine path"),
-        "build holds the cargo home": (built + forbidden[1], built + forbidden[1], None, "machine path"),
-        "build is no module": (b"\x7fELF" + built, b"\x7fELF" + built, None, "no WebAssembly module"),
-        "excused host that builds the module": (built, built, excused, "excuses nothing"),
-        "excused host, committed module missing": (built, None, excused, "is missing"),
-        "excused host, build holds the checkout path": (built + forbidden[-1], flipped, excused, "machine path"),
-        "excused host, build is no module": (b"\x7fELF" + built, flipped, excused, "no WebAssembly module"),
+        "one bit of the committed module flipped": (built, flipped, None, None, "is not the build"),
+        "committed module cut short": (built, built[:-1], None, None, "is not the build"),
+        "committed module empty": (built, b"", None, None, "is not the build"),
+        "committed module missing": (built, None, None, None, "is missing"),
+        "build holds the checkout path": (path, path, None, None, "machine path"),
+        "build holds the cargo home": (built + forbidden[1], built + forbidden[1], None, None, "machine path"),
+        "build is no module": (elf, elf, None, None, "no WebAssembly module"),
+        "Windows host that builds the module": (built, built, excused, True, "excuses nothing"),
+        "Windows host, committed module missing": (built, None, excused, True, "is missing"),
+        "Windows host, build holds the checkout path": (path, flipped, excused, True, "machine path"),
+        "Windows host, build is no module": (elf, flipped, excused, True, "no WebAssembly module"),
+        "macOS host, committed module missing": (built, None, excused, False, "is missing"),
+        "macOS host, build holds the checkout path": (path, flipped, excused, False, "machine path"),
+        "macOS host, build is no module": (elf, flipped, excused, False, "no WebAssembly module"),
+        "macOS host, entry past its day": (built, flipped, None, False, "is not the build"),
     }
     failures = []
-    for name, (planted_build, planted_committed, planted_excuse, expected) in plants.items():
-        found, _ = differences(planted_build, planted_committed, forbidden, planted_excuse)
+    for name, (planted_build, planted_committed, planted_excuse, never, expected) in plants.items():
+        found, _ = differences(planted_build, planted_committed, forbidden, planted_excuse, never)
         if not found:
             failures.append(f"plant passed: {name}")
         elif not any(expected in line for line in found):
             failures.append(f"plant refused for another reason: {name}: {found}")
-    # The one skip there is: two modules that differ, on an excused host, and
-    # the notice carries the entry's reason. No other host is ever excused.
-    found, notice = differences(built, flipped, forbidden, excused)
-    if found or excused["reason"] not in notice:
-        failures.append(f"an excused host is refused, or skips without its reason: {found} {notice!r}")
-    for host in ("x86_64-unknown-linux-gnu", "aarch64-apple-darwin"):
-        if excuse(root, host) is not None:
-            failures.append(f"a host that builds the committed bytes is excused: {host}")
-    return failures, len(plants) + 2
+    failures += skip_failures(built, flipped, forbidden, excused)
+    return failures, len(plants) + 3 + len(HOST_RULE)
 
 
 def report(command: str, found: list[str], notice: str, detail: str) -> int:
@@ -278,16 +326,16 @@ def main() -> int:
     root = args.root.resolve()
     try:
         built, forbidden, host = build(root, args.cargo_log)
-        excused = excuse(root, host)
+        excused, never = excuse(root, host), never_equal(host)
         if args.command == "update":
-            if excused is not None:
-                raise CheckError(f"a {host} host cannot build the committed bytes; update on Linux or macOS")
+            if never is not None:
+                raise CheckError(f"a {host} host does not build the committed bytes; update on a Linux x86_64 host")
             (root / COMMITTED).parent.mkdir(parents=True, exist_ok=True)
             (root / COMMITTED).write_bytes(built)
-        found, notice = differences(built, committed_module(root), forbidden, excused)
+        found, notice = differences(built, committed_module(root), forbidden, excused, never)
         detail = f"{len(built)} bytes, sha256 {digest(built)}, host {host}"
         if args.command == "selftest":
-            failures, count = selftest(root, built, forbidden)
+            failures, count = selftest(built, forbidden)
             found = [f"the unplanted tree is refused: {line}" for line in found] + failures
             detail = f"{count} plants refused"
     except CheckError as error:
