@@ -3,8 +3,9 @@
 ---
 # Verification gate: runs `make verify-all`, the same target a contributor runs
 # locally, on the toolchain rust-toolchain.toml pins and with the engine built
-# from the pinned Praetor commit. Linux only while the repository is private;
-# the macOS and Windows jobs join with the first release.
+# from the pinned Praetor commit. Three jobs run it, on Linux, macOS and
+# Windows; each is a required check under its own fixed name, and all three
+# run one list of steps, written once under the first job.
 name: Verification gate
 
 on:
@@ -22,23 +23,30 @@ concurrency:
 
 env:
   REUSE_VERSION: "6.2.0"
-  # cargo-deny runs the licence allow-list of the gate. The digest is the one
-  # its release page publishes for the Linux archive of this version.
+  # cargo-deny runs the licence allow-list of the gate. Each digest is the one
+  # its release page publishes for that platform's archive of this version.
   CARGO_DENY_VERSION: "0.20.2"
-  CARGO_DENY_SHA256: "9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f"
+  CARGO_DENY_SHA256_LINUX: "9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f"
+  CARGO_DENY_SHA256_MACOS: "fe67d82a10d8597a3549364cb733a3f9cc1bfff9031b7ae46384a9f2a72090c3"
+  CARGO_DENY_SHA256_WINDOWS: "975a22143262fd27476d19ee00c7af67978426e40e1dee94eed6bbade1cf87dc"
   # Published Praetor commit that builds the praetorctl this gate pins.
   PRAETOR_COMMIT: "54c6f19b647ed643d0526cbab12f6f87e349c9b3"
   CARGO_TERM_COLOR: never
+
+# One shell on every platform: the steps are written for bash, which the
+# Windows runner image carries too.
+defaults:
+  run:
+    shell: bash
 
 jobs:
   verify:
     name: Verification gate
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    steps:
+    steps: &gate
       - name: Stop on a draft pull request
         if: github.event.pull_request.draft == true
-        shell: bash
         env:
           TITLE: Gate not run on a draft
           MESSAGE: >-
@@ -83,7 +91,7 @@ jobs:
           ( cd praetor-src && go mod download && go mod verify \
             && go vet ./... \
             && go build -trimpath -buildvcs=false \
-              -o "$RUNNER_TEMP/bin/praetorctl" ./cmd/standardsctl )
+              -o "$RUNNER_TEMP/bin/praetorctl$(go env GOEXE)" ./cmd/standardsctl )
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
           # The Praetor checkout is a build input only; the audit and the
           # licence check must not read it as content of this repository.
@@ -104,24 +112,45 @@ jobs:
           rustup which cargo-clippy
           rustup target list --installed | grep -qx wasm32-unknown-unknown
 
-      # A changed archive fails the digest line and nothing of it is unpacked.
+      # The archive of this runner's platform, held to its pinned digest: a
+      # changed archive fails the comparison and nothing of it is unpacked. A
+      # platform without a pinned archive stops here instead of running an
+      # unpinned one. The paths are relative because a drive letter in a path
+      # reads as a host name to tar.
       - name: Install the pinned cargo-deny
         run: |
-          archive="cargo-deny-${CARGO_DENY_VERSION}-x86_64-unknown-linux-musl"
+          exe=""
+          case "${RUNNER_OS}-${RUNNER_ARCH}" in
+            Linux-X64) target=x86_64-unknown-linux-musl; want="$CARGO_DENY_SHA256_LINUX" ;;
+            macOS-ARM64) target=aarch64-apple-darwin; want="$CARGO_DENY_SHA256_MACOS" ;;
+            Windows-X64) target=x86_64-pc-windows-msvc; want="$CARGO_DENY_SHA256_WINDOWS"; exe=.exe ;;
+            *) echo "::error::no cargo-deny archive is pinned for ${RUNNER_OS}-${RUNNER_ARCH}"; exit 1 ;;
+          esac
+          archive="cargo-deny-${CARGO_DENY_VERSION}-${target}"
           base="https://github.com/EmbarkStudios/cargo-deny/releases/download"
+          cd "$RUNNER_TEMP"
           curl --fail --silent --show-error --location --max-time 120 \
-            --output "$RUNNER_TEMP/${archive}.tar.gz" \
+            --output "${archive}.tar.gz" \
             "${base}/${CARGO_DENY_VERSION}/${archive}.tar.gz"
-          echo "${CARGO_DENY_SHA256}  $RUNNER_TEMP/${archive}.tar.gz" \
-            | sha256sum --check --strict
-          tar -xzf "$RUNNER_TEMP/${archive}.tar.gz" -C "$RUNNER_TEMP" \
-            "${archive}/cargo-deny"
-          install -m 0755 "$RUNNER_TEMP/${archive}/cargo-deny" \
-            "$RUNNER_TEMP/bin/cargo-deny"
+          got="$(python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "${archive}.tar.gz")"
+          if [ "$got" != "$want" ]; then
+            echo "::error::${archive}.tar.gz has sha256 ${got}, not the pinned ${want}"
+            exit 1
+          fi
+          tar -xzf "${archive}.tar.gz" "${archive}/cargo-deny${exe}"
+          install -m 0755 "${archive}/cargo-deny${exe}" "bin/cargo-deny${exe}"
           cargo deny --version
 
+      # The log names the host and the tools the gate is about to run.
+      - name: Name the tools the gate will run
+        run: |
+          uname -a
+          command -v make sh python3 go cargo rustup pipx praetorctl cargo-deny
+          make --version | head -1
+          python3 --version
+
       - name: Verification gate
-        run: make verify-all REUSE="pipx run reuse==${REUSE_VERSION}"
+        run: make verify-all REUSE="pipx run --spec reuse[charset-normalizer]==${REUSE_VERSION} reuse"
 
       - name: Sign-off on pull request commits
         if: github.event_name == 'pull_request'
@@ -137,3 +166,15 @@ jobs:
             fi
           done
           exit "$missing"
+
+  verify-macos:
+    name: Verification gate (macOS)
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps: *gate
+
+  verify-windows:
+    name: Verification gate (Windows)
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps: *gate

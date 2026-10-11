@@ -13,3 +13,9 @@ rule = "unsafe_code"
 path = "crates/amussis-decision-wasm/src/abi.rs"
 reason = "a WebAssembly module declares its imports in an unsafe extern block and names its exports with #[unsafe(no_mangle)]; Rust has no safe spelling for either, and the file holds no unsafe block and dereferences no raw pointer"
 expires = "2027-01-09"
+
+[[exception]]
+rule = "module-byte-comparison"
+path = "bindings/go/decision/amussis_decision.wasm"
+reason = "a Windows host cannot build the bytes of the committed module: rustc embeds five source paths with the host's separators, which no flag of the stable toolchain rewrites, and six functions come out in another order for a cause still open (plurano/amussis#2); the Windows job skips only this comparison and tests the Go binding on the committed module"
+expires = "2027-01-09"
