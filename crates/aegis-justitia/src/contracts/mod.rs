@@ -69,7 +69,6 @@ pub mod decision_request;
 pub mod encoding;
 pub mod graph;
 pub mod proposal;
-pub mod unit;
 
 use core::fmt;
 

@@ -86,8 +86,10 @@
 //!
 //! [`contracts`] holds the three versioned consumer schemas P06 speaks over --
 //! the action proposal from P09 Minerva, the decision request to P05 Forum and
-//! the signed audit record to P16 Athena -- together with the reviewed
-//! hardened-unit contract. Every schema is a typed Rust struct with an explicit
+//! the signed audit record to P16 Athena. The reviewed service-unit contract
+//! that used to sit next to them describes how the operating system runs the
+//! engine, so it stays with that system and is not part of this library.
+//! Every schema is a typed Rust struct with an explicit
 //! contract version, a stable field encoding and a decoder that lands every
 //! field in a fixed inline buffer. See [`contracts`] for what that does and
 //! does not say about heap: an escape-free payload is decoded without one, an
@@ -180,10 +182,6 @@ pub use crate::contracts::graph::{
     contract_edges,
 };
 pub use crate::contracts::proposal::{ActionProposal, ActionProposalVersion};
-pub use crate::contracts::unit::{
-    CONTRACT_MARKER, INSTALL_DIRECTORIES, MAX_UNIT_BYTES, MAX_UNIT_LINES, REQUIRED_DIRECTIVES,
-    UnitContractError, is_installed_path, review,
-};
 pub use crate::contracts::{
     ContractError, Correlation, MAX_CONTRACT_PAYLOAD_BYTES, PayloadBuffer, SchemaId,
 };

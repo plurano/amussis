@@ -1,17 +1,8 @@
 {
   "version": 1,
-  "generated_at": "2026-10-11T00:38:20Z",
+  "generated_at": "2026-10-11T00:56:26Z",
   "repository": "plurano/amussis",
-  "commit_sha": "7ef2a4495205fac052962625d34944c533ebaa43",
-  "total_infractions": 1,
-  "infractions": [
-    {
-      "rule_id": "HISS-02",
-      "file_path": "crates/aegis-justitia/contracts/justitia-interceptor.service",
-      "line_number": 32,
-      "message": "Restart=always with StartLimitIntervalSec=0 restarts without a rate limit, so a failing service restarts forever",
-      "anchor": "text:cb7d05acb896",
-      "fingerprint": "crates/aegis-justitia/contracts/justitia-interceptor.service:HISS-02:text:cb7d05acb896#1"
-    }
-  ]
+  "commit_sha": "6514aa4b5b6d6e7fbcba625e3d71216f60bcd65d",
+  "total_infractions": 0,
+  "infractions": []
 }
