@@ -17,5 +17,5 @@ expires = "2027-01-09"
 [[exception]]
 rule = "module-byte-comparison"
 path = "bindings/go/decision/amussis_decision.wasm"
-reason = "a Windows host cannot build the bytes of the committed module: rustc embeds five source paths with the host's separators, which no flag of the stable toolchain rewrites, and six functions come out in another order for a cause still open (plurano/amussis#2); the Windows job skips only this comparison and tests the Go binding on the committed module"
+reason = "a Windows host cannot build the bytes of the committed module: rustc embeds five source paths with the host's separators, which no flag of the stable toolchain rewrites, and six functions come out in another order, which follows cargo's `-C metadata` values that differ from host to host and that no stable setting fixes (plurano/amussis#2); the Windows job skips only this comparison and tests the Go binding on the committed module"
 expires = "2027-01-09"

@@ -117,7 +117,9 @@ is built from a `SchemaTag`, and `ContractError` has three variants.
 ## Not verified
 
 - The adapter was built against this repository's working tree, not against a
-  published crate. Nothing is published yet.
+  published crate. The crate file of `v0.1.0` is on the forge since
+  2026-10-11; the adapter has not been built against it, and no package
+  registry holds the crate.
 - The documentation links inside the four schema files point at `crate::`
   paths that no longer exist in an adapter. The throwaway crate did not build
   its documentation.
