@@ -27,6 +27,11 @@ agent_clients:
   - claude
   - codex
   - gemini
+overrides:
+  branch_protection:
+    # Owner-approved 2026-10-11: one maintainer and no review bot can approve.
+    # Restore independent when a second maintainer or a review bot can.
+    review_mode: single_maintainer
 register:
   sources:
     expected: 13

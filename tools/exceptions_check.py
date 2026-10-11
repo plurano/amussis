@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: EUPL-1.2
 """Hold every exception of this workspace to one named, dated entry.
 
-Two rules are read. The first is `unsafe_code`:
+Three rules are read. The first is `unsafe_code`:
 
 The workspace forbids unsafe code. A WebAssembly export crate cannot live under
 a forbid, so it carries its own lint tables with `unsafe_code = "deny"` and one
@@ -33,6 +33,13 @@ No job of this workspace calls another workflow today, so the list holds no
 entry for this rule. The selftest gives every planted tree one calling job,
 its required name and its entry, so the rule stays proven until a job needs it.
 
+The third is `module-byte-comparison`. A Windows host cannot build the bytes
+of the committed WebAssembly module, so tools/wasm_module.py skips its byte
+comparison there while a live entry names the module; this tool holds the entry
+to that one file and hands it to the module check (`live_exception`). Whether
+the entry still excuses anything is decided where it applies: on a host that
+builds the module, the module check refuses the entry.
+
 An exception past its day excuses nothing: the file it names fails as if the
 entry were missing.
 
@@ -59,8 +66,12 @@ LIST = "exceptions.toml"
 MANIFEST = "Cargo.toml"
 RULE = "unsafe_code"
 REPORTED = "required-check-is-reported"
-RULES = (RULE, REPORTED)
+COMPARED = "module-byte-comparison"
+RULES = (RULE, REPORTED, COMPARED)
 RULESET = ".github/rulesets/main.json"
+MODULE = "bindings/go/decision/amussis_decision.wasm"
+# The one file each of these rules excuses.
+ONLY_FILE = {REPORTED: RULESET, COMPARED: MODULE}
 WORKFLOWS = ".github/workflows"
 MAX_WORKFLOWS = 64
 ENTRY_KEYS = {"rule", "path", "reason", "expires"}
@@ -111,8 +122,9 @@ def entry_problem(root: Path, entry: object, today: datetime.date) -> str:
         return f"path {entry['path']!r} must be one clean path below the repository root"
     if not (root / path).is_file():
         return f"path {entry['path']!r} names no file"
-    if entry["rule"] == REPORTED and entry["path"] != RULESET:
-        return f"rule {REPORTED!r} excuses only {RULESET}, not {entry['path']!r}"
+    only = ONLY_FILE.get(entry["rule"], entry["path"])
+    if entry["path"] != only:
+        return f"rule {entry['rule']!r} excuses only {only}, not {entry['path']!r}"
     reason = entry["reason"]
     if not reason.strip() or "\n" in reason or len(reason.encode("utf-8")) > MAX_REASON_BYTES:
         return f"reason must be one non-empty line of at most {MAX_REASON_BYTES} bytes"
@@ -126,7 +138,7 @@ def entry_problem(root: Path, entry: object, today: datetime.date) -> str:
     return ""
 
 
-def load_entries(root: Path, today: datetime.date) -> tuple[dict[tuple[str, str], str], list[str]]:
+def load_entries(root: Path, today: datetime.date) -> tuple[dict[tuple[str, str], dict[str, str]], list[str]]:
     """The live and the expired entries by rule and path, and what is wrong with the list."""
     document = load_toml(root / LIST)
     entries = document.get("exception", [])
@@ -142,13 +154,25 @@ def load_entries(root: Path, today: datetime.date) -> tuple[dict[tuple[str, str]
         elif (entry["rule"], entry["path"]) in by_key:
             found.append(f"{LIST} entry {index}: repeats the entry for {entry['path']}")
         else:
-            by_key[(entry["rule"], entry["path"])] = entry["expires"]
+            by_key[(entry["rule"], entry["path"])] = entry
     return by_key, found
 
 
-def of_rule(by_key: dict[tuple[str, str], str], rule: str) -> dict[str, str]:
-    """The entries of one rule, by path."""
-    return {path: expires for (named, path), expires in by_key.items() if named == rule}
+def live_exception(root: Path, rule: str, path: str, today: datetime.date) -> dict[str, str] | None:
+    """The entry for one rule and file while it is live on `today`, or None.
+
+    An entry the list check refuses is not live, and neither is one past its day.
+    """
+    by_key, _ = load_entries(root, today)
+    entry = by_key.get((rule, path))
+    if entry is None or datetime.date.fromisoformat(entry["expires"]) < today:
+        return None
+    return entry
+
+
+def of_rule(by_key: dict[tuple[str, str], dict[str, str]], rule: str) -> dict[str, str]:
+    """The last day of each entry of one rule, by path."""
+    return {path: entry["expires"] for (named, path), entry in by_key.items() if named == rule}
 
 
 def members(root: Path) -> tuple[dict, list[str]]:
@@ -529,6 +553,11 @@ PLANTS = {
         0,
         "is computed",
     ),
+    "module exception names another file": (
+        replace_in(LIST, f'path = "{MODULE}"', f'path = "{ABI}"'),
+        0,
+        f"excuses only {MODULE}",
+    ),
     "rule set that requires no check": (
         replace_in(RULESET, '"type": "required_status_checks"', '"type": "required_checks"'),
         0,
@@ -559,15 +588,24 @@ def plant_caller(tree: Path, end: datetime.date) -> None:
     append_to(LIST, entry)(tree)
 
 
+def plant_module_entry(tree: Path, end: datetime.date) -> None:
+    """Give a copy the entry for the module, unless the list holds it."""
+    if f'rule = "{COMPARED}"' not in read_text(tree / LIST):
+        entry = f'\n[[exception]]\nrule = "{COMPARED}"\npath = "{MODULE}"\nreason = "planted"\nexpires = "{end}"\n'
+        append_to(LIST, entry)(tree)
+
+
 def planted(root: Path, end: datetime.date, edit) -> Path:
-    """A throwaway copy of the manifests, the list, the rule set, the workflows and the member sources."""
+    """A throwaway copy of the manifests, the list, the rule set, the module, the workflows and the member sources."""
     tree = Path(tempfile.mkdtemp(prefix="exceptions-check-"))
     (tree / RULESET).parent.mkdir(parents=True)
-    for name in (MANIFEST, LIST, RULESET):
+    (tree / MODULE).parent.mkdir(parents=True)
+    for name in (MANIFEST, LIST, RULESET, MODULE):
         shutil.copyfile(root / name, tree / name)
     for top in (WORKFLOWS, *source_roots(members(root)[1])):
         shutil.copytree(root / top, tree / top, ignore=shutil.ignore_patterns("target"))
     plant_caller(tree, end)
+    plant_module_entry(tree, end)
     same_end(tree, end)
     if edit is not None:
         edit(tree)
@@ -585,18 +623,35 @@ def refusals(root: Path, end: datetime.date, edit, day: datetime.date) -> list[s
         shutil.rmtree(tree, ignore_errors=True)
 
 
+def reader_failures(root: Path, end: datetime.date) -> list[str]:
+    """What `live_exception` gets wrong on a planted tree whose entries end on `end`."""
+    tree = planted(root, end, None)
+    after = end + datetime.timedelta(days=1)
+    try:
+        cases = {
+            "the module entry is not live on its last day": live_exception(tree, COMPARED, MODULE, end) is None,
+            "the module entry is live past its day": live_exception(tree, COMPARED, MODULE, after) is not None,
+            "the module entry is live for another file": live_exception(tree, COMPARED, ABI, end) is not None,
+            "the module entry is live for another rule": live_exception(tree, RULE, MODULE, end) is not None,
+        }
+    finally:
+        shutil.rmtree(tree, ignore_errors=True)
+    return [name for name, wrong in cases.items() if wrong]
+
+
 def selftest(root: Path, today: datetime.date) -> list[str]:
     """Each plant must be refused, and for the reason it was planted for."""
     failures = [f"the unplanted tree is refused: {line}" for line in check(root, today)]
-    ends = sorted(EXPIRES.findall(read_text(root / LIST)))
+    ends = sorted(set(EXPIRES.findall(read_text(root / LIST))))
     if len(ends) != 1:
-        return [*failures, f"the selftest is written for one exception in {LIST}; it holds {len(ends)}"]
-    # Every planted tree carries that end on both entries, the committed one
-    # and the planted one: a date plant is read relative to that day, an edit
+        return [*failures, f"the selftest is written for one end date in {LIST}; it holds {len(ends)}"]
+    # Every planted tree carries that end on all entries, the committed ones
+    # and the planted ones: a date plant is read relative to that day, an edit
     # plant on it.
     end = datetime.date.fromisoformat(ends[0])
     last_day = refusals(root, end, None, end)
     failures.extend(f"the exceptions do not hold on their last day: {line}" for line in last_day)
+    failures.extend(reader_failures(root, end))
     for name, (edit, days, expected) in PLANTS.items():
         day = end - datetime.timedelta(days=MAX_DAYS) + datetime.timedelta(days=days)
         found = refusals(root, end, edit, day if edit is None else end)

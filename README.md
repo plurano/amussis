@@ -66,7 +66,9 @@ kill switch) that moves here from the operating-system repository.
 make verify-all
 ```
 
-One target, the same one CI runs. Its first half, `make verify`, needs no
+One target, the same one CI runs: three jobs, on Linux, macOS and Windows,
+share one step list in `.github/workflows/ci.yml`, and the rule set in
+`.github/rulesets/main.json` requires all three. Its first half, `make verify`, needs no
 engine: it checks the shared settings and the exception list, then formats,
 builds, tests (default and all features), lints with warnings refused and
 builds the documentation on the toolchain `rust-toolchain.toml` pins. It then
@@ -274,12 +276,17 @@ Limits as of this state:
   in `crates/amussis-decision/tests/halt_record.rs`). An engine that ends before
   that call takes the name with it: no record of the stored chain names that
   person for the halt.
-- The binding has run on Linux amd64 only.
+- The binding has run on the three CI hosts only: Linux amd64, macOS arm64 and
+  Windows amd64.
 
 The committed module is the build of the source beside it: `tools/wasm_module.py
 check` rebuilds it with the machine's paths rewritten and fails on one differing
 byte. After a change to the engine or the export crate, run
 `python3 tools/wasm_module.py update` and commit the module with the change.
+Linux and macOS build the same bytes. A Windows host does not, so there the
+check skips the comparison, prints the reason and tests the binding on the
+committed module; `update` is refused on that host (see
+[Exceptions](#exceptions)).
 
 ## Identities in the audit chain
 
@@ -357,6 +364,17 @@ entry for the rule-set file, a required name no job carries is refused with or
 without one, and an entry is refused once no such name is left. No job here
 calls another workflow today, so the list holds no such entry; the selftest
 plants a calling job to keep the rule proven.
+
+The third entry kind excuses the byte comparison of the committed module on a
+Windows host. `rustc` embeds five source paths with that host's separators,
+which no flag of the stable toolchain rewrites, and six functions come out in
+another order for a cause that is still open; the entry in `exceptions.toml`
+names the issue. While the entry is live, `tools/wasm_module.py check` on
+Windows skips that one comparison and says so in its output. It still refuses a
+build that is no module or holds a machine path, and a missing module. It
+refuses the entry itself once a Windows host builds the committed bytes, and
+past the entry's date the Windows job fails like the others would. No other
+host is ever excused.
 
 ## Shared settings
 
