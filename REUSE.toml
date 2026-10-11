@@ -17,6 +17,7 @@ path = [
     ".gitignore",
     "bindings/go/go.sum",
     "tools/notices/refused/Cargo.lock",
+    "renovate.json",
 ]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Lusoris <lusoris@pm.me>"
