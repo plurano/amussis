@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -41,8 +42,8 @@ type shapeFunction struct {
 }
 
 // realSurface is the surface of the real module, over functions that answer:
-// interface version 1, a 4,096-byte input buffer at address 16, a set-up that
-// succeeds and a decision that allows.
+// the loader's interface version, a 4,096-byte input buffer at address 16, two
+// set-ups that succeed and a decision that allows.
 func realSurface() shape {
 	return shape{
 		imports: []shapeImport{
@@ -55,6 +56,7 @@ func realSurface() shape {
 			{exportInput, nil, []byte{i32}, 16},
 			{exportInputCapacity, nil, []byte{i32}, 4096},
 			{exportInit, []byte{i32, i32}, []byte{i32}, 0},
+			{exportContinue, []byte{i32, i32, i32, i32}, []byte{i32}, 0},
 			{exportDecide, []byte{i32}, []byte{i32}, 0},
 		},
 		memoryName: exportMemory,
@@ -151,7 +153,7 @@ func loadShape(t *testing.T, s shape, mode Mode) (*Engine, error) {
 	t.Helper()
 	w := newWorld()
 	effects := &host{clock: w, signer: w, sink: w}
-	engine, err := load(t.Context(), w.config(mode), s.assemble(), effects.functions())
+	engine, err := load(t.Context(), w.config(mode), s.assemble(), effects.functions(), nil)
 	if engine != nil {
 		t.Cleanup(func() { _ = engine.Close(t.Context()) })
 	}
@@ -193,12 +195,17 @@ func TestAModuleWithAnotherSurfaceIsRefused(t *testing.T) {
 		{"an export beyond the interface", func(s *shape) {
 			s.exports = append(s.exports, shapeFunction{"amussis_extra", nil, []byte{i32}, 0})
 		}, "no function of this interface"},
-		{"no decide function", func(s *shape) { s.exports = s.exports[:4] }, "exports 4 of the 5"},
+		{"no decide function", func(s *shape) { s.exports = s.exports[:5] }, "exports 5 of the 6"},
+		{"the exports of interface version 1, which cannot continue a chain", func(s *shape) {
+			s.exports = slices.DeleteFunc(s.exports, func(f shapeFunction) bool { return f.name == exportContinue })
+		}, "exports 5 of the 6"},
+		{"a continue function without its latch flag", func(s *shape) { s.export(exportContinue).params = []byte{i32, i32, i32} }, "another type"},
 		{"a decide function of another type", func(s *shape) { s.export(exportDecide).params = []byte{i32, i32} }, "another type"},
 		{"a decide function with a wide result", func(s *shape) { s.export(exportDecide).results = []byte{i64} }, "another type"},
 		{"no exported memory", func(s *shape) { s.memoryName = "" }, "exactly one memory"},
 		{"a memory under another name", func(s *shape) { s.memoryName = "mem" }, "exactly one memory"},
-		{"another interface version", func(s *shape) { s.export(exportABIVersion).value = 2 }, "interface version 2"},
+		{"the interface version before this one", func(s *shape) { s.export(exportABIVersion).value = 1 }, "interface version 1"},
+		{"the interface version after this one", func(s *shape) { s.export(exportABIVersion).value = 3 }, "interface version 3"},
 		{"interface version zero", func(s *shape) { s.export(exportABIVersion).value = 0 }, "interface version 0"},
 		{"an input buffer past the memory", func(s *shape) { s.export(exportInput).value = 65536 - 100 }, "not in its memory"},
 		{"an input buffer at the highest address", func(s *shape) { s.export(exportInput).value = -1 }, "not in its memory"},
@@ -227,7 +234,7 @@ func TestBytesThatAreNoModuleAreRefused(t *testing.T) {
 		w := newWorld()
 		effects := &host{clock: w, signer: w, sink: w}
 		for _, module := range [][]byte{nil, []byte("\x7fELF"), embedded[:len(embedded)/2]} {
-			engine, err := load(t.Context(), w.config(mode), module, effects.functions())
+			engine, err := load(t.Context(), w.config(mode), module, effects.functions(), nil)
 			if err == nil || engine != nil || !strings.Contains(err.Error(), "does not compile") {
 				t.Fatalf("%d bytes that are no module: %v", len(module), err)
 			}

@@ -115,10 +115,40 @@ picks one or falls back to the other. A module that traps, or an answer the
 loader cannot read, yields a blocked outcome and an error, and the engine
 answers blocked from then on.
 
-Limits as of this state: a held action cannot be approved or rejected through
-the binding and an operator cannot halt or release the engine through it; one
-engine decides 4,096 proposals and then blocks (the bound of its in-memory
-chain); and the binding has run on Linux amd64 only.
+The audit chain lives in the `Sink` and has no bound of its own: the module
+keeps a window of 4,096 records in memory and drops it when it is full
+(`TestTheChainRunsPastTheWindowAsOneChain`). A program that starts again does
+not start a second chain. It hands the last record its sink stored to
+`decision.Continue`, and the next record links onto it:
+
+```go
+engine, err := decision.Continue(ctx, config, decision.Continuation{Head: lastStored})
+```
+
+The module recomputes the digest of that record and reads the chain position
+and the halt state out of its content; a record that does not hash to its
+digest is refused with `decision.ErrHead`. A chain that ends halted continues
+halted, so a restart is no release. `Continuation.ReleaseHalt` is the one
+release of a halt the binding has. It is refused with `decision.ErrCompromised`
+for a chain halted as compromised, and the chain shows it as the step from a
+halted record to one that is not. The release rule is provisional and may
+change before the first release.
+
+Limits as of this state:
+
+- A held action cannot be approved or rejected through the binding, and an
+  operator cannot halt a running engine through it. Actions an earlier engine
+  held are not carried over a continuation and stay unreleased.
+- The head record is checked for integrity, not for origin. The module verifies
+  no signature, and it cannot know that the record is the last one stored. A
+  continuation from another record leaves two records with one sequence number
+  in the store, which a walk over the store shows
+  (`TestAContinuationFromAnotherRecordThanTheHeadShowsInTheStore`); the module
+  does not prevent it.
+- A halt whose record never reached the sink (a signer or a sink that failed) is
+  not in the stored chain, so a continuation from the stored head starts without
+  it ([#14](https://github.com/plurano/amussis/issues/14)).
+- The binding has run on Linux amd64 only.
 
 The committed module is the build of the source beside it: `tools/wasm_module.py
 check` rebuilds it with the machine's paths rewritten and fails on one differing

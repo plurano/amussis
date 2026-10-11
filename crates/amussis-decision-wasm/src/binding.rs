@@ -4,11 +4,12 @@
 //! One decision behind one call: proposal text in, outcome code out.
 
 use amussis_decision::{
-    DecisionEngine, EngineConfig, InterceptorOutcome, IoDeadline, Proposal, ProposalError,
-    Sha256Hasher, SignerBinding, SignerKeyId, WarningCode,
+    AnchorError, ChainAnchor, DecisionEngine, Digest32, EngineConfig, InterceptorOutcome,
+    IoDeadline, Proposal, ProposalError, Sha256Hasher, SignerBinding, SignerKeyId, WarningCode,
 };
 
 use crate::host::{ClockAdapter, HostClock, HostSigner, HostSink, SignerAdapter, SinkAdapter};
+use crate::wire::FrameParts;
 
 /// The engine a binding runs: SHA-256 chain, host signer, host sink, host clock.
 pub type Engine<C, S, K> =
@@ -62,6 +63,40 @@ pub enum InitError {
     Deadline = 3,
     /// The call was made from inside a host function of another call.
     Busy = 4,
+    /// The head bytes are not one record frame, or its pre-image is not a
+    /// canonical audit pre-image of this contract.
+    Head = 5,
+    /// The head record does not hash to the digest it is filed under.
+    HeadDigest = 6,
+    /// The chain ends halted as compromised; its halt is not released.
+    Compromised = 7,
+    /// The latch flag is neither [`Latch::Keep`] nor [`Latch::Release`].
+    Latch = 8,
+}
+
+/// What a continuation does with the halt latch of the chain it continues.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum Latch {
+    /// The engine starts in the state the head record carries: a chain that
+    /// ends halted continues halted.
+    Keep = 0,
+    /// The engine starts with the latch armed. This is the release of a halt;
+    /// the chain shows it as the step from a halted record to an armed one.
+    Release = 1,
+}
+
+impl Latch {
+    /// Reads the flag that crosses the interface, or returns `None` for a
+    /// number that names neither choice.
+    #[must_use]
+    pub const fn from_flag(flag: u32) -> Option<Self> {
+        match flag {
+            0 => Some(Self::Keep),
+            1 => Some(Self::Release),
+            _ => None,
+        }
+    }
 }
 
 /// One outcome as the three bytes that cross to the host.
@@ -136,6 +171,34 @@ impl OutcomeCode {
     }
 }
 
+/// The chain a new engine continues: the frame of the last record the host's
+/// store holds, and what becomes of the halt latch that record carries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Continuation<'a> {
+    head: &'a [u8],
+    latch: Latch,
+}
+
+impl<'a> Continuation<'a> {
+    /// Names the head frame of a chain and the choice for its halt latch.
+    #[must_use]
+    pub const fn new(head: &'a [u8], latch: Latch) -> Self {
+        Self { head, latch }
+    }
+
+    /// Returns the head frame.
+    #[must_use]
+    pub const fn head(&self) -> &'a [u8] {
+        self.head
+    }
+
+    /// Returns the choice for the halt latch.
+    #[must_use]
+    pub const fn latch(&self) -> Latch {
+        self.latch
+    }
+}
+
 /// The stable tag of a warning; zero is reserved for "no warning".
 const fn warning_tag(code: WarningCode) -> u8 {
     match code {
@@ -164,11 +227,7 @@ impl<C: HostClock, S: HostSigner, K: HostSink> Binding<C, S, K> {
         signer: S,
         sink: K,
     ) -> Result<Self, InitError> {
-        let key_id = core::str::from_utf8(key_id)
-            .ok()
-            .and_then(|text| SignerKeyId::parse(text).ok())
-            .ok_or(InitError::KeyId)?;
-        let deadline = IoDeadline::try_from_millis(io_deadline_ms).ok_or(InitError::Deadline)?;
+        let (key_id, deadline) = settings(key_id, io_deadline_ms)?;
         Ok(Self {
             engine: DecisionEngine::new(
                 EngineConfig::default(),
@@ -176,6 +235,49 @@ impl<C: HostClock, S: HostSigner, K: HostSink> Binding<C, S, K> {
                 SinkAdapter::new(sink),
                 deadline,
                 ClockAdapter::new(clock),
+            ),
+        })
+    }
+
+    /// Sets up an engine that continues the chain `from` names by the frame of
+    /// its last stored record, as the host's sink received it.
+    ///
+    /// The first record of the new engine links onto the head record and
+    /// carries the next sequence number. The engine starts in the halt-latch
+    /// state the head record carries unless `from` asks for [`Latch::Release`].
+    /// Held actions of the engine that wrote the head record are not carried
+    /// over: they stay unreleased.
+    ///
+    /// The head is checked for integrity, not for origin: its content must
+    /// hash to its digest, and its signature is not verified. That the frame
+    /// is the last record of the store, and that the store is the host's own,
+    /// is the host's statement.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InitError::KeyId`] and [`InitError::Deadline`] as
+    /// [`Self::new`] does, [`InitError::Head`] when the head is not a record
+    /// frame of this contract, [`InitError::HeadDigest`] when the record does
+    /// not hash to its digest, and [`InitError::Compromised`] when a release
+    /// is asked for a chain halted as compromised.
+    pub fn continue_from(
+        key_id: &[u8],
+        io_deadline_ms: u32,
+        from: Continuation<'_>,
+        clock: C,
+        signer: S,
+        sink: K,
+    ) -> Result<Self, InitError> {
+        let (key_id, deadline) = settings(key_id, io_deadline_ms)?;
+        let anchor = anchor_of(from)?;
+        Ok(Self {
+            engine: DecisionEngine::continue_from(
+                EngineConfig::default(),
+                SignerBinding::Bound(SignerAdapter::new(key_id, signer)),
+                SinkAdapter::new(sink),
+                deadline,
+                ClockAdapter::new(clock),
+                &anchor,
             ),
         })
     }
@@ -202,6 +304,45 @@ impl<C: HostClock, S: HostSigner, K: HostSink> Binding<C, S, K> {
         let Ok(intent) = proposal.intent() else {
             return OutcomeCode::refused(Refusal::IntentRefused);
         };
+        self.make_room();
         OutcomeCode::from_outcome(&self.engine.decide(&intent))
+    }
+
+    /// Drops the engine's audit window when it is full, so that the chain
+    /// goes on past the window; the host's sink holds every record of it.
+    fn make_room(&mut self) {
+        if self.engine.audit_room() == 0 {
+            // A rotation that fails frees no room and is not answered here.
+            // The decision that follows finds the window full, or the halt
+            // latch the failed walk engaged, and blocks with that reason.
+            self.engine.rotate_ledger().ok();
+        }
+    }
+}
+
+/// Reads the two settings every set-up takes.
+fn settings(key_id: &[u8], io_deadline_ms: u32) -> Result<(SignerKeyId, IoDeadline), InitError> {
+    let key_id = core::str::from_utf8(key_id)
+        .ok()
+        .and_then(|text| SignerKeyId::parse(text).ok())
+        .ok_or(InitError::KeyId)?;
+    let deadline = IoDeadline::try_from_millis(io_deadline_ms).ok_or(InitError::Deadline)?;
+    Ok((key_id, deadline))
+}
+
+/// Reads the head frame of a chain as the point to continue it from.
+fn anchor_of(from: Continuation<'_>) -> Result<ChainAnchor, InitError> {
+    let parts = FrameParts::split(from.head()).ok_or(InitError::Head)?;
+    let digest = Digest32::from_bytes(parts.digest());
+    let anchor =
+        ChainAnchor::from_preimage::<Sha256Hasher>(parts.preimage(), &digest).map_err(|error| {
+            match error {
+                AnchorError::DigestMismatch => InitError::HeadDigest,
+                _ => InitError::Head,
+            }
+        })?;
+    match from.latch() {
+        Latch::Keep => Ok(anchor),
+        Latch::Release => anchor.release_latch().map_err(|_| InitError::Compromised),
     }
 }

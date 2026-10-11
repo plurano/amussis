@@ -14,6 +14,11 @@
 // module that cannot be run or whose answer cannot be read yields Blocked and
 // an error, and the Engine answers Blocked from then on. No path puts a
 // default in the place of an effect.
+//
+// The audit chain lives in the Sink and has no bound of its own. New starts a
+// chain. A program that starts again does not start a second one: Continue
+// takes the last record the Sink stored and links the next record onto it. A
+// chain that ends halted continues halted; a restart is no release.
 package decision
 
 import (
@@ -78,6 +83,48 @@ type Config struct {
 	Sink   Sink
 }
 
+// Continuation names the stored chain an Engine continues.
+type Continuation struct {
+	// Head is the last record the Sink stored for the chain, as the Sink
+	// received it. The module checks that its content hashes to its digest
+	// and reads the chain position and the halt state out of that content.
+	// It does not verify the signature, and it cannot know whether the
+	// record is the last one stored: both are the caller's statement. A
+	// continuation from any other record leaves two records with one
+	// sequence number in the store, which a walk over the store shows.
+	Head Record
+	// ReleaseHalt continues a chain that ends halted with the halt lifted.
+	// It is the only release of a halt this package has. Left false, a chain
+	// that ends halted continues halted and every decision is Blocked.
+	ReleaseHalt bool
+}
+
+// Errors of Continue; test for them with errors.Is.
+var (
+	// ErrHead: the head record is not a record of the chain format, or its
+	// content does not hash to its digest.
+	ErrHead = errors.New("decision: the head record is refused")
+	// ErrCompromised: the chain ends halted as compromised. Its halt is not
+	// released; without ReleaseHalt it continues halted.
+	ErrCompromised = errors.New("decision: a chain halted as compromised is not released")
+)
+
+// chain is a Continuation as the module takes it: the frame of the head
+// record and the latch flag.
+type chain struct {
+	head  []byte
+	latch uint32
+}
+
+// The latch flag and the set-up statuses of the module's interface.
+const (
+	latchKeep         = 0
+	latchRelease      = 1
+	statusHead        = 5
+	statusHeadDigest  = 6
+	statusCompromised = 7
+)
+
 // Engine is one decision engine with its own chain of audit records. It is
 // safe for use by several goroutines; decisions run one at a time. An effect
 // must not call the Engine it serves.
@@ -93,17 +140,42 @@ type Engine struct {
 	fault         error
 }
 
-// New loads the embedded module, checks its interface and sets the engine up.
+// New loads the embedded module, checks its interface and sets the engine up
+// at the start of a new chain.
 func New(ctx context.Context, config Config) (*Engine, error) {
+	return start(ctx, config, nil)
+}
+
+// Continue is New for an engine that continues the stored chain from names:
+// its first record links onto from.Head and carries the next sequence number.
+// Actions the earlier engine held are not carried over and stay unreleased.
+//
+// It returns ErrHead when the head record is refused and ErrCompromised when
+// from.ReleaseHalt is set for a chain halted as compromised.
+func Continue(ctx context.Context, config Config, from Continuation) (*Engine, error) {
+	head, err := encodeFrame(from.Head)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrHead, err)
+	}
+	stored := &chain{head: head, latch: latchKeep}
+	if from.ReleaseHalt {
+		stored.latch = latchRelease
+	}
+	return start(ctx, config, stored)
+}
+
+// start loads the embedded module over the caller's effects.
+func start(ctx context.Context, config Config, from *chain) (*Engine, error) {
 	if config.Clock == nil || config.Signer == nil || config.Sink == nil {
 		return nil, errors.New("decision: a clock, a signer and a sink are required; none has a default")
 	}
 	effects := &host{clock: config.Clock, signer: config.Signer, sink: config.Sink}
-	return load(ctx, config, embedded, effects.functions())
+	return load(ctx, config, embedded, effects.functions(), from)
 }
 
-// load is New with the module and the host functions named by the caller.
-func load(ctx context.Context, config Config, module []byte, functions []hostFunction) (*Engine, error) {
+// load is New or Continue with the module and the host functions named by
+// the caller; a nil chain starts a new one.
+func load(ctx context.Context, config Config, module []byte, functions []hostFunction, from *chain) (*Engine, error) {
 	settings, millis, err := checked(config)
 	if err != nil {
 		return nil, err
@@ -112,7 +184,7 @@ func load(ctx context.Context, config Config, module []byte, functions []hostFun
 	if err != nil {
 		return nil, err
 	}
-	if err := engine.setUp(ctx, config.KeyID, millis); err != nil {
+	if err := engine.setUp(ctx, config.KeyID, millis, from); err != nil {
 		return nil, errors.Join(err, engine.runtime.Close(ctx))
 	}
 	return engine, nil
@@ -183,8 +255,9 @@ func link(ctx context.Context, mode Mode, settings wazero.RuntimeConfig, module 
 }
 
 // setUp checks the interface version, finds the input buffer and hands the
-// module its key identifier and sink deadline.
-func (e *Engine) setUp(ctx context.Context, keyID string, millis uint32) error {
+// module its key identifier and sink deadline, and the head of the chain it
+// continues when there is one.
+func (e *Engine) setUp(ctx context.Context, keyID string, millis uint32, from *chain) error {
 	version, err := call(ctx, e.instance.ExportedFunction(exportABIVersion))
 	if err != nil {
 		return err
@@ -201,17 +274,36 @@ func (e *Engine) setUp(ctx context.Context, keyID string, millis uint32) error {
 	if _, ok := e.memory.Read(e.inputAt, e.inputCapacity); !ok || e.inputCapacity < MaxKeyIDBytes {
 		return fmt.Errorf("decision: the module's input buffer (%d bytes at %d) is not in its memory", e.inputCapacity, e.inputAt)
 	}
-	if !e.memory.Write(e.inputAt, []byte(keyID)) {
-		return errors.New("decision: the key identifier cannot be written to the module")
+	if from == nil {
+		return e.begin(ctx, exportInit, []byte(keyID), uint64(len(keyID)), uint64(millis))
 	}
-	status, err := call(ctx, e.instance.ExportedFunction(exportInit), uint64(len(keyID)), uint64(millis))
+	input := append([]byte(keyID), from.head...)
+	if uint64(len(input)) > uint64(e.inputCapacity) {
+		return fmt.Errorf("%w: its %d bytes do not fit the module's input buffer", ErrHead, len(from.head))
+	}
+	return e.begin(ctx, exportContinue, input, uint64(len(keyID)), uint64(len(from.head)), uint64(millis), uint64(from.latch))
+}
+
+// begin writes the set-up input to the module and calls one of its two
+// set-up functions.
+func (e *Engine) begin(ctx context.Context, export string, input []byte, params ...uint64) error {
+	if !e.memory.Write(e.inputAt, input) {
+		return errors.New("decision: the set-up input cannot be written to the module")
+	}
+	status, err := call(ctx, e.instance.ExportedFunction(export), params...)
 	if err != nil {
 		return err
 	}
-	if status != 0 {
+	switch status {
+	case 0:
+		return nil
+	case statusHead, statusHeadDigest:
+		return fmt.Errorf("%w (status %d)", ErrHead, status)
+	case statusCompromised:
+		return ErrCompromised
+	default:
 		return fmt.Errorf("decision: the module refused its set-up with status %d", status)
 	}
-	return nil
 }
 
 // call runs one exported function that returns a single 32-bit value.

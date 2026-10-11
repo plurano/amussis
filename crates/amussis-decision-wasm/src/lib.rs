@@ -31,6 +31,7 @@
 //! | `amussis_input` | `() -> i32` | Address of the input buffer. |
 //! | `amussis_input_capacity` | `() -> i32` | Its size in bytes, the proposal bound. |
 //! | `amussis_init` | `(key_id_len: i32, io_deadline_ms: i32) -> i32` | Sets up the engine; the signer key identifier is in the input buffer. `0`, or an [`InitError`] number. |
+//! | `amussis_continue` | `(key_id_len: i32, head_len: i32, io_deadline_ms: i32, latch: i32) -> i32` | Sets up the engine as the continuation of a stored chain; the input buffer holds the signer key identifier followed by the frame ([`wire`]) of the chain's last stored record. `latch` is a [`Latch`] number. `0`, or an [`InitError`] number. |
 //! | `amussis_decide` | `(len: i32) -> i32` | Decides the proposal text in the input buffer; returns the outcome code. |
 //!
 //! # Outcome code
@@ -47,13 +48,39 @@
 //! | `3` block | block-reason tag of the engine | halt-reason tag when the halt latch caused the block |
 //! | `4` refused by the binding | [`Refusal`] number | `0` |
 //!
+//! # The audit chain
+//!
+//! The chain lives in the host's sink. The engine keeps a window of at most
+//! `MAX_LEDGER_RECORDS` records in memory; when the window is full the
+//! binding has the engine walk it once more and drop it, and the next record
+//! links onto the last one as before. A window that no longer verifies is not
+//! dropped: the engine halts as compromised.
+//!
+//! A module instance holds one engine for its lifetime. A host that starts
+//! again does not start a second chain: it calls `amussis_continue` with the
+//! frame of the last record its store holds. The module checks that the
+//! record hashes to its digest and reads the sequence number, the time and
+//! the halt-latch state out of the hashed bytes; nothing is taken from loose
+//! numbers. A continuation from any record but the last leaves two records
+//! with one sequence number in the store, which a walk over the store
+//! refuses.
+//!
+//! A chain that ends halted continues halted ([`Latch::Keep`]).
+//! [`Latch::Release`] is the one release of a halt this interface has; it is
+//! refused for a chain halted as compromised.
+//!
 //! # Limits
 //!
 //! - A held action (class `2`) cannot be adjudicated through this interface
-//!   yet; the hold lapses with its approval window.
-//! - The engine keeps its audit chain in memory and stops deciding when the
-//!   chain holds `MAX_LEDGER_RECORDS` records. The binding does not start a
-//!   second chain behind the caller's back: it reports the block.
+//!   yet; the hold lapses with its approval window. Holds are not carried
+//!   over a continuation.
+//! - The head handed to `amussis_continue` is checked for integrity, not for
+//!   origin: this library verifies no signature. That the frame is the last
+//!   record of the host's own store is the host's statement.
+//! - A halt is carried over a continuation only as far as the store shows
+//!   it. A halt whose record never reached the store (the sink or the signer
+//!   failed) is not in the head record, so a continuation from that head
+//!   starts armed.
 //!
 //! # Unsafe code
 //!
@@ -68,14 +95,16 @@ pub mod wire;
 #[cfg(target_family = "wasm")]
 mod abi;
 
-pub use crate::binding::{Binding, Class, Engine, InitError, OutcomeCode, Refusal};
+pub use crate::binding::{
+    Binding, Class, Continuation, Engine, InitError, Latch, OutcomeCode, Refusal,
+};
 pub use crate::host::{
     ClockAdapter, HostClock, HostSigner, HostSink, SINK_STORED, SignerAdapter, SinkAdapter,
 };
-pub use crate::wire::{FRAME_VERSION, Frame, MAX_FRAME_BYTES};
+pub use crate::wire::{FRAME_VERSION, Frame, FrameParts, MAX_FRAME_BYTES};
 
 /// Version of the import and export interface described above.
-pub const ABI_VERSION: u32 = 1;
+pub const ABI_VERSION: u32 = 2;
 
 /// Name of the import module the host functions live in.
 pub const HOST_MODULE: &str = "amussis_host_v1";

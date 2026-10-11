@@ -330,26 +330,12 @@ func TestAHostFunctionTheHostDoesNotHoldFailsTheLoad(t *testing.T) {
 			if len(functions) != 2 {
 				t.Fatalf("withholding %s left %d host functions", withheld, len(functions))
 			}
-			engine, err := load(t.Context(), w.config(mode), embedded, functions)
+			engine, err := load(t.Context(), w.config(mode), embedded, functions, nil)
 			if err == nil || engine != nil || !strings.Contains(err.Error(), withheld) {
 				t.Fatalf("a host without %s loaded the module: %v", withheld, err)
 			}
 		}
 	})
-}
-
-func TestTheChainBoundBlocksAndNoSecondChainStarts(t *testing.T) {
-	const bound = 4096
-	w := newWorld()
-	engine := engineFor(t, w, Compiled)
-	for range bound {
-		want(t, decide(t, engine, routine), Outcome{Class: Allowed})
-	}
-	want(t, decide(t, engine, routine), Outcome{Class: Blocked, Detail: BlockAuditUnavailable})
-	want(t, decide(t, engine, routine), halted(HaltAuditUnavailable))
-	if len(w.stored) != bound {
-		t.Fatalf("stored %d records, want %d", len(w.stored), bound)
-	}
 }
 
 func TestAClosedEngineBlocks(t *testing.T) {

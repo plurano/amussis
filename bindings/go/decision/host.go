@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
+	"math"
 	"time"
 
 	"github.com/tetratelabs/wazero/api"
@@ -167,6 +168,21 @@ func parseFrame(frame []byte) (Record, error) {
 		return Record{}, errFrame
 	}
 	return record, nil
+}
+
+// encodeFrame writes one record as the frame parseFrame reads. It refuses a
+// record whose parts do not fit their length prefixes and checks nothing
+// else: whether the bytes are a record of a chain is the module's check.
+func encodeFrame(record Record) ([]byte, error) {
+	if len(record.Preimage) > math.MaxUint16 || len(record.KeyID) > math.MaxUint8 || len(record.Signature) > math.MaxUint16 {
+		return nil, errFrame
+	}
+	frame := []byte{frameVersion}
+	frame = binary.LittleEndian.AppendUint16(frame, uint16(len(record.Preimage)))
+	frame = append(append(frame, record.Preimage...), record.Digest[:]...)
+	frame = append(append(frame, byte(len(record.KeyID))), record.KeyID...)
+	frame = binary.LittleEndian.AppendUint16(frame, uint16(len(record.Signature)))
+	return append(frame, record.Signature...), nil
 }
 
 // take reads a little-endian length of prefix bytes (1 or 2), then that many bytes.

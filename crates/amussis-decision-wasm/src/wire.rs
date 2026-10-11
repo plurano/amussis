@@ -17,6 +17,10 @@
 //! A reader needs nothing but the frame to check it: the digest is the hash
 //! of the pre-image, the signature is over the digest, and the pre-image
 //! carries the sequence number and the digest of the record before it.
+//!
+//! The same bytes come back once: a host that continues a chain hands in the
+//! frame of the last record its store holds, and [`FrameParts::split`] reads
+//! it.
 
 use amussis_decision::{
     AuditRecord, DIGEST_LEN, MAX_IDENTITY_LEN, MAX_PREIMAGE_BYTES, MAX_SIGNATURE_BYTES,
@@ -76,4 +80,80 @@ impl Frame {
         self.len = end;
         Some(())
     }
+}
+
+/// The parts of one frame, borrowed from its bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FrameParts<'a> {
+    preimage: &'a [u8],
+    digest: [u8; DIGEST_LEN],
+    key_id: &'a [u8],
+    signature: &'a [u8],
+}
+
+impl<'a> FrameParts<'a> {
+    /// Splits `frame` into its parts, or returns `None` when the bytes are
+    /// not one frame of [`FRAME_VERSION`]: another version byte, a length
+    /// that runs past the end or past its bound, an empty key identifier or
+    /// signature, or bytes after the signature.
+    ///
+    /// Only the layout is checked. Whether the digest is the hash of the
+    /// pre-image is the reader's check
+    /// (`amussis_decision::ChainAnchor::from_preimage` makes it), and the
+    /// signature is not checked by this library at all.
+    #[must_use]
+    pub fn split(frame: &'a [u8]) -> Option<Self> {
+        let mut rest = frame;
+        if take(&mut rest, 1)? != [FRAME_VERSION] {
+            return None;
+        }
+        let preimage_len = usize::from(u16::from_le_bytes(take(&mut rest, 2)?.try_into().ok()?));
+        let preimage = take(&mut rest, preimage_len)?;
+        let digest: [u8; DIGEST_LEN] = take(&mut rest, DIGEST_LEN)?.try_into().ok()?;
+        let key_id_len = usize::from(*take(&mut rest, 1)?.first()?);
+        let key_id = take(&mut rest, key_id_len)?;
+        let signature_len = usize::from(u16::from_le_bytes(take(&mut rest, 2)?.try_into().ok()?));
+        let signature = take(&mut rest, signature_len)?;
+        let bounded = preimage.len() <= MAX_PREIMAGE_BYTES
+            && (1..=MAX_IDENTITY_LEN).contains(&key_id.len())
+            && (1..=MAX_SIGNATURE_BYTES).contains(&signature.len())
+            && rest.is_empty();
+        bounded.then_some(Self {
+            preimage,
+            digest,
+            key_id,
+            signature,
+        })
+    }
+
+    /// Returns the canonical pre-image.
+    #[must_use]
+    pub const fn preimage(&self) -> &'a [u8] {
+        self.preimage
+    }
+
+    /// Returns the digest the frame states for the pre-image.
+    #[must_use]
+    pub const fn digest(&self) -> [u8; DIGEST_LEN] {
+        self.digest
+    }
+
+    /// Returns the signer key identifier.
+    #[must_use]
+    pub const fn key_id(&self) -> &'a [u8] {
+        self.key_id
+    }
+
+    /// Returns the signature over the digest.
+    #[must_use]
+    pub const fn signature(&self) -> &'a [u8] {
+        self.signature
+    }
+}
+
+/// Takes the next `len` bytes of `rest`, or returns `None` when fewer are left.
+fn take<'a>(rest: &mut &'a [u8], len: usize) -> Option<&'a [u8]> {
+    let (taken, tail) = rest.split_at_checked(len)?;
+    *rest = tail;
+    Some(taken)
 }
