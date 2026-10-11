@@ -260,6 +260,12 @@ Limits as of this state:
 - A halt whose record never reached the sink (a signer or a sink that failed) is
   not in the stored chain, so a continuation from the stored head starts without
   it. The halted engine writes the halt with the next record the sink stores.
+- The person of a halt whose record never reached the sink is kept in the
+  running engine only. The next call of `Halt` writes the record owed with that
+  person, whoever calls (`a_named_halt_record_that_failed_is_written_with_its_person`
+  in `crates/amussis-decision/tests/halt_record.rs`). An engine that ends before
+  that call takes the name with it: no record of the stored chain names that
+  person for the halt.
 - The binding has run on Linux amd64 only.
 
 The committed module is the build of the source beside it: `tools/wasm_module.py
