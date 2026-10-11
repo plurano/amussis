@@ -17,6 +17,16 @@ facets:
 # does, the workspace is audited as rust-systems.
 flavors:
   - name: rust-systems
+# The editors and agent clients this repository is worked on with. Files of
+# any other editor or client are not generated and not tracked.
+editors:
+  - universal
+  - vscode
+  - antigravity
+agent_clients:
+  - claude
+  - codex
+  - gemini
 register:
   sources:
     expected: 13
