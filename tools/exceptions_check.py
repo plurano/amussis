@@ -73,6 +73,7 @@ LOWERING = re.compile(r"\b(?:allow|expect|warn)\s*\((?:[^()]|\([^()]*\))*\bunsaf
 # reports. A job this cannot place stops the check instead of passing.
 JOB = re.compile(r"^  ([A-Za-z_][A-Za-z0-9_-]*):\s*(?:#.*)?$")
 JOB_KEY = re.compile(r"^    (name|uses|runs-on):\s*(\S.*)$")
+CALL = re.compile(r"^    uses: ", re.MULTILINE)
 
 
 class CheckError(Exception):
@@ -353,6 +354,19 @@ def repeat_entry(tree: Path) -> None:
     append_to(LIST, "\n" + one_entry(tree))(tree)
 
 
+def every_call_runs(tree: Path) -> None:
+    """Turn each job that calls a workflow into one that runs steps, in every workflow."""
+    files = sorted((tree / WORKFLOWS).glob("*.y*ml"))[:MAX_WORKFLOWS]
+    turned = 0
+    for path in files:
+        text = read_text(path)
+        runs = CALL.sub("    runs-on: ", text)
+        turned += runs != text
+        path.write_text(runs, encoding="utf-8")
+    if not turned:
+        raise CheckError(f"selftest plant: no job under {WORKFLOWS} calls a workflow")
+
+
 def lower_second_member(tree: Path) -> None:
     """Give the engine crate the export crate's lowered tables."""
     lowered = read_text(tree / WASM / MANIFEST)
@@ -487,8 +501,8 @@ PLANTS = {
         0,
         "requires check 'Verification gate', a name no job of any workflow carries",
     ),
-    "rule-set exception left after the calling job went": (
-        replace_in(CALLER, "    uses: plurano/shared-ci/", "    runs-on: plurano/shared-ci/"),
+    "rule-set exception left after the last calling job went": (
+        every_call_runs,
         0,
         f"the entry for {RULESET} excuses nothing",
     ),
