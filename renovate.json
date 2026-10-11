@@ -1,0 +1,24 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": [
+    "Copy of the family preset (plurano/shared-ci default.json), taken 2026-10-12. Replaced by \"extends\": [\"github>plurano/shared-ci\"] on the day that repository turns public."
+  ],
+  "extends": [
+    "config:recommended",
+    ":gitSignOff"
+  ],
+  "minimumReleaseAge": "3 days",
+  "automerge": false,
+  "packageRules": [
+    {
+      "description": "Which release of a hosted machine a job runs on is decided in the repository, not proposed.",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchDepTypes": [
+        "github-runner"
+      ],
+      "enabled": false
+    }
+  ]
+}
