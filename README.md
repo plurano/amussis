@@ -47,7 +47,7 @@ kill switch) that moves here from the operating-system repository.
 | `crates/amussis-decision/` | The decision engine, imported with its history from the operating-system repository, where it is the crate `aegis-justitia`. |
 | `crates/amussis-decision-wasm/` | The decision engine as a WebAssembly module: five exports, three host functions (clock, signer, sink). |
 | `bindings/go/` | The Go module that embeds the WebAssembly module and runs it without cgo; package `decision`. |
-| `exceptions.toml`, `tools/exceptions_check.py` | The one file that lowers a workspace lint, with its reason and end date, and the check that holds it to that entry. |
+| `exceptions.toml`, `tools/exceptions_check.py` | The workspace's exceptions to its own rules, each with one rule, one file, a reason and an end date, and the check that holds every entry to what it names. |
 | `tools/wasm_module.py` | Builds the WebAssembly module and compares it byte for byte with the one `bindings/go` embeds. |
 | `tools/settings_sync.py` | Holds the shared toolchain and lint settings to their recorded source. |
 | `tools/apicompat/`, `.github/workflows/praetor-api.yml` | Written by the Praetor engine: on a pull request, compares the exported API of the Go module with the base commit. |
@@ -262,6 +262,17 @@ is named in `exceptions.toml` with one file, one rule, a reason and an end date
 at most 90 days ahead. `tools/exceptions_check.py` fails on any other file that
 lowers the lint, on an entry whose file lowers nothing, and on an entry past its
 date: a lapsed exception excuses nothing.
+
+The second entry names `.github/rulesets/main.json`. The Praetor engine writes
+that file, and for the licence job, which calls the shared workflow of
+`plurano/shared-ci` (`.github/workflows/licence-check.yml`), it requires the
+check `Licence`. A run reports that job as `Licence / REUSE lint`, so the
+required name is never reported (cordanaLLM/praetor#1212). The same check reads
+every workflow's job names and the rule set: a required name that is the bare
+name of a calling job needs the live entry, a required name no job carries is
+refused with or without it, and the entry is refused once no such name is left.
+No rule set is live on the forge while the repository is private; the entry's
+reason states what has to hold before that changes.
 
 ## Shared settings
 

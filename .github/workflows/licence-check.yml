@@ -1,0 +1,26 @@
+---
+# Licence check: every file carries its licence information. The job is the
+# shared workflow of plurano/shared-ci, named by commit.
+name: Licence check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+  merge_group:
+
+permissions: {}
+
+concurrency:
+  group: licence-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  licence:
+    name: Licence
+    permissions:
+      contents: read
+    uses: plurano/shared-ci/.github/workflows/licence.yml@e40e3d40727806a60175f945470a9e6d76558960 # unreleased, main of 2026-10-11
+    with:
+      runner: ubuntu-26.04

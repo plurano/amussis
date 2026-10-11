@@ -13,3 +13,9 @@ rule = "unsafe_code"
 path = "crates/amussis-decision-wasm/src/abi.rs"
 reason = "a WebAssembly module declares its imports in an unsafe extern block and names its exports with #[unsafe(no_mangle)]; Rust has no safe spelling for either, and the file holds no unsafe block and dereferences no raw pointer"
 expires = "2027-01-09"
+
+[[exception]]
+rule = "required-check-is-reported"
+path = ".github/rulesets/main.json"
+reason = "the Praetor engine writes this file and requires the calling job's bare name `Licence`, which no run reports: the forge reports `Licence / REUSE lint` (cordanaLLM/praetor#1212). No rule set is live on this repository; before one goes live or the repository becomes public, the issue is fixed or no `praetorctl sync --remote` runs"
+expires = "2026-12-31"
