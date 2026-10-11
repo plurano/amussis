@@ -1,0 +1,9 @@
+# SPDX-FileCopyrightText: 2026 Lusoris <lusoris@proton.me>
+# SPDX-License-Identifier: EUPL-1.2
+#
+# D61: pinned toolchain admission. Read by rustup only; a distribution cargo
+# ignores this file, so the gate must report which rustc actually ran.
+[toolchain]
+channel = "1.98.1"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

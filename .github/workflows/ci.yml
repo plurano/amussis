@@ -1,0 +1,47 @@
+# SPDX-FileCopyrightText: 2026 Lusoris <lusoris@proton.me>
+# SPDX-License-Identifier: EUPL-1.2
+---
+# Verification gate: runs `make verify`, the same target a contributor runs
+# locally, on the toolchain rust-toolchain.toml pins. Linux only while the
+# repository is private; the macOS and Windows jobs join with the first release.
+name: Verification gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REUSE_VERSION: "6.2.0"
+  CARGO_TERM_COLOR: never
+
+jobs:
+  verify:
+    name: Verification gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The runner image ships a Rust toolchain, but not the pinned one. With
+      # no toolchain argument rustup installs the active toolchain, which
+      # rust-toolchain.toml overrides to the pinned channel.
+      - name: Materialise the pinned Rust toolchain
+        run: |
+          rustup toolchain install --no-self-update --profile minimal \
+            -c rustfmt,clippy
+          rustup show active-toolchain
+          rustup which cargo-clippy
+
+      - name: Verification gate
+        run: make verify REUSE="pipx run reuse==${REUSE_VERSION}"

@@ -1,0 +1,19 @@
+# SPDX-FileCopyrightText: 2026 Lusoris <lusoris@proton.me>
+# SPDX-License-Identifier: EUPL-1.2
+#
+# Only files that cannot carry a header are named here. There is deliberately
+# no "**" table: a source file without its own header must fail `reuse lint`.
+
+version = 1
+
+[[annotations]]
+path = [
+    "README.md",
+    "Cargo.lock",
+    "rustfmt.toml",
+    "settings-source.json",
+    ".gitignore",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Lusoris <lusoris@proton.me>"
+SPDX-License-Identifier = "EUPL-1.2"

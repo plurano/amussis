@@ -239,7 +239,7 @@ fn the_workspace_package_metadata_is_pinned() {
         "the workspace licence every crate inherits must stay EUPL-1.2"
     );
     assert!(
-        root.contains("https://github.com/cordanaLLM/Aegis-OS"),
+        root.contains("https://github.com/plurano/amussis"),
         "the repository every crate inherits must stay the canonical remote"
     );
 }
