@@ -27,10 +27,10 @@
 //! # What is not in the schema
 //!
 //! An edge name, a call direction, a payload hash, a proposal time and a seal
-//! belong to the envelope one system puts around a proposal. The schemas in
-//! [`crate::contracts`] are such envelopes: they are the Aegis operating
-//! system's conversation schemas, and its adapter checks them and then maps to
-//! this one. The engine reads none of those fields.
+//! belong to the envelope one system puts around a proposal. Such an envelope
+//! is a schema of that system's adapter, built from [`crate::encoding`]: the
+//! adapter checks it and then maps to this one. The engine reads none of those
+//! fields.
 //!
 //! # Refusals
 //!

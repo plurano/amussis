@@ -11,9 +11,9 @@
 //! this file fails. The widths are computed from `size_of` on the building
 //! target, so this file, not the prose, is the authority for the numbers.
 //!
-//! The M14 consumer contracts are held to the same standard at the end of this
-//! file, and the property they are held to is narrower than the one first
-//! written down. A decoded payload owns no heap, and an escape-free payload is
+//! The encoding rules are held to the same standard at the end of this file,
+//! on the fixture schema of `common`, and the property they are held to is
+//! narrower than the one first written down. A decoded payload owns no heap, and an escape-free payload is
 //! decoded without a copy; a payload that spells the same value with a JSON
 //! escape is not, because `serde_json` unescapes into a heap scratch buffer.
 //! That last case is the falsifier for "decoding allocates nothing", and it is
@@ -22,16 +22,15 @@
 mod common;
 
 use amussis_decision::{
-    ActionProposal, ActionType, ApprovalTicket, AuditRecord, BlockReason, ContractError,
-    Correlation, DecisionRequest, InterceptorOutcome, MAX_CONTRACT_PAYLOAD_BYTES,
-    MAX_LEDGER_RECORDS, MAX_PENDING_REQUESTS, MAX_RETAINED_AUDIT_BYTES, MAX_SIGNATURE_BYTES,
-    MAX_TARGET_LEN, OversightClass, RequestState, RiskTier, SchemaId, SignedAuditRecord,
-    TargetResource,
+    ActionType, ApprovalTicket, AuditRecord, BlockReason, ContractError, Correlation,
+    InterceptorOutcome, MAX_CONTRACT_PAYLOAD_BYTES, MAX_LEDGER_RECORDS, MAX_PENDING_REQUESTS,
+    MAX_RETAINED_AUDIT_BYTES, MAX_SIGNATURE_BYTES, MAX_TARGET_LEN, OversightClass, RequestState,
+    RiskTier, TargetResource,
 };
 
 use common::{
-    CORRELATION, FIXTURE_AUDIT_BOUND, Fallible, audit_record, decision_request, encoded, engine,
-    filler, intent, proposal,
+    CORRELATION, ENVELOPE, FIXTURE_AUDIT_BOUND, Fallible, decoded, encoded, engine, envelope,
+    filler, intent,
 };
 
 // --- Positive -------------------------------------------------------------
@@ -202,7 +201,7 @@ fn the_retained_and_pending_budgets_are_computed_from_size_of() {
     assert_eq!(MAX_PENDING_REQUESTS, 256);
 }
 
-// --- Milestone M14: what decoding one contract payload costs --------------
+// --- What decoding one payload costs --------------------------------------
 
 /// Whether `serde_json` handed a string field a slice borrowed straight out of
 /// the payload, or a copy it had to build in a heap scratch buffer first.
@@ -250,10 +249,10 @@ impl<'de> serde::Deserialize<'de> for Provenance {
     }
 }
 
-/// Reads one field of any contract payload for its provenance and nothing else.
+/// Reads one field of a payload for its provenance and nothing else.
 ///
 /// Every other field is unknown to this view and is skipped, so the witness
-/// works against all three schemas without naming any of them.
+/// works against any schema that carries the key without naming it.
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
 struct CorrelationWitness {
@@ -290,27 +289,17 @@ fn inline_only<T: Copy>(_value: &T) -> usize {
 
 // --- Positive -------------------------------------------------------------
 
-/// Positive: a decoded contract payload owns no heap, and a whole decoded
-/// payload fits inside the same scalar bound as its wire form.
+/// Positive: a decoded payload owns no heap, and a whole decoded payload fits
+/// inside the same scalar bound as its wire form.
 #[test]
-fn a_decoded_contract_payload_owns_no_heap() -> Fallible<()> {
-    let widths = [
-        inline_only(&ActionProposal::decode(&encoded(&proposal()?)?)?),
-        inline_only(&DecisionRequest::decode(&encoded(&decision_request(
-            RiskTier::TierAConsequential,
-            OversightClass::Standard,
-            300,
-        )?)?)?),
-        inline_only(&SignedAuditRecord::decode(&encoded(&audit_record(1)?)?)?),
-    ];
-    for width in widths {
-        assert!(width > 0);
-        assert!(
-            width <= MAX_CONTRACT_PAYLOAD_BYTES,
-            "a decoded payload of {width} bytes is wider than the \
-             {MAX_CONTRACT_PAYLOAD_BYTES}-byte bound on its wire form"
-        );
-    }
+fn a_decoded_payload_owns_no_heap() -> Fallible<()> {
+    let width = inline_only(&decoded(&encoded(&envelope()?)?)?);
+    assert!(width > 0);
+    assert!(
+        width <= MAX_CONTRACT_PAYLOAD_BYTES,
+        "a decoded payload of {width} bytes is wider than the \
+         {MAX_CONTRACT_PAYLOAD_BYTES}-byte bound on its wire form"
+    );
     Ok(())
 }
 
@@ -322,34 +311,22 @@ fn a_decoded_contract_payload_owns_no_heap() -> Fallible<()> {
 /// This is the falsifier. Both spellings are accepted and both decode to the
 /// same value, so the escape is not a hostile payload that could simply be
 /// refused: it is an ordinary, admissible spelling that costs heap. What is
-/// true, and what the contract documentation now claims, is the narrower
-/// property the other two tests here assert.
+/// true, and what the module documentation claims, is the narrower property
+/// the other two tests here assert.
 #[test]
 fn one_json_escape_makes_the_decoder_copy_a_field_into_scratch() -> Fallible<()> {
-    let payloads = [
-        encoded(&proposal()?)?,
-        encoded(&decision_request(
-            RiskTier::TierAConsequential,
-            OversightClass::Standard,
-            300,
-        )?)?,
-        encoded(&audit_record(1)?)?,
-    ];
-    for plain in payloads {
-        let with_escape = escaped(&plain);
-        assert_ne!(plain, with_escape, "the fixture carries the identifier");
-        assert_eq!(provenance(&plain)?, Provenance::Borrowed);
-        assert_eq!(
-            provenance(&with_escape)?,
-            Provenance::Copied,
-            "an escaped field cannot be borrowed, so the decoder allocated"
-        );
-    }
-
-    let plain = encoded(&proposal()?)?;
+    let plain = encoded(&envelope()?)?;
+    let with_escape = escaped(&plain);
+    assert_ne!(plain, with_escape, "the fixture carries the identifier");
+    assert_eq!(provenance(&plain)?, Provenance::Borrowed);
     assert_eq!(
-        ActionProposal::decode(&escaped(&plain))?,
-        ActionProposal::decode(&plain)?,
+        provenance(&with_escape)?,
+        Provenance::Copied,
+        "an escaped field cannot be borrowed, so the decoder allocated"
+    );
+    assert_eq!(
+        decoded(&with_escape)?,
+        decoded(&plain)?,
         "the escaped spelling is admissible and decodes to the same value"
     );
     Ok(())
@@ -361,14 +338,14 @@ fn one_json_escape_makes_the_decoder_copy_a_field_into_scratch() -> Fallible<()>
 /// [`MAX_CONTRACT_PAYLOAD_BYTES`], because a longer payload never reaches the
 /// parser at all.
 ///
-/// The widest escape a contract admits is a target resource of
+/// The widest escape a field admits is a target resource of
 /// [`MAX_TARGET_LEN`] bytes with every byte escaped, which doubles the field on
 /// the wire. It still fits the payload bound, and the buffer it is unescaped
 /// into is narrower than the payload that carried it. One byte past the bound
 /// is refused before parsing, so no scratch is reserved for it.
 #[test]
-fn no_decoder_scratch_can_exceed_the_contract_payload_bound() -> Fallible<()> {
-    let mut widest = proposal()?;
+fn no_decoder_scratch_can_exceed_the_payload_bound() -> Fallible<()> {
+    let mut widest = envelope()?;
     widest.target = TargetResource::parse(&"/".repeat(MAX_TARGET_LEN))?;
     let plain = encoded(&widest)?;
     let with_escapes = plain.replace('/', "\\/");
@@ -381,20 +358,20 @@ fn no_decoder_scratch_can_exceed_the_contract_payload_bound() -> Fallible<()> {
         "the widest escaped payload is {} bytes, past the bound",
         with_escapes.len()
     );
-    let decoded = ActionProposal::decode(&with_escapes)?;
-    assert_eq!(decoded, widest);
+    let value = decoded(&with_escapes)?;
+    assert_eq!(value, widest);
     assert!(
-        decoded.target.len() <= with_escapes.len(),
+        value.target.len() <= with_escapes.len(),
         "the buffer the field is unescaped into is narrower than the payload \
          that carried it, so the payload bound bounds it too"
     );
-    assert!(decoded.target.len() <= MAX_CONTRACT_PAYLOAD_BYTES);
+    assert!(value.target.len() <= MAX_CONTRACT_PAYLOAD_BYTES);
 
     let over_bound = filler(MAX_CONTRACT_PAYLOAD_BYTES.saturating_add(1));
     assert_eq!(
-        ActionProposal::decode(&over_bound),
+        decoded(&over_bound),
         Err(ContractError::PayloadTooLong {
-            correlation: Correlation::new(SchemaId::ActionProposal, None),
+            correlation: Correlation::new(ENVELOPE, None),
             max: MAX_CONTRACT_PAYLOAD_BYTES
         }),
         "one byte past the bound is refused before it is parsed"

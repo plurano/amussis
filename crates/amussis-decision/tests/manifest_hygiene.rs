@@ -88,6 +88,10 @@ fn a_prefixed_md5_name_is_not_a_hit() -> Result<(), String> {
 }
 
 /// The crate manifest declares no MD5 dependency and no unexpected one.
+///
+/// `serde` and `serde_json` are reviewed dependencies: the proposal schema
+/// and the encoding rules read and write JSON whatever schemas an adapter
+/// declares, so both stay after the operating system's schemas left.
 #[test]
 fn the_crate_manifest_declares_only_the_reviewed_dependencies() {
     let manifest = read("crates/amussis-decision/Cargo.toml").unwrap_or_default();
@@ -98,12 +102,20 @@ fn the_crate_manifest_declares_only_the_reviewed_dependencies() {
         !manifest.contains("[[bin]]"),
         "milestone M02 ships a library only"
     );
-    for expected in ["sha2", "base16ct", "thiserror"] {
+    for expected in ["sha2", "base16ct", "thiserror", "serde", "serde_json"] {
         assert!(
-            manifest.contains(expected),
+            manifest.contains(&format!("\n{expected}.workspace = true")),
             "the manifest must declare {expected}"
         );
     }
+    let declared = manifest
+        .split("[dependencies]")
+        .nth(1)
+        .and_then(|rest| rest.split("\n[").next())
+        .map_or(0, |table| {
+            table.lines().filter(|line| line.contains('=')).count()
+        });
+    assert_eq!(declared, 5, "a sixth dependency needs a review first");
     for deferred in ["tokio", "dbus", "zbus", "tss-esapi", "aya", "libbpf"] {
         assert!(
             !manifest.contains(deferred),

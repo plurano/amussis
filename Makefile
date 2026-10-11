@@ -10,7 +10,7 @@ WASM_TARGET := wasm32-unknown-unknown
 # The Go steps use the installed Go, change no go.mod and build without cgo.
 GO_LOCAL := GOTOOLCHAIN=local GOFLAGS=-mod=readonly CGO_ENABLED=0
 
-.PHONY: verify verify-settings verify-exceptions verify-rust verify-wasm verify-go verify-reuse fetch
+.PHONY: verify verify-settings verify-exceptions verify-origin verify-rust verify-wasm verify-go verify-reuse fetch
 
 # The one gate is `make verify-all`: CI runs exactly that target, so a local
 # green run and a green status check mean the same thing. Its recipe, at the
@@ -19,8 +19,8 @@ GO_LOCAL := GOTOOLCHAIN=local GOFLAGS=-mod=readonly CGO_ENABLED=0
 verify-all: verify
 
 # This workspace's own checks; they need no engine.
-verify: verify-settings verify-exceptions verify-rust verify-wasm verify-go verify-reuse
-	@printf '%s\n' 'PASS: settings, exceptions, crate gate, module, Go binding and licence headers.'
+verify: verify-settings verify-exceptions verify-origin verify-rust verify-wasm verify-go verify-reuse
+	@printf '%s\n' 'PASS: settings, exceptions, origin names, crate gate, module, Go binding and licence headers.'
 
 # The shared toolchain and lint settings equal the record in
 # settings-source.json; the selftest plants one defect per setting first, so a
@@ -34,6 +34,14 @@ verify-settings:
 verify-exceptions:
 	python3 -B tools/exceptions_check.py selftest
 	python3 -B tools/exceptions_check.py check
+
+# The names of the system this library was cut from (its component numbers and
+# its `aegis.` schema tags) stand in the sources only where the crate says where
+# it came from. That system's adapter holds its schemas; a name that comes back
+# here fails.
+verify-origin:
+	python3 -B tools/origin_names.py selftest
+	python3 -B tools/origin_names.py check
 
 # The only step that reaches a third-party host: the crates.io registry and
 # the Go module proxy. It downloads every platform's locked crates, which the

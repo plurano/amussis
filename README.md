@@ -50,6 +50,8 @@ kill switch) that moves here from the operating-system repository.
 | `exceptions.toml`, `tools/exceptions_check.py` | The workspace's exceptions to its own rules, each with one rule, one file, a reason and an end date, and the check that holds every entry to what it names. |
 | `tools/wasm_module.py` | Builds the WebAssembly module and compares it byte for byte with the one `bindings/go` embeds. |
 | `tools/settings_sync.py` | Holds the shared toolchain and lint settings to their recorded source. |
+| `tools/origin_names.py` | Counts the operating system's component numbers and `aegis.` schema tags in the crates' sources. They may stand only in the line that says where the crate came from. |
+| `docs/handover/` | What left this repository for the operating-system repository, each with paths, hashes and the steps to switch: the service unit, and the conversation schemas with the subsystem graph. |
 | `tools/apicompat/`, `.github/workflows/praetor-api.yml` | Written by the Praetor engine: on a pull request, compares the exported API of the Go module with the base commit. |
 | `settings-source.json` | The record: source repository, commit, file hashes and manifest settings. |
 | `LICENSES/`, `REUSE.toml` | Licence text and the annotations for files that cannot carry a header. |

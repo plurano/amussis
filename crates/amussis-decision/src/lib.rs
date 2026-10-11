@@ -4,8 +4,8 @@
 //! `amussis-decision`: the decision engine.
 //!
 //! It was cut from the Aegis OS repository, where it is component P06
-//! Justitia; the P-numbers and component names in this documentation are
-//! that system's.
+//! Justitia. That system's schemas and component names are not part of this
+//! library; its adapter holds them.
 //!
 //! The crate carries the risk-tier, maker-checker, Annex III, timeout and
 //! killswitch logic as library code. Every rule is reachable through the public
@@ -63,8 +63,8 @@
 //! crate and fails if the retained total passes the
 //! [`MAX_RETAINED_AUDIT_BYTES`] budget; the figures in that failure message are
 //! the authority, not this paragraph. The point the bounds exist to make is the
-//! order of magnitude: a hardened unit reserves single-digit mebibytes for P06,
-//! not the gibibytes a `1 << 20` record bound would have demanded.
+//! order of magnitude: a hardened unit reserves single-digit mebibytes for the
+//! engine, not the gibibytes a `1 << 20` record bound would have demanded.
 //!
 //! # Total inventory of `unwrap_or` in the library
 //!
@@ -86,44 +86,33 @@
 //! of its own validated prefix. The last two convert a non-zero constant into a
 //! non-zero-typed value, where the only alternative would be `expect`.
 //!
-//! # The library's input, and the operating system's schemas
+//! # The library's input, and a system's own schemas
 //!
 //! [`proposal`] is the library's own text input: one proposed action as a JSON
 //! object tagged [`PROPOSAL_SCHEMA`], holding exactly the fields of an
 //! [`IntentSpec`]. Every consumer that does not link Rust uses it, the
 //! WebAssembly binding included.
 //!
-//! The schemas in [`contracts`], tagged `aegis.*`, are not the library's. They
-//! are the Aegis operating system's conversation schemas, with its subsystem
-//! graph and edge names; its adapter owns them and maps a checked proposal to
-//! [`Proposal`]. They are still in this crate only until that adapter has taken
-//! them over.
+//! A system that puts an envelope around a proposal, or that exports an audit
+//! record in a form of its own, declares that schema in its own adapter crate
+//! and maps a checked proposal to [`Proposal`]. The library declares no such
+//! schema. [`encoding`] holds the rules one is built from: the bounded payload
+//! buffer, hexadecimal byte fields, the seal's field form, the version check
+//! and the typed refusal. See [`encoding`] for what that does and does not say
+//! about heap: an escape-free payload is decoded without one, an admissible
+//! JSON escape costs the decoder a bounded scratch copy, and the decoded value
+//! owns nothing either way.
 //!
-//! # What milestone M14 added, and what it deliberately did not
-//!
-//! [`contracts`] holds the three versioned consumer schemas P06 speaks over --
-//! the action proposal from P09 Minerva, the decision request to P05 Forum and
-//! the signed audit record to P16 Athena. The reviewed service-unit contract
-//! that used to sit next to them describes how the operating system runs the
-//! engine, so it stays with that system and is not part of this library.
-//! Every schema is a typed Rust struct with an explicit
-//! contract version, a stable field encoding and a decoder that lands every
-//! field in a fixed inline buffer. See [`contracts`] for what that does and
-//! does not say about heap: an escape-free payload is decoded without one, an
-//! admissible JSON escape costs the decoder a bounded scratch copy, and the
-//! decoded value owns nothing either way.
-//!
-//! **No transport is implemented anywhere in this crate.** There is no D-Bus
-//! connection, no socket, no eBPF program and no TPM2 signing: a signature
-//! field is a field encoding, not a signer. eBPF compilation and verifier load
-//! are M19 and M10, TPM2 sealing is M20, the Forum consumer is M16, and a
-//! file-backed ledger sink is still absent.
+//! **No transport is implemented anywhere in this crate.** There is no socket
+//! and no signing: a signature field is a field encoding, not a signer. A
+//! file-backed ledger sink is absent too; the store behind the sink is the
+//! caller's.
 
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
-pub mod contracts;
 pub mod effects;
+pub mod encoding;
 pub mod engine;
 pub mod error;
 pub mod identity;
@@ -188,22 +177,13 @@ pub const DEFAULT_APPROVAL_TTL_SECS: u32 = 300;
 /// rather than allowed to block past its own deadline.
 pub const DEFAULT_SINK_SERVICE_MILLIS: u32 = 1;
 
-pub use crate::contracts::audit::{AuditRecordVersion, PLD_EFFECTIVE_AT, SignedAuditRecord};
-pub use crate::contracts::decision_request::{
-    DecisionRequest, DecisionRequestVersion, MAX_DECISION_WINDOW_SECS, MIN_DECISION_WINDOW_SECS,
-};
-pub use crate::contracts::encoding::{
+pub use crate::encoding::fields::{
     DIGEST_HEX_CHARS, MAX_SIGNATURE_HEX_CHARS, OversightSignature, SignatureAlgorithm,
     SignatureBytes,
 };
-pub use crate::contracts::graph::{
-    D03_ACTION_GATE, D03_ACTION_GATE_DIRECTION, D03_ACTION_GATE_TRANSPORT, D04_SANDBOX_GATE,
-    DecisionRecord, DecisionState, EdgeId, GateDirection, MAX_ADMISSION_HOPS, SandboxAdmissionPath,
-    contract_edges,
-};
-pub use crate::contracts::proposal::{ActionProposal, ActionProposalVersion};
-pub use crate::contracts::{
-    ContractError, Correlation, MAX_CONTRACT_PAYLOAD_BYTES, PayloadBuffer, SchemaId,
+pub use crate::encoding::{
+    ContractError, Correlation, MAX_CONTRACT_PAYLOAD_BYTES, PayloadBuffer, SchemaTag, decode_text,
+    encode_into,
 };
 pub use crate::engine::{DecisionEngine, EngineConfig};
 pub use crate::error::DecisionError;

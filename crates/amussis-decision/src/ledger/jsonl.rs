@@ -3,11 +3,11 @@
 
 //! Optional JSON Lines rendering, behind the `jsonl` feature.
 //!
-//! The renderer is off by default so the default build carries three direct
-//! dependencies and the P06 to P16 record schema is not frozen before M14 pins
-//! it. It is deliberately not on the hashing path: the chain digest is taken
-//! over the crate's own canonical encoding, so a serialisation-library release
-//! can never alter a historical ledger digest.
+//! The renderer is off by default because a line is a local operator
+//! convenience, not a schema a consumer may rely on. It is deliberately not on
+//! the hashing path: the chain digest is taken over the crate's own canonical
+//! encoding, so a serialisation-library release can never alter a historical
+//! ledger digest.
 
 use crate::ledger::AuditRecord;
 use crate::ledger::RecordStatus;

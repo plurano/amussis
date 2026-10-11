@@ -15,14 +15,13 @@
 #![allow(dead_code)]
 
 use amussis_decision::{
-    ActionIntent, ActionProposal, ActionProposalVersion, ActionType, AgentId, AuditRecord,
-    AuditRecordVersion, ChainAnchor, ClockError, DIGEST_LEN, DecisionEngine, DecisionError,
-    DecisionRequest, DecisionRequestVersion, Digest32, EngineConfig, EventId, FixedClock,
-    HashAlgorithm, Identity, InMemorySink, IntentId, IntentSpec, IoDeadline, MAX_SIGNATURE_BYTES,
-    MakerId, OversightClass, OversightSignature, PayloadBuffer, RecordSigner, RecordStatus,
-    RequestId, RequiredApproval, RiskTier, Sequence, Sha256Hasher, SignError, Signature,
-    SignatureAlgorithm, SignedAuditRecord, SignerBinding, SignerKeyId, TargetResource, Ttl,
-    UnixSeconds,
+    ActionIntent, ActionType, AgentId, AuditRecord, BlockReason, ChainAnchor, ClockError,
+    ContractError, Correlation, DIGEST_LEN, DecisionEngine, DecisionError, Digest32, EngineConfig,
+    EventId, FixedClock, HashAlgorithm, Identity, InMemorySink, IntentId, IntentSpec, IoDeadline,
+    MAX_SIGNATURE_BYTES, MakerId, OversightClass, OversightSignature, PayloadBuffer, RecordSigner,
+    RecordStatus, RequestId, RequiredApproval, RiskTier, SchemaTag, Sequence, Sha256Hasher,
+    SignError, Signature, SignatureAlgorithm, SignerBinding, SignerKeyId, TargetResource, Ttl,
+    UnixSeconds, decode_text, encode_into,
 };
 
 /// Anything that can go wrong building or reading a fixture.
@@ -275,11 +274,12 @@ pub fn intent(
     Ok(ActionIntent::new(spec)?)
 }
 
-// --- Milestone M14 consumer-contract fixtures -----------------------------
+// --- Fixtures for the encoding rules ---------------------------------------
 
 /// A non-empty seal, produced through the library's own signer rather than
 /// assembled from bytes, so the wire form under test is one the crate can
-/// actually emit. Nothing here is a TPM2 signature: M14 implements no signing.
+/// actually emit. Nothing here is a TPM2 signature: the library ships no
+/// signer.
 ///
 /// # Errors
 ///
@@ -293,96 +293,108 @@ pub fn seal() -> Fallible<OversightSignature> {
     ))
 }
 
-/// The correlation identifier every contract fixture threads through.
+/// The correlation identifier every envelope fixture carries.
 pub const CORRELATION: &str = "intent-0001";
 
-/// A well-formed, signed action proposal from P09 Minerva.
+/// The version tag of the fixture schema.
+///
+/// The library declares no schema of this kind; an adapter does. The fixture
+/// plays that adapter with a schema of no real system, so that the encoding
+/// rules are exercised the way an adapter uses them: through the public API.
+pub const ENVELOPE: SchemaTag = SchemaTag::new("example.envelope.v1");
+
+/// The versions of the fixture schema: the one tagged [`ENVELOPE`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum EnvelopeVersion {
+    /// Version 1.
+    #[serde(rename = "example.envelope.v1")]
+    V1,
+}
+
+/// The fixture schema: one field of every type the library gives a wire form.
+///
+/// It is built the way the module documentation of `encoding` describes a
+/// schema: the version first, the correlation identifier under its fixed key,
+/// kebab-case keys, unknown keys refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct Envelope {
+    /// The schema version.
+    pub schema: EnvelopeVersion,
+    /// The identifier a refusal is correlated by.
+    pub correlation_id: Identity,
+    /// A request identifier.
+    pub request_id: RequestId,
+    /// An event identifier.
+    pub event_id: EventId,
+    /// An agent identifier.
+    pub agent_id: AgentId,
+    /// A maker identifier.
+    pub maker: MakerId,
+    /// An action type.
+    pub action_type: ActionType,
+    /// A target resource.
+    pub target: TargetResource,
+    /// A risk tier.
+    pub risk_tier: RiskTier,
+    /// An oversight class.
+    pub oversight: OversightClass,
+    /// A required approval.
+    pub required_approval: RequiredApproval,
+    /// A chain position.
+    pub sequence: Sequence,
+    /// A hash algorithm.
+    pub algorithm: HashAlgorithm,
+    /// A digest.
+    pub previous: Digest32,
+    /// A record status.
+    pub status: RecordStatus,
+    /// A refusal reason, when there is one.
+    pub block_reason: Option<BlockReason>,
+    /// A point in time.
+    pub recorded_at: UnixSeconds,
+    /// A seal, when there is one.
+    pub signature: Option<OversightSignature>,
+}
+
+/// A well-formed, sealed envelope.
 ///
 /// # Errors
 ///
 /// Propagates a fixture construction failure.
-pub fn proposal() -> Fallible<ActionProposal> {
-    Ok(ActionProposal {
-        schema: ActionProposalVersion::V1,
-        edge: ActionProposal::EDGE,
-        direction: ActionProposal::DIRECTION,
+pub fn envelope() -> Fallible<Envelope> {
+    Ok(Envelope {
+        schema: EnvelopeVersion::V1,
         correlation_id: Identity::parse(CORRELATION)?,
+        request_id: RequestId::parse("request-0001")?,
+        event_id: EventId::parse("event-0001")?,
         agent_id: AgentId::parse("agent-01")?,
         maker: MakerId::parse("maker-alice")?,
         action_type: ActionType::FileDeletion,
-        target: TargetResource::parse("/var/lib/aegis/example")?,
-        declared_tier: RiskTier::TierAConsequential,
+        target: TargetResource::parse("/var/lib/example/file")?,
+        risk_tier: RiskTier::TierAConsequential,
         oversight: OversightClass::Standard,
-        payload_hash: Digest32::from_bytes([3u8; DIGEST_LEN]),
-        proposed_at: UnixSeconds::new(1_000),
+        required_approval: RequiredApproval::SingleChecker,
+        sequence: Sequence::new(1),
+        algorithm: HashAlgorithm::Sha256,
+        previous: Digest32::GENESIS,
+        status: RecordStatus::Approved,
+        block_reason: None,
+        recorded_at: UnixSeconds::new(1_000),
         signature: Some(seal()?),
     })
 }
 
-/// A well-formed decision request for P05 Forum, with a `window` second window.
-///
-/// # Errors
-///
-/// Propagates a fixture construction failure.
-pub fn decision_request(
-    tier: RiskTier,
-    class: OversightClass,
-    window: u64,
-) -> Fallible<DecisionRequest> {
-    let created = 1_000u64;
-    Ok(DecisionRequest {
-        schema: DecisionRequestVersion::V1,
-        edge: DecisionRequest::EDGE,
-        correlation_id: Identity::parse(CORRELATION)?,
-        request_id: RequestId::parse("request-0001")?,
-        agent_id: AgentId::parse("agent-01")?,
-        maker: MakerId::parse("maker-alice")?,
-        proposed_action: ActionType::FileDeletion,
-        target: TargetResource::parse("/var/lib/aegis/example")?,
-        risk_tier: tier,
-        oversight: class,
-        required_approval: RequiredApproval::for_action(tier, class),
-        created_at: UnixSeconds::new(created),
-        due_at: UnixSeconds::new(created.saturating_add(window)),
-    })
+/// The correlation an envelope's refusals carry.
+#[must_use]
+pub fn correlation(value: &Envelope) -> Correlation {
+    Correlation::new(ENVELOPE, Some(value.correlation_id))
 }
 
-/// A well-formed signed audit record for P16 Athena at `sequence`.
+/// Renders a value as one JSON payload, without the byte bound.
 ///
-/// The predecessor link follows the genesis rule: all zero at the head of the
-/// chain, and a real digest anywhere else.
-///
-/// # Errors
-///
-/// Propagates a fixture construction failure.
-pub fn audit_record(sequence: u64) -> Fallible<SignedAuditRecord> {
-    let previous = if sequence == 1 {
-        Digest32::GENESIS
-    } else {
-        Digest32::from_bytes([9u8; DIGEST_LEN])
-    };
-    Ok(SignedAuditRecord {
-        schema: AuditRecordVersion::V1,
-        edge: SignedAuditRecord::EDGE,
-        correlation_id: Identity::parse(CORRELATION)?,
-        event_id: EventId::parse("event-0001")?,
-        sequence: Sequence::new(sequence),
-        algorithm: HashAlgorithm::Sha256,
-        previous,
-        digest: Digest32::from_bytes([5u8; DIGEST_LEN]),
-        action_type: ActionType::FileDeletion,
-        status: RecordStatus::Approved,
-        block_reason: None,
-        actor_id: AgentId::parse("agent-01")?,
-        recorded_at: UnixSeconds::new(1_000),
-        oversight_signature: Some(seal()?),
-    })
-}
-
-/// Renders a value as one JSON payload, without the contract validation.
-///
-/// Negative tests need payloads the encoders refuse to produce, so they build
-/// the text here and hand it to the decoder under test.
+/// Negative tests need payloads the bounded encoder refuses to produce, so
+/// they build the text here and hand it to the decoder under test.
 ///
 /// # Errors
 ///
@@ -391,57 +403,23 @@ pub fn render<T: serde::Serialize>(value: &T) -> Fallible<String> {
     Ok(serde_json::to_string(value)?)
 }
 
-/// Encodes a valid payload through the contract's own bounded encoder.
+/// Encodes an envelope through the library's own bounded encoder.
 ///
 /// # Errors
 ///
-/// Propagates the contract refusal.
-pub fn encoded<T>(value: &T) -> Fallible<String>
-where
-    T: Encodable,
-{
+/// Propagates the library's refusal.
+pub fn encoded(value: &Envelope) -> Fallible<String> {
     let mut buffer = PayloadBuffer::new();
-    Ok(value.encode(&mut buffer)?.to_owned())
+    Ok(encode_into(value, correlation(value), &mut buffer)?.to_owned())
 }
 
-/// The three contract payloads, behind one fixture-side encoding call.
-pub trait Encodable {
-    /// Encodes this payload into `buffer`.
-    ///
-    /// # Errors
-    ///
-    /// Propagates the contract refusal.
-    fn encode<'b>(
-        &self,
-        buffer: &'b mut PayloadBuffer,
-    ) -> Result<&'b str, amussis_decision::ContractError>;
-}
-
-impl Encodable for ActionProposal {
-    fn encode<'b>(
-        &self,
-        buffer: &'b mut PayloadBuffer,
-    ) -> Result<&'b str, amussis_decision::ContractError> {
-        self.encode_into(buffer)
-    }
-}
-
-impl Encodable for DecisionRequest {
-    fn encode<'b>(
-        &self,
-        buffer: &'b mut PayloadBuffer,
-    ) -> Result<&'b str, amussis_decision::ContractError> {
-        self.encode_into(buffer)
-    }
-}
-
-impl Encodable for SignedAuditRecord {
-    fn encode<'b>(
-        &self,
-        buffer: &'b mut PayloadBuffer,
-    ) -> Result<&'b str, amussis_decision::ContractError> {
-        self.encode_into(buffer)
-    }
+/// Decodes an envelope through the library's own bounded decoder.
+///
+/// # Errors
+///
+/// Returns the library's refusal unchanged, so a test can compare it.
+pub fn decoded(text: &str) -> Result<Envelope, ContractError> {
+    decode_text(ENVELOPE, text)
 }
 
 /// Parses a rendered payload, edits it, and renders it again.

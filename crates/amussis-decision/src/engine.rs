@@ -173,7 +173,7 @@ impl Default for EngineConfig {
     }
 }
 
-/// The P06 decision engine.
+/// The decision engine.
 #[derive(Debug, Clone)]
 pub struct DecisionEngine<H: LedgerHasher, S: RecordSigner, K: LedgerSink, C: Clock> {
     config: EngineConfig,

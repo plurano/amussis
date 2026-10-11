@@ -167,7 +167,7 @@ role_id!(
 );
 role_id!(
     EventId,
-    "Stable identifier of one audit event handed to P16 Athena."
+    "Stable identifier of one audit event handed to an audit consumer."
 );
 
 impl MakerId {

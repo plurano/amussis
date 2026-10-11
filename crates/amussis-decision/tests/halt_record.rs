@@ -749,3 +749,22 @@ fn levels_are_tagged() {
     assert_eq!(RiskLevel::from_tag(0), None, "zero is no level");
     assert_eq!(RiskLevel::from_tag(7), None);
 }
+
+/// Boundary: the two records of the latch itself are told apart from every
+/// record that decides an action, the refusal under a halt included. A schema
+/// that carries decisions only refuses a latch record by this answer.
+#[test]
+fn only_the_two_latch_records_are_of_the_latch() {
+    for of_latch in [RecordStatus::HaltEngaged, RecordStatus::HaltReleased] {
+        assert!(of_latch.is_of_latch(), "{of_latch:?}");
+    }
+    for decides in [
+        RecordStatus::PendingApproval,
+        RecordStatus::Approved,
+        RecordStatus::Rejected,
+        RecordStatus::Blocked,
+        RecordStatus::Halted,
+    ] {
+        assert!(!decides.is_of_latch(), "{decides:?}");
+    }
+}

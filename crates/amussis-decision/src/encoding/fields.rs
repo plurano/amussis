@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Lusoris <lusoris@pm.me>
 // SPDX-License-Identifier: EUPL-1.2
 
-//! The field encoding every M14 consumer schema shares.
+//! The field encoding every schema shares.
 //!
 //! One file holds every hand-written `Serialize`/`Deserialize` pair, so the
 //! wire form of a bounded value can be reviewed in one place rather than
@@ -13,12 +13,12 @@
 //!   the decoder rather than accepted and checked later.
 //! * **Every value lands in a fixed inline buffer.** Nothing in this file owns
 //!   heap: each validated value is copied into an inline array, which is why
-//!   all three schema types are `Copy`. What this does not claim is that
+//!   a schema built from these fields is `Copy`. What this does not claim is that
 //!   decoding is allocation-free in every case. `serde_json` unescapes a JSON
 //!   string into a heap scratch buffer before any visitor here sees it, so an
 //!   escaped field costs a transient copy bounded by
-//!   [`super::MAX_CONTRACT_PAYLOAD_BYTES`]; see the `contracts` module
-//!   documentation and `tests/allocation_bounds.rs`.
+//!   [`super::MAX_CONTRACT_PAYLOAD_BYTES`]; see the documentation of
+//!   [`super`] and `tests/allocation_bounds.rs`.
 //! * **The encoding is stable and explicit.** Bytes travel as lower-case
 //!   hexadecimal, never as a byte array, and every enum names its variants
 //!   explicitly, so a field reordering or a renamed variant is a visible
@@ -215,11 +215,9 @@ impl<'de> serde::Deserialize<'de> for SignatureBytes {
 
 /// The signature scheme a seal declares.
 ///
-/// One variant, naming the scheme the P06 report declares for audit records
-/// (export-015 `fcbe2caed363`: a TPM2 RSA-PSS signature). Milestone M14
-/// implements no signing at all: this is the field encoding a future signer
-/// will fill, and nothing in this crate produces or verifies a signature. TPM2
-/// sealing is milestone M20 work.
+/// One variant: an RSA-PSS signature made with a key held in a TPM2 device.
+/// The crate implements no signing at all: this is the field encoding a signer
+/// fills, and nothing in this crate produces or verifies a signature.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum SignatureAlgorithm {
@@ -238,7 +236,7 @@ impl SignatureAlgorithm {
     }
 }
 
-/// A detached seal as it travels on a contract payload.
+/// A detached seal as it travels on a payload.
 ///
 /// The key that produced the signature travels with it, because a consumer
 /// that cannot name the key cannot check the signature later.

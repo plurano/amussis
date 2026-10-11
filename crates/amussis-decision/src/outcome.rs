@@ -15,8 +15,8 @@
 //!
 //! * [`InterceptorOutcome::RequireApproval`] is the requirement's `Escalate`,
 //!   renamed for what it does to the action (it is held, not forwarded) and
-//!   carrying an [`ApprovalTicket`] in place of the unpinned `DecisionRequest`
-//!   schema, which M14 versions.
+//!   carrying an [`ApprovalTicket`] in place of a `DecisionRequest` schema,
+//!   which this library does not declare.
 //! * [`InterceptorOutcome::Warn`] splits the requirement's `Allow`. The
 //!   requirements also mandate a Tier B monitored notice; folding that into
 //!   `Allow` would leave the notice untyped, so the only way a caller could

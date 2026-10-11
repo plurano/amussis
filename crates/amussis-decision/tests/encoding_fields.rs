@@ -1,21 +1,21 @@
 // SPDX-FileCopyrightText: 2026 Lusoris <lusoris@pm.me>
 // SPDX-License-Identifier: EUPL-1.2
 
-//! The field encoding the three consumer schemas share.
+//! The field encoding every schema shares.
 //!
-//! Bytes travel as lower-case hexadecimal and nothing else, the bounded inline
-//! types refuse an over-long field during decoding rather than after it, and
-//! every refusal names the contract it belongs to.
+//! Bytes travel as lower-case hexadecimal and nothing else, and the bounded
+//! inline types refuse an over-long field during decoding rather than after
+//! it. The payload rules built on these fields are in `encoding_payload.rs`.
 
 mod common;
 
 use amussis_decision::{
-    Correlation, DIGEST_HEX_CHARS, DIGEST_LEN, Digest32, EdgeId, Identity, MAX_SIGNATURE_HEX_CHARS,
-    OversightSignature, PayloadBuffer, RecordSigner, SchemaId, SignatureAlgorithm, SignatureBytes,
-    SignerKeyId,
+    DIGEST_HEX_CHARS, DIGEST_LEN, Digest32, Identity, MAX_SIGNATURE_HEX_CHARS, MAX_TARGET_LEN,
+    OversightSignature, RecordSigner, SignatureAlgorithm, SignatureBytes, SignerKeyId,
+    TargetResource,
 };
 
-use common::{CORRELATION, Fallible, FixtureSigner, seal};
+use common::{Fallible, FixtureSigner, seal};
 
 // --- Positive -------------------------------------------------------------
 
@@ -56,31 +56,6 @@ fn a_digest_travels_as_lower_case_hexadecimal() -> Fallible<()> {
     Ok(())
 }
 
-/// Positive: a refusal names the contract it belongs to and the payload it
-/// came from, and says so when it cannot.
-#[test]
-fn a_correlation_names_its_contract_and_payload() -> Fallible<()> {
-    let identified = Correlation::new(
-        SchemaId::ActionProposal,
-        Some(Identity::parse(CORRELATION)?),
-    );
-    assert_eq!(identified.schema(), SchemaId::ActionProposal);
-    assert_eq!(identified.id(), Some(Identity::parse(CORRELATION)?));
-    assert_eq!(
-        identified.to_string(),
-        format!("{} [{CORRELATION}]", SchemaId::ActionProposal.tag())
-    );
-
-    let anonymous = Correlation::new(SchemaId::SignedAuditRecord, None);
-    assert_eq!(anonymous.id(), None);
-    assert!(anonymous.to_string().ends_with("[uncorrelated]"));
-    assert_eq!(
-        anonymous.schema().edge(),
-        EdgeId::AuditReconstructiveCandidate
-    );
-    Ok(())
-}
-
 // --- Negative -------------------------------------------------------------
 
 /// Negative: upper-case hexadecimal, a truncated digest and a non-string are
@@ -102,18 +77,38 @@ fn an_identifier_outside_the_charset_is_refused() {
     assert!(serde_json::from_str::<SignerKeyId>("\"fixture-key\"").is_ok());
 }
 
-/// Negative: an empty buffer yields an empty payload rather than stale bytes.
+/// Negative: a seal with a key it does not name, an algorithm the library does
+/// not know or a key the schema does not have is refused.
 #[test]
-fn an_untouched_payload_buffer_holds_nothing() {
-    let buffer = PayloadBuffer::default();
-    assert!(buffer.is_empty());
-    assert_eq!(buffer.len(), 0);
-    assert_eq!(buffer.as_bytes(), b"");
-    assert_eq!(buffer.as_str(), Some(""));
-    assert_eq!(PayloadBuffer::new().len(), buffer.len());
+fn a_seal_with_a_missing_or_unknown_part_is_refused() -> Fallible<()> {
+    let text = serde_json::to_string(&seal()?)?;
+    assert!(serde_json::from_str::<OversightSignature>(&text).is_ok());
+    let other_scheme = text.replace("tpm2-rsa-pss", "ed25519");
+    assert_ne!(other_scheme, text);
+    assert!(serde_json::from_str::<OversightSignature>(&other_scheme).is_err());
+    let no_key = text.replace("\"key-id\":\"fixture-key\",", "");
+    assert_ne!(no_key, text);
+    assert!(serde_json::from_str::<OversightSignature>(&no_key).is_err());
+    let extra = text.replacen('{', "{\"note\":1,", 1);
+    assert!(serde_json::from_str::<OversightSignature>(&extra).is_err());
+    Ok(())
 }
 
 // --- Boundary -------------------------------------------------------------
+
+/// Boundary: a target resource of exactly the admitted width round-trips, and
+/// one byte more is refused during decoding.
+#[test]
+fn a_target_resource_sits_exactly_on_its_bound() -> Fallible<()> {
+    let widest = format!("\"{}\"", "/".repeat(MAX_TARGET_LEN));
+    let decoded: TargetResource = serde_json::from_str(&widest)?;
+    assert_eq!(decoded.len(), MAX_TARGET_LEN);
+    assert_eq!(serde_json::to_string(&decoded)?, widest);
+    let over = format!("\"{}\"", "/".repeat(MAX_TARGET_LEN.saturating_add(1)));
+    assert!(serde_json::from_str::<TargetResource>(&over).is_err());
+    assert!(serde_json::from_str::<TargetResource>("\"\"").is_err());
+    Ok(())
+}
 
 /// Boundary: a signature of exactly the admitted width round-trips, and one
 /// byte more is refused.
