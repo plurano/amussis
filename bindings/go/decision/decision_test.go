@@ -78,13 +78,25 @@ func inBothModes(t *testing.T, test func(t *testing.T, mode Mode)) {
 	}
 }
 
+// closeAtEnd closes engine when the test ends and fails the test when Close
+// returns an error, so a broken Close cannot pass unseen. Cleanup runs after
+// t.Context() is cancelled, so Close takes a context of its own.
+func closeAtEnd(t *testing.T, engine *Engine) {
+	t.Helper()
+	t.Cleanup(func() {
+		if err := engine.Close(context.Background()); err != nil {
+			t.Errorf("Close: %v", err)
+		}
+	})
+}
+
 func engineFor(t *testing.T, w *world, mode Mode) *Engine {
 	t.Helper()
 	engine, err := New(t.Context(), w.config(mode))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	t.Cleanup(func() { _ = engine.Close(context.Background()) })
+	closeAtEnd(t, engine)
 	if engine.Mode() != mode {
 		t.Fatalf("the engine runs %v, asked for %v", engine.Mode(), mode)
 	}
