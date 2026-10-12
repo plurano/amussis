@@ -1,8 +1,8 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "description": [
-    "Copy of the family preset (plurano/shared-ci default.json), taken 2026-10-12. Replaced by \"extends\": [\"github>plurano/shared-ci\"] on the day that repository turns public.",
-    "Copy of the settings-sync preset (plurano/shared-ci settings-sync.json), taken 2026-10-12: rust-toolchain.toml is held to settings-source.json by the gate, so the bot does not propose it. Replaced by \"github>plurano/shared-ci:settings-sync\" on the same day."
+    "Copy of the family preset (plurano/horistes default.json; Horistes is Greek for the boundary commissioner who fixes limits, pronounced ho-RIS-tees), taken 2026-10-12. Replaced by \"extends\": [\"github>plurano/horistes\"] on the day that repository turns public.",
+    "Copy of the settings-sync preset (plurano/horistes settings-sync.json), taken 2026-10-12: rust-toolchain.toml is held to settings-source.json by the gate, so the bot does not propose it. Replaced by \"github>plurano/horistes:settings-sync\" on the same day."
   ],
   "extends": [
     "config:recommended",
