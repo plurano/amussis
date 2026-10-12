@@ -5,7 +5,6 @@ package decision
 
 import (
 	"bytes"
-	"context"
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
@@ -105,7 +104,7 @@ func continued(t *testing.T, w *world, mode Mode, from Continuation) *Engine {
 	if err != nil {
 		t.Fatalf("Continue: %v", err)
 	}
-	t.Cleanup(func() { _ = engine.Close(context.Background()) })
+	closeAtEnd(t, engine)
 	return engine
 }
 
@@ -550,7 +549,7 @@ func linked(t *testing.T, w *world, mode Mode) *Engine {
 	if err != nil {
 		t.Fatalf("link: %v", err)
 	}
-	t.Cleanup(func() { _ = engine.Close(context.Background()) })
+	closeAtEnd(t, engine)
 	if engine.inputAt, err = call(t.Context(), engine.instance.ExportedFunction(exportInput)); err != nil {
 		t.Fatalf("the input buffer: %v", err)
 	}

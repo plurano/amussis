@@ -163,7 +163,7 @@ func loadShape(t *testing.T, s shape, mode Mode) (*Engine, error) {
 	effects := &host{clock: w, signer: w, sink: w}
 	engine, err := load(t.Context(), w.config(mode), s.assemble(), effects.functions(), nil)
 	if engine != nil {
-		t.Cleanup(func() { _ = engine.Close(t.Context()) })
+		closeAtEnd(t, engine)
 	}
 	return engine, err
 }
