@@ -100,6 +100,7 @@ func rehashed(record Record, at int, value byte) Record {
 
 func continued(t *testing.T, w *world, mode Mode, from Continuation) *Engine {
 	t.Helper()
+	needCompiler(t, mode)
 	engine, err := Continue(t.Context(), w.config(mode), from)
 	if err != nil {
 		t.Fatalf("Continue: %v", err)
