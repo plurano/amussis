@@ -10,7 +10,10 @@
 #[path = "../../dependency_closure.rs"]
 mod dependency_closure;
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+
+use serde_json::Value;
 
 /// This crate's package name, the start of its closure (D78).
 const PACKAGE: &str = "amussis-decision";
@@ -158,6 +161,138 @@ fn the_toolchain_pin_is_an_exact_version() {
     }
     assert!(toolchain.contains("clippy"), "the pin must carry clippy");
     assert!(toolchain.contains("rustfmt"), "the pin must carry rustfmt");
+}
+
+/// A `rust-version`: major, minor and patch.
+type RustVersion = (u64, u64, u64);
+
+/// Parses `1.87` or `1.98.1` into comparable numbers.
+fn rust_version(text: &str) -> Option<RustVersion> {
+    let mut parts = text.split('.').map(str::parse::<u64>);
+    let major = parts.next()?.ok()?;
+    let minor = parts.next()?.ok()?;
+    let patch = parts.next().unwrap_or(Ok(0)).ok()?;
+    Some((major, minor, patch))
+}
+
+/// The value of the first line of `text` that reads `key = "..."`.
+fn quoted_value(text: &str, key: &str) -> Option<RustVersion> {
+    let prefix = format!("{key} = \"");
+    let line = text.lines().find(|line| line.starts_with(&prefix))?;
+    rust_version(line.strip_prefix(&prefix)?.strip_suffix('"')?)
+}
+
+/// The highest `rust_version` any package outside the workspace declares,
+/// with the packages that declare it.
+fn highest_declared(metadata: &Value) -> Result<(RustVersion, Vec<String>), String> {
+    let members: BTreeSet<&str> = metadata
+        .get("workspace_members")
+        .and_then(Value::as_array)
+        .ok_or("no members")?
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    let declared: Vec<(RustVersion, String)> = metadata
+        .get("packages")
+        .and_then(Value::as_array)
+        .ok_or("no packages")?
+        .iter()
+        .filter(|package| {
+            !members.contains(package.get("id").and_then(Value::as_str).unwrap_or(""))
+        })
+        .filter_map(|package| {
+            let version = rust_version(package.get("rust_version")?.as_str()?)?;
+            Some((version, package.get("name")?.as_str()?.to_owned()))
+        })
+        .collect();
+    let highest = declared
+        .iter()
+        .map(|(version, _)| *version)
+        .max()
+        .ok_or("none declared")?;
+    let names = declared
+        .into_iter()
+        .filter(|(version, _)| *version == highest)
+        .map(|(_, name)| name)
+        .collect();
+    Ok((highest, names))
+}
+
+/// The workspace `rust-version` is the pinned toolchain, the only Rust any
+/// job builds with, and no resolved package declares more than that pin.
+/// The settings source decided the same (Aegis-OS D111).
+fn judge_rust_version(
+    declared: RustVersion,
+    pin: RustVersion,
+    highest: RustVersion,
+) -> Result<(), String> {
+    if declared != pin {
+        return Err(format!("rust-version {declared:?} is not the pin {pin:?}"));
+    }
+    if highest > pin {
+        return Err(format!(
+            "the graph declares {highest:?}, above the pin {pin:?}"
+        ));
+    }
+    Ok(())
+}
+
+/// Positive: the workspace `rust-version` equals the `rust-toolchain.toml`
+/// pin, and the highest `rust-version` any resolved package declares, read
+/// from `cargo metadata`, is not above it. A declared minimum below the pin
+/// would claim a Rust that no job builds with.
+#[test]
+fn the_workspace_rust_version_is_the_pinned_toolchain() -> Result<(), String> {
+    let (highest, names) = highest_declared(&dependency_closure::metadata()?)?;
+    let manifest = read("Cargo.toml").unwrap_or_default();
+    let declared = quoted_value(&manifest, "rust-version").ok_or("no rust-version")?;
+    let toolchain = read("rust-toolchain.toml").unwrap_or_default();
+    let pin = quoted_value(&toolchain, "channel").ok_or("no channel")?;
+    judge_rust_version(declared, pin, highest).map_err(|error| format!("{error}; {names:?}"))
+}
+
+/// Negative: a `rust-version` one release below the pin is refused, and so
+/// is a resolved package that declares one release above it.
+#[test]
+fn a_rust_version_off_the_pin_is_refused() -> Result<(), String> {
+    let toolchain = read("rust-toolchain.toml").unwrap_or_default();
+    let pin = quoted_value(&toolchain, "channel").ok_or("no channel")?;
+    let (major, minor, patch) = pin;
+    let below = quoted_value(
+        &format!("rust-version = \"{major}.{}\"", minor.saturating_sub(1)),
+        "rust-version",
+    )
+    .ok_or("unparsed")?;
+    let error = judge_rust_version(below, pin, below)
+        .err()
+        .ok_or("a rust-version below the pin passed")?;
+    assert!(error.contains("is not the pin"), "{error}");
+    let above = (major, minor.saturating_add(1), patch);
+    let error = judge_rust_version(pin, pin, above)
+        .err()
+        .ok_or("a dependency above the pin passed")?;
+    assert!(error.contains("above the pin"), "{error}");
+    Ok(())
+}
+
+/// Boundary: a resolved package that declares exactly the pin is admitted,
+/// and one patch release above it is not; a version read without a patch
+/// release is the `.0` release.
+#[test]
+fn the_graph_may_reach_the_pin_and_no_further() -> Result<(), String> {
+    let toolchain = read("rust-toolchain.toml").unwrap_or_default();
+    let pin = quoted_value(&toolchain, "channel").ok_or("no channel")?;
+    let (major, minor, patch) = pin;
+    judge_rust_version(pin, pin, pin)?;
+    let error = judge_rust_version(pin, pin, (major, minor, patch.saturating_add(1)))
+        .err()
+        .ok_or("one patch release above the pin passed")?;
+    assert!(error.contains("above the pin"), "{error}");
+    assert_eq!(
+        quoted_value(&format!("channel = \"{major}.{minor}\""), "channel"),
+        Some((major, minor, 0))
+    );
+    Ok(())
 }
 
 /// The workspace activates exactly the crate directories that have a manifest.

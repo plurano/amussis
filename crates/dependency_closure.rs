@@ -324,14 +324,14 @@ pub fn plant(
         .and_then(Value::as_array_mut)
         .ok_or("the resolve is null")?;
     for node in nodes.iter_mut() {
-        if node.get("id").and_then(Value::as_str) == Some(start.as_str()) {
-            if let Some(deps) = node.get_mut("deps").and_then(Value::as_array_mut) {
-                deps.push(serde_json::json!({
-                    "name": name,
-                    "pkg": id,
-                    "dep_kinds": [{ "kind": kind, "target": null }],
-                }));
-            }
+        if node.get("id").and_then(Value::as_str) == Some(start.as_str())
+            && let Some(deps) = node.get_mut("deps").and_then(Value::as_array_mut)
+        {
+            deps.push(serde_json::json!({
+                "name": name,
+                "pkg": id,
+                "dep_kinds": [{ "kind": kind, "target": null }],
+            }));
         }
     }
     nodes.push(serde_json::json!({ "id": id, "deps": [] }));
