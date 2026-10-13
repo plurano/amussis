@@ -11,8 +11,12 @@ as parsed values (resolver, edition, rust-version and the lint tables).
 
     check                 local settings equal the record; no network, no checkout
     check --source DIR    additionally: the record equals a checkout of the source
+    changed --base B --head H
+                          print the settings files that B...H changes, one per
+                          line; CI checks the source only when one is printed
     update --source DIR   copy the files from DIR and rewrite the record
-    selftest              plant one defect per setting and require each to fail
+    selftest              plant one defect per setting and require each to fail;
+                          require `changed` to name a changed setting only
 
 Exit status: 0 in step, 1 a setting differs, 2 the check itself could not run.
 """
@@ -32,6 +36,7 @@ from pathlib import Path
 RECORD = "settings-source.json"
 MANIFEST = "Cargo.toml"
 COPIED_FILES = ("rust-toolchain.toml", "clippy.toml", "rustfmt.toml")
+SETTINGS_FILES = (*COPIED_FILES, MANIFEST, RECORD)
 GIT_DEADLINE_SECONDS = 30
 
 
@@ -104,20 +109,29 @@ def differences(root: Path, record: dict, label: str) -> list[str]:
     return found
 
 
-def source_commit(source: Path) -> str:
+def git(repo: Path, *args: str) -> str:
     try:
         done = subprocess.run(
-            ["git", "-C", str(source), "rev-parse", "HEAD"],
+            ["git", "-C", str(repo), *args],
             capture_output=True,
             text=True,
             timeout=GIT_DEADLINE_SECONDS,
             check=False,
         )
     except (OSError, subprocess.TimeoutExpired) as error:
-        raise CheckError(f"git could not read {source}: {error}") from error
+        raise CheckError(f"git could not read {repo}: {error}") from error
     if done.returncode != 0:
-        raise CheckError(f"{source} is not a git checkout: {done.stderr.strip()}")
-    return done.stdout.strip()
+        raise CheckError(f"git {' '.join(args)} in {repo} exited {done.returncode}: {done.stderr.strip()}")
+    return done.stdout
+
+
+def source_commit(source: Path) -> str:
+    return git(source, "rev-parse", "HEAD").strip()
+
+
+def changed(repo: Path, base: str, head: str) -> list[str]:
+    """The settings files head changes since it forked from base."""
+    return git(repo, "diff", "--name-only", f"{base}...{head}", "--", *SETTINGS_FILES).split()
 
 
 def check(root: Path, source: Path | None) -> list[str]:
@@ -142,7 +156,7 @@ def update(root: Path, source: Path) -> list[str]:
 def planted(root: Path, edit) -> Path:
     """A throwaway copy of the tracked settings with one edit applied."""
     copy = Path(tempfile.mkdtemp(prefix="settings-sync-"))
-    for name in (*COPIED_FILES, MANIFEST, RECORD):
+    for name in SETTINGS_FILES:
         shutil.copyfile(root / name, copy / name)
     edit(copy)
     return copy
@@ -171,6 +185,41 @@ PLANTS = {
 }
 
 
+def commit(repo: Path, name: str, text: str) -> str:
+    (repo / name).write_text(text, encoding="utf-8")
+    git(repo, "add", name)
+    git(repo, "-c", "user.name=Plant", "-c", "user.email=plant@example.invalid",
+        "-c", "commit.gpgsign=false", "commit", "--quiet", "--message", name)
+    return git(repo, "rev-parse", "HEAD").strip()
+
+
+def changed_selftest() -> list[str]:
+    """`changed` names a changed setting, nothing else, and fails on a bad revision."""
+    failures = []
+    with tempfile.TemporaryDirectory(prefix="settings-changed-") as scratch:
+        repo = Path(scratch)
+        git(repo, "init", "--quiet")
+        fork = commit(repo, "README.md", "base\n")
+        other = commit(repo, "README.md", "edited\n")
+        setting = commit(repo, "clippy.toml", "planted\n")
+        git(repo, "checkout", "--quiet", "--detach", fork)
+        unrelated = commit(repo, "notes.md", "a branch that changes no setting\n")
+        cases = {
+            "a changed setting": (other, setting, ["clippy.toml"]),
+            "no setting changed": (fork, other, []),
+            "a setting the base changed after the fork": (setting, unrelated, []),
+        }
+        for name, (base, head, expected) in cases.items():
+            if changed(repo, base, head) != expected:
+                failures.append(f"changed misread {name}: expected {expected}")
+        try:
+            changed(repo, "no-such-revision", unrelated)
+            failures.append("changed read an unknown revision as no change")
+        except CheckError:
+            pass
+    return failures
+
+
 def selftest(root: Path) -> list[str]:
     """Each plant must be refused, in the local and in the source position."""
     failures = [f"the unplanted tree is refused: {line}" for line in check(root, None)]
@@ -185,16 +234,23 @@ def selftest(root: Path) -> list[str]:
                 failures.append(f"source plant passed: {name}")
         finally:
             shutil.rmtree(copy, ignore_errors=True)
-    return failures
+    return failures + changed_selftest()
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("command", choices=("check", "update", "selftest"))
+    parser.add_argument("command", choices=("check", "changed", "update", "selftest"))
     parser.add_argument("--source", type=Path, help="checkout of the source repository")
+    parser.add_argument("--base", help="changed: the revision the range forks from")
+    parser.add_argument("--head", help="changed: the last revision of the range")
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parent.parent)
     args = parser.parse_args()
     try:
+        if args.command == "changed":
+            if not (args.base and args.head):
+                raise CheckError("changed needs --base and --head")
+            print("\n".join(changed(args.root, args.base, args.head)))
+            return 0
         if args.command == "selftest":
             found = selftest(args.root)
         elif args.command == "update":
@@ -211,7 +267,7 @@ def main() -> int:
     if found:
         return 1
     scope = "local and source" if args.source and args.command == "check" else "local"
-    detail = f"{len(PLANTS)} plants refused" if args.command == "selftest" else scope
+    detail = f"{len(PLANTS)} plants refused, 3 changed ranges and 1 bad revision held" if args.command == "selftest" else scope
     print(f"PASS: settings {args.command} ({detail})")
     return 0
 
