@@ -8,11 +8,13 @@ CARGO_DENY ?= cargo deny
 GITLEAKS ?= gitleaks
 
 GO_BINDING := bindings/go
+GO_CONSUMER := examples/go-consumer
 WASM_TARGET := wasm32-unknown-unknown
 # The Go steps use the installed Go, change no go.mod and build without cgo.
 GO_LOCAL := GOTOOLCHAIN=local GOFLAGS=-mod=readonly CGO_ENABLED=0
 
 .PHONY: verify verify-settings verify-exceptions verify-origin verify-rust verify-wasm verify-go
+.PHONY: verify-readme
 .PHONY: verify-notices verify-licences verify-reuse verify-secrets verify-signoff fetch
 .PHONY: verify-engine-plants verify-api-plant verify-hook-scripts
 
@@ -26,9 +28,9 @@ verify-all: verify verify-engine-plants
 
 # This workspace's own checks; they need no engine.
 verify: verify-settings verify-exceptions verify-origin verify-rust verify-wasm verify-go \
-		verify-notices verify-licences verify-reuse verify-secrets verify-signoff
+		verify-readme verify-notices verify-licences verify-reuse verify-secrets verify-signoff
 	@printf '%s\n' 'PASS: settings, exceptions, origin names, crate gate, module, Go binding,' \
-		'third-party notices, dependency licences, licence headers, secrets and sign-off check.'
+		'README Go blocks, third-party notices, dependency licences, licence headers, secrets and sign-off check.'
 
 # The shared toolchain and lint settings equal the record in
 # settings-source.json; the selftest plants one defect per setting first, so a
@@ -59,6 +61,7 @@ verify-origin:
 fetch:
 	cargo fetch --locked
 	cd $(GO_BINDING) && $(GO_LOCAL) go mod download
+	cd $(GO_CONSUMER) && $(GO_LOCAL) go mod download
 
 # The crate gate on the toolchain rust-toolchain.toml pins. The toolchain is
 # printed first so the log names the rustc that actually ran.
@@ -86,7 +89,9 @@ verify-wasm: fetch
 gofmt_clean = unformatted="$$(gofmt -l $(1))" && test -z "$$unformatted" \
 	|| { printf 'FAIL: gofmt: %s\n' "$$unformatted" >&2; exit 1; }
 
-# The Go binding, on the module verify-wasm has just held to the source.
+# The Go binding, on the module verify-wasm has just held to the source, and
+# the examples, a module outside the binding's that requires it as a
+# consumer does and runs the README's code.
 # -count=1 keeps a cached result from standing in for a run. The second gofmt
 # run is the planted case: an unformatted file written at run time into a
 # scratch directory has to be refused by name, so a gofmt that could not run
@@ -102,6 +107,16 @@ verify-go: fetch verify-wasm
 	@printf '%s\n' 'PASS: the planted unformatted file is refused.'
 	cd $(GO_BINDING) && $(GO_LOCAL) GOPROXY=off go vet ./...
 	cd $(GO_BINDING) && $(GO_LOCAL) GOPROXY=off go test -count=1 ./...
+	cd $(GO_CONSUMER) && $(call gofmt_clean,.)
+	cd $(GO_CONSUMER) && $(GO_LOCAL) GOPROXY=off go vet ./...
+	cd $(GO_CONSUMER) && $(GO_LOCAL) GOPROXY=off go test -count=1 ./...
+
+# Every Go block of the README stands line for line in the examples that
+# verify-go compiles and runs; the selftest plants one changed block per form
+# first.
+verify-readme:
+	python3 -B tools/readme_snippets.py selftest
+	python3 -B tools/readme_snippets.py check
 
 # The compiled module holds code of the crates it links and of the Rust
 # standard library. The notices beside it are generated from the lock file;
