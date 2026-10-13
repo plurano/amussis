@@ -201,6 +201,30 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: python3 -B tools/signoff_check.py check --base "$BASE_SHA" --head "$HEAD_SHA"
 
+      # The gate holds the settings to their record; this step also holds the
+      # record to the source repository's main branch whenever a pull request
+      # changes a settings file or the record, so such a change cannot merge
+      # out of step with the source. The weekly settings-drift workflow covers
+      # changes made in the source. A red run is cured by
+      # `tools/settings_sync.py update --source`. One platform is enough: the
+      # comparison reads files, not the platform.
+      - name: Settings equal the source when a pull request changes them
+        if: runner.os == 'Linux' && github.event_name == 'pull_request'
+        timeout-minutes: 5
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SOURCE_URL: https://github.com/cordanaLLM/Aegis-OS.git
+        run: |
+          touched="$(python3 -B tools/settings_sync.py changed --base "$BASE_SHA" --head "$HEAD_SHA")"
+          if [ -z "$touched" ]; then
+            echo "No settings file changed; the weekly settings-drift workflow holds them to the source."
+            exit 0
+          fi
+          printf 'Changed settings files:\n%s\n' "$touched"
+          timeout 120 git clone --quiet --depth 1 "$SOURCE_URL" "$RUNNER_TEMP/settings-source"
+          python3 -B tools/settings_sync.py check --source "$RUNNER_TEMP/settings-source"
+
       # The API compatibility gate of the Go API workflow has to refuse a
       # removed exported method. It builds the gate's checker from the Go
       # module proxy with the toolchain that workflow lets Go select, so it
