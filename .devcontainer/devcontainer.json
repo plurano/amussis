@@ -18,16 +18,17 @@
         "state": "source-bundle",
         "builderImage": "docker.io/library/golang@sha256:f92b6ef800e499660581efdabdf25d9d817a9d124eaf900924f0504e7e27e12d",
         "baseImage": "mcr.microsoft.com/devcontainers/base@sha256:91eff046d5c12318fc98e59258982b87ba896c467427ed8b5dab5a02107a5db7",
-        "sourceSHA256": "sha256:c55bd466e5b1e81c9d82fced2e507238928244d3a8fdb0f74fc1305ab858b8de",
-        "archiveSHA256": "sha256:e1179c61c817f1d7aec91a3c8658c94da535f4014faec27d06259813dddca227",
+        "sourceSHA256": "sha256:785da905c3f020a8a39130bf17d812ab19008587edf37221d4bf13ea55274800",
+        "archiveSHA256": "sha256:5d0c8066a7d9c5697fa7322dc73f3ecaabd7a587f2e30a566b0ea448d16ab7ba",
         "archiveParts": 6,
-        "dockerfileSHA256": "sha256:3d5fb390e3f0d75ed5fd4a270d9f5c0f9454ea60d9f026c1fe36d011325f03dd"
+        "dockerfileSHA256": "sha256:cc4bdf21d524a94a62620d6064fcb1d216f785c9ce5b27478b7e293c5b2cc41f"
       }
     },
     "vscode": {
       "extensions": [
         "GitHub.vscode-pull-request-github",
         "aquasecurity.trivy-vulnerability-scanner",
+        "davidanson.vscode-markdownlint",
         "eamodio.gitlens",
         "github.copilot",
         "golang.go",
