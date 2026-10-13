@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -33,12 +34,13 @@ type shapeImport struct {
 }
 
 // shapeFunction is an exported function that ignores its parameters and
-// returns one constant.
+// returns one constant, or traps when it is called.
 type shapeFunction struct {
 	name    string
 	params  []byte
 	results []byte
 	value   int64
+	traps   bool
 }
 
 // realSurface is the surface of the real module, over functions that answer:
@@ -53,14 +55,14 @@ func realSurface() shape {
 			{hostModule, "sink_append", []byte{i32, i32, i32}, []byte{i32}},
 		},
 		exports: []shapeFunction{
-			{exportABIVersion, nil, []byte{i32}, abiVersion},
-			{exportInput, nil, []byte{i32}, 16},
-			{exportInputCapacity, nil, []byte{i32}, 4096},
-			{exportInit, []byte{i32, i32}, []byte{i32}, 0},
-			{exportContinue, []byte{i32, i32, i32, i32}, []byte{i32}, 0},
-			{exportDecide, []byte{i32}, []byte{i32}, 0},
-			{exportAdjudicate, []byte{i32}, []byte{i32}, 0},
-			{exportHalt, []byte{i32, i32}, []byte{i32}, 0},
+			{exportABIVersion, nil, []byte{i32}, abiVersion, false},
+			{exportInput, nil, []byte{i32}, 16, false},
+			{exportInputCapacity, nil, []byte{i32}, 4096, false},
+			{exportInit, []byte{i32, i32}, []byte{i32}, 0, false},
+			{exportContinue, []byte{i32, i32, i32, i32}, []byte{i32}, 0, false},
+			{exportDecide, []byte{i32}, []byte{i32}, 0, false},
+			{exportAdjudicate, []byte{i32}, []byte{i32}, 0, false},
+			{exportHalt, []byte{i32, i32}, []byte{i32}, 0, false},
 		},
 		memoryName: exportMemory,
 	}
@@ -144,6 +146,10 @@ func (s shape) assemble() []byte {
 			constant = 0x42
 		}
 		body := bytes.Join([][]byte{{0x00, constant}, sleb(exported.value), {0x0b}}, nil)
+		if exported.traps {
+			// No locals, unreachable, end.
+			body = []byte{0x00, 0x00, 0x0b}
+		}
 		bodies = append(bodies, sized(body))
 	}
 	if s.memoryName != "" {
@@ -201,7 +207,7 @@ func TestAModuleWithAnotherSurfaceIsRefused(t *testing.T) {
 		{"no import at all", func(s *shape) { s.imports = nil }, "imports 0 of the 3"},
 		{"an imported memory", func(s *shape) { s.importedMemory = true }, "must own its memory"},
 		{"an export beyond the interface", func(s *shape) {
-			s.exports = append(s.exports, shapeFunction{"amussis_extra", nil, []byte{i32}, 0})
+			s.exports = append(s.exports, shapeFunction{"amussis_extra", nil, []byte{i32}, 0, false})
 		}, "no function of this interface"},
 		{"no decide function", func(s *shape) { s.without(exportDecide) }, "exports 7 of the 8"},
 		{"no continue function", func(s *shape) { s.without(exportContinue) }, "exports 7 of the 8"},
@@ -274,6 +280,88 @@ func TestAnAnswerTheModuleDoesNotWriteBlocksAndPoisons(t *testing.T) {
 			}
 		}
 	})
+}
+
+// trapped fails the test unless err is the trap of the module's code in the
+// function exported as export, so a test of a trap cannot pass on a fault of
+// another kind.
+func trapped(t *testing.T, err error, export string) {
+	t.Helper()
+	if err == nil || !strings.Contains(err.Error(), "unreachable") || !strings.Contains(err.Error(), export+" failed") {
+		t.Fatalf("the error is not the trap of %s: %v", export, err)
+	}
+}
+
+// askAfterTrap is one way to ask an engine. Halt answers no outcome; it is
+// given the blocked outcome so that only its error is compared.
+type askAfterTrap struct {
+	name, export string
+	ask          func(t *testing.T, engine *Engine) (Outcome, error)
+}
+
+var asksAfterTrap = []askAfterTrap{
+	{"decide", exportDecide, func(t *testing.T, engine *Engine) (Outcome, error) {
+		return engine.Decide(t.Context(), []byte(routine))
+	}},
+	{"adjudicate", exportAdjudicate, func(t *testing.T, engine *Engine) (Outcome, error) {
+		return engine.Adjudicate(t.Context(), vote(Approve, "carol"))
+	}},
+	{"halt", exportHalt, func(t *testing.T, engine *Engine) (Outcome, error) {
+		return loaderFault, engine.Halt(t.Context(), "operator-7", LevelConsequential)
+	}},
+}
+
+// A module that traps blocks the call that met the trap with the trap as its
+// error, and every call after it answers blocked with that same error: the
+// module is in a state nobody checked and is not asked again.
+func TestATrapBlocksAndTheEngineAnswersBlockedFromThenOn(t *testing.T) {
+	for _, trap := range asksAfterTrap {
+		t.Run(trap.name, func(t *testing.T) {
+			inBothModes(t, func(t *testing.T, mode Mode) {
+				s := realSurface()
+				s.export(trap.export).traps = true
+				engine, err := loadShape(t, s, mode)
+				if err != nil {
+					t.Fatalf("load: %v", err)
+				}
+				outcome, fault := trap.ask(t, engine)
+				trapped(t, fault, trap.export)
+				if outcome != loaderFault || outcome.Permits() {
+					t.Fatalf("the trap gave %+v", outcome)
+				}
+				for _, then := range asksAfterTrap {
+					outcome, err := then.ask(t, engine)
+					if outcome != loaderFault || !errors.Is(err, fault) {
+						t.Fatalf("%s after the trap gave %+v and the error %v", then.name, outcome, err)
+					}
+				}
+			})
+		})
+	}
+}
+
+// Boundary: a module that traps while it is set up gives no engine.
+func TestATrapWhileSettingUpGivesNoEngine(t *testing.T) {
+	for _, export := range []string{exportABIVersion, exportInput, exportInit, exportContinue} {
+		t.Run(export, func(t *testing.T) {
+			inBothModes(t, func(t *testing.T, mode Mode) {
+				s := realSurface()
+				s.export(export).traps = true
+				w := newWorld()
+				effects := &host{clock: w, signer: w, sink: w}
+				var from *chain
+				if export == exportContinue {
+					from = &chain{head: []byte{frameVersion}}
+				}
+				engine, err := load(t.Context(), w.config(mode), s.assemble(), effects.functions(), from)
+				if engine != nil {
+					closeAtEnd(t, engine)
+					t.Fatal("a module that trapped while it was set up gave an engine")
+				}
+				trapped(t, err, export)
+			})
+		})
+	}
 }
 
 func TestOnlyTheCodesTheModuleWritesAreRead(t *testing.T) {
