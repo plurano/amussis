@@ -85,6 +85,13 @@ jobs:
           go-version-file: praetor-src/go.mod
           cache: false
 
+      # The checkpoint hook scripts come from this engine commit; they have to
+      # equal its source and pass its tests. One platform runs it: the
+      # comparison reads the same committed bytes on every runner.
+      - name: Hook scripts equal the pinned engine and pass its tests
+        if: runner.os == 'Linux'
+        run: make verify-hook-scripts PRAETOR_SRC=praetor-src
+
       - name: Build pinned praetorctl from the published Praetor commit
         env:
           GOTOOLCHAIN: local

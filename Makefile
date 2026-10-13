@@ -14,7 +14,7 @@ GO_LOCAL := GOTOOLCHAIN=local GOFLAGS=-mod=readonly CGO_ENABLED=0
 
 .PHONY: verify verify-settings verify-exceptions verify-origin verify-rust verify-wasm verify-go
 .PHONY: verify-notices verify-licences verify-reuse verify-secrets verify-signoff fetch
-.PHONY: verify-engine-plants verify-api-plant
+.PHONY: verify-engine-plants verify-api-plant verify-hook-scripts
 
 # The one gate is `make verify-all`: CI runs exactly that target, so a local
 # green run and a green status check mean the same thing. Its recipe, at the
@@ -174,6 +174,29 @@ verify-engine-plants:
 # it on Linux.
 verify-api-plant:
 	python3 -B tools/gate_plants.py api-gate
+
+# The checkpoint hook scripts are the engine's, copied in by adoption, and
+# tested where they are written: each has to equal the pinned engine source
+# PRAETOR_SRC names, and the engine's own test_checkpoint.py then runs on a
+# copy, so the tests leave nothing in that checkout. CI runs it before the
+# engine checkout is removed; locally PRAETOR_SRC is a checkout of the commit
+# ci.yml pins. The planted case: a script that differs by one line has to
+# compare as different, and cmp exits 1 for a difference and 2 when it could
+# not read a file.
+HOOK_SCRIPTS := checkpoint.py common.py
+verify-hook-scripts:
+	test -d "$(PRAETOR_SRC)/.config/lefthook/scripts" \
+		|| { printf 'FAIL: PRAETOR_SRC names no engine checkout: %s\n' "$(PRAETOR_SRC)" >&2; exit 1; }
+	for f in $(HOOK_SCRIPTS); do cmp ".config/lefthook/scripts/$$f" \
+		"$(PRAETOR_SRC)/.config/lefthook/scripts/$$f" || exit 1; done
+	@dir=$$(mktemp -d) && { cat .config/lefthook/scripts/common.py; echo '# planted'; } \
+		> "$$dir/common.py" && status=0 && cmp -s "$$dir/common.py" \
+		"$(PRAETOR_SRC)/.config/lefthook/scripts/common.py" || status=$$?; rm -rf "$$dir"; \
+		test "$$status" -eq 1 || { printf 'FAIL: the planted script was not told apart: cmp exited %s, not 1\n' \
+		"$$status" >&2; exit 1; }
+	dir=$$(mktemp -d) && cp -R "$(PRAETOR_SRC)/.config/lefthook/scripts" "$$dir/scripts" \
+		&& (cd "$$dir/scripts" && python3 -B -m unittest test_checkpoint); status=$$?; \
+		rm -rf "$$dir"; exit $$status
 
 # Praetor declared verification; existing project recipes remain unchanged.
 # Praetor ships one binary under two names; resolve whichever is installed.
