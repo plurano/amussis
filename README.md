@@ -49,6 +49,7 @@ forge and on no package registry; see [Releases](#releases).
 | `crates/amussis-decision/` | The decision engine, imported with its history from the operating-system repository, where it is the crate `aegis-justitia`. |
 | `crates/amussis-decision-wasm/` | The decision engine as a WebAssembly module: five exports, three host functions (clock, signer, sink). |
 | `bindings/go/` | The Go module that embeds the WebAssembly module and runs it without cgo; package `decision`. |
+| `examples/go-consumer/`, `tools/readme_snippets.py` | A Go module that requires the binding as a program outside this repository does, holding every Go block of this README in examples that run; and the check that each block stands there line for line. |
 | `exceptions.toml`, `tools/exceptions_check.py` | The workspace's exceptions to its own rules, each with one rule, one file, a reason and an end date, and the check that holds every entry to what it names. |
 | `tools/wasm_module.py` | Builds the WebAssembly module and compares it byte for byte with the one `bindings/go` embeds. |
 | `tools/settings_sync.py` | Holds the shared toolchain and lint settings to their recorded source. |
@@ -76,7 +77,8 @@ builds, tests (default and all features), lints with warnings refused and
 builds the documentation on the toolchain `rust-toolchain.toml` pins. It then
 lints the export crate for `wasm32-unknown-unknown`, builds the WebAssembly
 module and compares it with the committed one, formats, vets and tests the Go
-binding, holds the third-party notices of the module to the lock file, holds
+binding and the examples in `examples/go-consumer`, checks that every Go block
+of this README stands line for line in those examples, holds the third-party notices of the module to the lock file, holds
 every locked crate to the licences `deny.toml` allows, checks the licence
 headers with `reuse lint` and scans every commit of the clone for credentials
 with [gitleaks](https://github.com/gitleaks/gitleaks), which has to find a
@@ -98,17 +100,26 @@ follow `CARGO_BUILD_JOBS`; set it when other work shares the machine.
 
 ## Go binding
 
+The Go blocks of this README are compiled and run: each stands line for line
+in [`examples/go-consumer/example_test.go`](examples/go-consumer/example_test.go),
+whose examples check their output.
+
 ```go
 import "github.com/plurano/amussis/bindings/go/decision"
 
 engine, err := decision.New(ctx, decision.Config{
-    KeyID:        "host-key-01",
-    SinkDeadline: 250 * time.Millisecond,
-    Mode:         decision.Compiled,
-    Clock:        clock, Signer: signer, Sink: sink,
+	KeyID:        "host-key-01",
+	SinkDeadline: 250 * time.Millisecond,
+	Mode:         decision.Compiled,
+	Clock:        clock, Signer: signer, Sink: sink,
 })
+if err != nil {
+	return err
+}
 outcome, err := engine.Decide(ctx, proposalJSON)
-if !outcome.Permits() { /* the action does not run */ }
+if !outcome.Permits() {
+	// the action does not run
+}
 ```
 
 The package embeds the WebAssembly module and runs it in the process with
@@ -192,7 +203,9 @@ outcome, err := engine.Adjudicate(ctx, decision.Adjudication{
 	Vote:     decision.Approve,
 	Checkers: []string{"carol"},
 })
-if outcome.Permits() { /* approved: the held action runs */ }
+if outcome.Permits() {
+	// approved: the held action runs
+}
 ```
 
 Who may approve is the program's decision. The engine holds the checkers it is
@@ -332,9 +345,9 @@ name, so the rule is the host's to keep:
 
 ```go
 func identity(key []byte, id string) string {
-    mac := hmac.New(sha256.New, key)
-    mac.Write([]byte(id))
-    return hex.EncodeToString(mac.Sum(nil))
+	mac := hmac.New(sha256.New, key)
+	mac.Write([]byte(id))
+	return hex.EncodeToString(mac.Sum(nil))
 }
 ```
 

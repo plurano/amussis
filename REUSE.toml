@@ -16,6 +16,7 @@ path = [
     "settings-source.json",
     ".gitignore",
     "bindings/go/go.sum",
+    "examples/go-consumer/go.sum",
     "tools/notices/refused/Cargo.lock",
     "renovate.json",
 ]
