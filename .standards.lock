@@ -1,7 +1,7 @@
 ---
 version: 1
 pinned_version: v0.0.0+catalog.33773a292166
-digest: sha256:8eec2db6ea99635fc8bfac74b4b1623bf05db559f67de0d8bc10bd81da878708
+digest: sha256:e2f97d9227b65edcff0c7f5218b5bbedc8adfdc11056fdd73b6c58489db46b1d
 profiles:
   - id: framework
     version: v0.0.0+catalog.33773a292166
@@ -20,3 +20,7 @@ facets:
     version: v0.0.0+catalog.33773a292166
     digest:
       sha256:bc87486dea71e54d20549d6054dcf290d3d700e37b304cbdb6d6c1a2def895f2
+  - id: docs:seo-portal
+    version: v0.0.0+catalog.33773a292166
+    digest:
+      sha256:145722c161ed8e436369d573c2b736fe7f579b8a1e33a85119e3b10268563428

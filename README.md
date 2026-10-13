@@ -2,6 +2,7 @@
 
 <!-- praetor:readme-governance:start -->
 [![HISS Adopted][praetor-hiss-badge]][praetor-hiss-agents]
+[![Documentation Governance][praetor-docs-badge]][praetor-docs-runs]
 
 Praetor manages this repository's declared governance policy. This managed
 block records adoption state; it is not a verification certificate.
@@ -15,11 +16,16 @@ integrity, and the debt ratchet.
 **Context Sync**: `praetorctl compile-context --verify` verifies every
 generated agent context against `AGENTS.md`.
 
+**Documentation**: `make docs-lint` enforces locked Markdown style and the
+private scratch-link policy.
+
 **Debt Baseline**: `.standards-baseline.json` anchors the debt ratchet at
 0 recorded infractions; audit forbids growth.
 
 [praetor-hiss-badge]: https://img.shields.io/badge/Standards-HISS%20Adopted-blue
 [praetor-hiss-agents]: https://github.com/plurano/amussis/blob/HEAD/AGENTS.md
+[praetor-docs-badge]: https://github.com/plurano/amussis/actions/workflows/praetor-docs.yml/badge.svg
+[praetor-docs-runs]: https://github.com/plurano/amussis/actions/workflows/praetor-docs.yml
 <!-- praetor:readme-governance:end -->
 
 Shared Rust crates of the Plurano framework family, kept in one workspace.
@@ -88,14 +94,16 @@ commit pinned in the workflow.
 
 The gate needs the `wasm32-unknown-unknown` target of the pinned toolchain
 (`rustup target add wasm32-unknown-unknown`), Go at the version
-`bindings/go/go.mod` names and
+`bindings/go/go.mod` names, Node.js 22.12 or later with npm, and
 [cargo-deny](https://github.com/EmbarkStudios/cargo-deny) and gitleaks at the
 versions `.github/workflows/ci.yml` pins. It installs none of them, and fails when one
 is missing.
 
 `make fetch` is the only step that reaches a third-party host: `cargo fetch
---locked` reads the crates.io registry and `go mod download` the Go module
-proxy. Everything after it runs with `--offline` or `GOPROXY=off`. Builds
+--locked` reads the crates.io registry, `go mod download` the Go module proxy
+and a locked `npm ci` the npm registry, for the packages of the documentation
+gate. Everything after it runs with `--offline`, `GOPROXY=off` or npm's offline
+mode. Builds
 follow `CARGO_BUILD_JOBS`; set it when other work shares the machine.
 
 ## Go binding
@@ -108,17 +116,17 @@ whose examples check their output.
 import "github.com/plurano/amussis/bindings/go/decision"
 
 engine, err := decision.New(ctx, decision.Config{
-	KeyID:        "host-key-01",
-	SinkDeadline: 250 * time.Millisecond,
-	Mode:         decision.Compiled,
-	Clock:        clock, Signer: signer, Sink: sink,
+    KeyID:        "host-key-01",
+    SinkDeadline: 250 * time.Millisecond,
+    Mode:         decision.Compiled,
+    Clock:        clock, Signer: signer, Sink: sink,
 })
 if err != nil {
-	return err
+    return err
 }
 outcome, err := engine.Decide(ctx, proposalJSON)
 if !outcome.Permits() {
-	// the action does not run
+    // the action does not run
 }
 ```
 
@@ -166,8 +174,8 @@ engine holds it to the approval rule it holds an action of that level to:
 
 ```go
 from := decision.Continuation{
-	Head:    lastStored,
-	Release: &decision.Release{Releaser: "olga", Checkers: []string{"petra"}},
+    Head:    lastStored,
+    Release: &decision.Release{Releaser: "olga", Checkers: []string{"petra"}},
 }
 engine, err := decision.Continue(ctx, config, from)
 ```
@@ -200,12 +208,12 @@ proposal. The program brings the checkers' decision to the engine with
 
 ```go
 outcome, err := engine.Adjudicate(ctx, decision.Adjudication{
-	IntentID: "intent-0042",
-	Vote:     decision.Approve,
-	Checkers: []string{"carol"},
+    IntentID: "intent-0042",
+    Vote:     decision.Approve,
+    Checkers: []string{"carol"},
 })
 if outcome.Permits() {
-	// approved: the held action runs
+    // approved: the held action runs
 }
 ```
 
@@ -348,9 +356,9 @@ name, so the rule is the host's to keep:
 
 ```go
 func identity(key []byte, id string) string {
-	mac := hmac.New(sha256.New, key)
-	mac.Write([]byte(id))
-	return hex.EncodeToString(mac.Sum(nil))
+    mac := hmac.New(sha256.New, key)
+    mac.Write([]byte(id))
+    return hex.EncodeToString(mac.Sum(nil))
 }
 ```
 

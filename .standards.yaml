@@ -13,6 +13,7 @@ facets:
   - security:high
   - api:public-contract
   - agent:sandboxed
+  - docs:seo-portal
 # The engine has no library flavor yet (cordanaLLM/praetor#67); until it
 # does, the workspace is audited as rust-systems.
 flavors:

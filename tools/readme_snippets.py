@@ -144,9 +144,9 @@ def in_go_blocks(transform):
 
 
 EXAMPLE = f"{EXAMPLES}/example_test.go"
-VOTE = "\tVote:     decision.Approve,\n"
-INTENT = '\tIntentID: "intent-0042",\n'
-CHECKERS = '\tCheckers: []string{"carol"},\n'
+VOTE = "    Vote:     decision.Approve,\n"
+INTENT = '    IntentID: "intent-0042",\n'
+CHECKERS = '    Checkers: []string{"carol"},\n'
 IMPORT_LINE = 'import "github.com/plurano/amussis/bindings/go/decision"'
 
 
@@ -161,7 +161,7 @@ PLANTS = {
         EXAMPLE, 'Checkers: []string{"petra"}', 'Checkers: []string{"petra", "quinn"}'
     ),
     "two README lines swapped": replace_in(README, INTENT + VOTE, VOTE + INTENT),
-    "a line added to a README block": replace_in(README, CHECKERS, CHECKERS + "\tLevel:    3,\n"),
+    "a line added to a README block": replace_in(README, CHECKERS, CHECKERS + "    Level:    3,\n"),
     "an import the example does not have": replace_in(README, IMPORT_LINE, IMPORT_LINE[:-1] + 's"'),
     "a line inserted in the example inside a block": replace_in(
         EXAMPLE, "\t\tVote:     decision.Approve,\n", "\t\tVote:     decision.Approve,\n\t\tLevel:    3,\n"
@@ -177,7 +177,7 @@ PLANTS = {
 }
 
 LOOK_ALIKES = {
-    "README blocks indented with spaces": in_go_blocks(lambda line: line.replace("\t", "    ")),
+    "README blocks indented with tabs": in_go_blocks(lambda line: line.replace("    ", "\t")),
     "blank lines inside README blocks": in_go_blocks(lambda line: line + "\n" if line.strip() else line),
     "white space at the end of README lines": in_go_blocks(lambda line: line + "  "),
 }
