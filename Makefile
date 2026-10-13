@@ -5,6 +5,7 @@
 SHELL := /bin/sh
 REUSE ?= reuse
 CARGO_DENY ?= cargo deny
+GITLEAKS ?= gitleaks
 
 GO_BINDING := bindings/go
 WASM_TARGET := wasm32-unknown-unknown
@@ -12,7 +13,7 @@ WASM_TARGET := wasm32-unknown-unknown
 GO_LOCAL := GOTOOLCHAIN=local GOFLAGS=-mod=readonly CGO_ENABLED=0
 
 .PHONY: verify verify-settings verify-exceptions verify-origin verify-rust verify-wasm verify-go
-.PHONY: verify-notices verify-licences verify-reuse fetch
+.PHONY: verify-notices verify-licences verify-reuse verify-secrets fetch
 
 # The one gate is `make verify-all`: CI runs exactly that target, so a local
 # green run and a green status check mean the same thing. Its recipe, at the
@@ -22,9 +23,9 @@ verify-all: verify
 
 # This workspace's own checks; they need no engine.
 verify: verify-settings verify-exceptions verify-origin verify-rust verify-wasm verify-go \
-		verify-notices verify-licences verify-reuse
+		verify-notices verify-licences verify-reuse verify-secrets
 	@printf '%s\n' 'PASS: settings, exceptions, origin names, crate gate, module, Go binding,' \
-		'third-party notices, dependency licences and licence headers.'
+		'third-party notices, dependency licences, licence headers and secrets.'
 
 # The shared toolchain and lint settings equal the record in
 # settings-source.json; the selftest plants one defect per setting first, so a
@@ -123,6 +124,22 @@ verify-reuse:
 	@status=0; cmp -s LICENSE LICENSES/MIT.txt || status=$$?; test "$$status" -eq 1 \
 		|| { printf 'FAIL: another licence text was not told apart: cmp exited %s, not 1\n' \
 		"$$status" >&2; exit 1; }
+
+# No credential stands in any commit the clone holds (HISS-12); CI checks out
+# the whole history. The second run is the planted case: a GitHub token written
+# at run time into a scratch directory has to be found. The recipe spells the
+# token in two parts, so none stands in the tree. The planted run sets its own
+# exit status for a finding, 3, so a scan that could not run is not counted as
+# a refusal.
+verify-secrets:
+	$(GITLEAKS) version
+	$(GITLEAKS) git --no-banner --redact --timeout 300 .
+	@dir=$$(mktemp -d) && printf 'token = "%s_%s"\n' ghp R7k2Qw9Lm4Xz8Vb3Nc6Hd1Fj5Tg0Sy2Pa4Ue \
+		> "$$dir/planted.txt" && status=0 && $(GITLEAKS) dir --no-banner --redact \
+		--exit-code 3 --log-level error "$$dir" || status=$$?; rm -rf "$$dir"; \
+		test "$$status" -eq 3 || { printf 'FAIL: the planted token was not found: gitleaks exited %s, not 3\n' \
+		"$$status" >&2; exit 1; }
+	@printf '%s\n' 'PASS: the planted token is found.'
 
 # Praetor declared verification; existing project recipes remain unchanged.
 # Praetor ships one binary under two names; resolve whichever is installed.

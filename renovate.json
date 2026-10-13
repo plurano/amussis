@@ -23,6 +23,18 @@
         "github-runner"
       ],
       "enabled": false
+    },
+    {
+      "description": "praetor-managed files: praetorctl adopt ships their updates and praetorctl audit locks them byte for byte",
+      "matchFileNames": [
+        ".github/workflows/praetor-api.yml",
+        "tools/apicompat/gate/main.go",
+        "tools/apicompat/gate/placeholder.go",
+        ".devcontainer/devcontainer.json",
+        ".devcontainer/Dockerfile.praetor",
+        ".github/workflows/reuse.yml"
+      ],
+      "enabled": false
     }
   ]
 }

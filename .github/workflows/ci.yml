@@ -29,8 +29,14 @@ env:
   CARGO_DENY_SHA256_LINUX: "9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f"
   CARGO_DENY_SHA256_MACOS: "fe67d82a10d8597a3549364cb733a3f9cc1bfff9031b7ae46384a9f2a72090c3"
   CARGO_DENY_SHA256_WINDOWS: "975a22143262fd27476d19ee00c7af67978426e40e1dee94eed6bbade1cf87dc"
+  # gitleaks scans the history for credentials (HISS-12). Each digest is the
+  # one its release publishes for that platform's archive of this version.
+  GITLEAKS_VERSION: "8.30.1"
+  GITLEAKS_SHA256_LINUX: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+  GITLEAKS_SHA256_MACOS: "b40ab0ae55c505963e365f271a8d3846efbc170aa17f2607f13df610a9aeb6a5"
+  GITLEAKS_SHA256_WINDOWS: "d29144deff3a68aa93ced33dddf84b7fdc26070add4aa0f4513094c8332afc4e"
   # Published Praetor commit that builds the praetorctl this gate pins.
-  PRAETOR_COMMIT: "6622361940dc66399d027f3a203884bce2f616ac"
+  PRAETOR_COMMIT: "3bbde07342bdece12c46f74b0ee2c1f51129478f"
   CARGO_TERM_COLOR: never
 
 # One shell on every platform: the steps are written for bash, which the
@@ -142,11 +148,38 @@ jobs:
           install -m 0755 "${archive}/cargo-deny${exe}" "bin/cargo-deny${exe}"
           cargo deny --version
 
+      # The same rule for gitleaks: the archive is held to its pinned digest
+      # before anything of it is unpacked. The Windows archive is a zip, which
+      # Python unpacks on every host.
+      - name: Install the pinned gitleaks
+        run: |
+          exe=""
+          case "${RUNNER_OS}-${RUNNER_ARCH}" in
+            Linux-X64) platform=linux_x64; kind=tar.gz; want="$GITLEAKS_SHA256_LINUX" ;;
+            macOS-ARM64) platform=darwin_arm64; kind=tar.gz; want="$GITLEAKS_SHA256_MACOS" ;;
+            Windows-X64) platform=windows_x64; kind=zip; want="$GITLEAKS_SHA256_WINDOWS"; exe=.exe ;;
+            *) echo "::error::no gitleaks archive is pinned for ${RUNNER_OS}-${RUNNER_ARCH}"; exit 1 ;;
+          esac
+          archive="gitleaks_${GITLEAKS_VERSION}_${platform}.${kind}"
+          base="https://github.com/gitleaks/gitleaks/releases/download"
+          cd "$RUNNER_TEMP"
+          curl --fail --silent --show-error --location --max-time 120 \
+            --output "${archive}" "${base}/v${GITLEAKS_VERSION}/${archive}"
+          got="$(python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "${archive}")"
+          if [ "$got" != "$want" ]; then
+            echo "::error::${archive} has sha256 ${got}, not the pinned ${want}"
+            exit 1
+          fi
+          mkdir gitleaks-unpacked
+          python3 -c 'import shutil, sys; shutil.unpack_archive(sys.argv[1], sys.argv[2])' "${archive}" gitleaks-unpacked
+          install -m 0755 "gitleaks-unpacked/gitleaks${exe}" "bin/gitleaks${exe}"
+          gitleaks version
+
       # The log names the host and the tools the gate is about to run.
       - name: Name the tools the gate will run
         run: |
           uname -a
-          command -v make sh python3 go cargo rustup pipx praetorctl cargo-deny
+          command -v make sh python3 go cargo rustup pipx praetorctl cargo-deny gitleaks
           make --version | head -1
           python3 --version
 

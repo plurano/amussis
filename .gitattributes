@@ -2,6 +2,7 @@
 # same bytes on every platform.
 * text=auto eol=lf
 *.wasm binary
+
 # BEGIN praetor managed attributes (praetorctl adopt)
 # praetorctl audit hashes these files; keep their checkout bytes the same on every platform.
 .devcontainer/Dockerfile.praetor text eol=lf
