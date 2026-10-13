@@ -313,8 +313,8 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ================================================================================
-serde_json 1.0.151
-https://crates.io/crates/serde_json/1.0.151
+serde_json 1.0.152
+https://crates.io/crates/serde_json/1.0.152
 Licence offered: MIT OR Apache-2.0; taken: MIT
 --------------------------------------------------------------------------------
 Permission is hereby granted, free of charge, to any
