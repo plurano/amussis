@@ -96,6 +96,10 @@ gofmt_clean = unformatted="$$(gofmt -l $(1))" && test -z "$$unformatted" \
 # run is the planted case: an unformatted file written at run time into a
 # scratch directory has to be refused by name, so a gofmt that could not run
 # and listed nothing is not counted as a refusal.
+# The binding runs a second time as linux/386, an architecture wazero does
+# not compile for, where a linux/amd64 kernel runs it: Interpreted has to
+# pass every test there and New has to refuse Compiled. Other hosts say why
+# they skip it.
 verify-go: fetch verify-wasm
 	go version
 	cd $(GO_BINDING) && $(call gofmt_clean,.)
@@ -107,6 +111,10 @@ verify-go: fetch verify-wasm
 	@printf '%s\n' 'PASS: the planted unformatted file is refused.'
 	cd $(GO_BINDING) && $(GO_LOCAL) GOPROXY=off go vet ./...
 	cd $(GO_BINDING) && $(GO_LOCAL) GOPROXY=off go test -count=1 ./...
+	@host="$$(go env GOHOSTOS)/$$(go env GOHOSTARCH)"; if [ "$$host" = linux/amd64 ]; then \
+		cd $(GO_BINDING) && $(GO_LOCAL) GOPROXY=off GOARCH=386 go test -count=1 ./... \
+		&& printf '%s\n' 'PASS: the binding on linux/386: Interpreted runs, Compiled is refused.'; \
+	else printf 'SKIP: the linux/386 run needs a linux/amd64 host; this is %s.\n' "$$host"; fi
 	cd $(GO_CONSUMER) && $(call gofmt_clean,.)
 	cd $(GO_CONSUMER) && $(GO_LOCAL) GOPROXY=off go vet ./...
 	cd $(GO_CONSUMER) && $(GO_LOCAL) GOPROXY=off go test -count=1 ./...

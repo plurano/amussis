@@ -136,9 +136,10 @@ refuses a module that imports anything beyond them:
 
 No effect has a default. `New` refuses a missing one, and a module that imports
 a host function the host does not hold fails to load. `Mode` is named by the
-caller as well: `Compiled` (amd64 and arm64) or `Interpreted` (every platform
-Go runs on, about ninety times slower per decision on amd64); the package never
-picks one or falls back to the other. A module that traps, or an answer the
+caller as well: `Compiled` (amd64 and arm64; `New` returns an error on any other
+architecture) or `Interpreted` (no machine code of its own, about sixty times
+as long per decision as `Compiled` on amd64, per `BenchmarkDecide`); the
+package never picks one or falls back to the other. A module that traps, or an answer the
 loader cannot read, yields a blocked outcome and an error, and the engine
 answers blocked from then on.
 
@@ -294,7 +295,9 @@ Limits as of this state:
   that call takes the name with it: no record of the stored chain names that
   person for the halt.
 - The binding has run on the three CI hosts only: Linux amd64, macOS arm64 and
-  Windows amd64.
+  Windows amd64, both modes on each. The Linux host also runs it as linux/386,
+  where `Interpreted` passes every test and `New` refuses `Compiled`. No other
+  operating system or architecture has run it.
 
 The committed module is the build of the source beside it: `tools/wasm_module.py
 check` rebuilds it with the machine's paths rewritten and fails on one differing
