@@ -77,16 +77,18 @@ builds the documentation on the toolchain `rust-toolchain.toml` pins. It then
 lints the export crate for `wasm32-unknown-unknown`, builds the WebAssembly
 module and compares it with the committed one, formats, vets and tests the Go
 binding, holds the third-party notices of the module to the lock file, holds
-every locked crate to the licences `deny.toml` allows, and checks the licence
-headers with `reuse lint`. Its second half is
+every locked crate to the licences `deny.toml` allows, checks the licence
+headers with `reuse lint` and scans every commit of the clone for credentials
+with [gitleaks](https://github.com/gitleaks/gitleaks), which has to find a
+token planted at run time. Its second half is
 the Praetor standards audit, which needs `praetorctl`; CI builds it from the
 commit pinned in the workflow.
 
 The gate needs the `wasm32-unknown-unknown` target of the pinned toolchain
 (`rustup target add wasm32-unknown-unknown`), Go at the version
 `bindings/go/go.mod` names and
-[cargo-deny](https://github.com/EmbarkStudios/cargo-deny) at the version
-`.github/workflows/ci.yml` pins. It installs none of them, and fails when one
+[cargo-deny](https://github.com/EmbarkStudios/cargo-deny) and gitleaks at the
+versions `.github/workflows/ci.yml` pins. It installs none of them, and fails when one
 is missing.
 
 `make fetch` is the only step that reaches a third-party host: `cargo fetch
