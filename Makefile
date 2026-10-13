@@ -13,7 +13,7 @@ WASM_TARGET := wasm32-unknown-unknown
 # The Go steps use the installed Go, change no go.mod and build without cgo.
 GO_LOCAL := GOTOOLCHAIN=local GOFLAGS=-mod=readonly CGO_ENABLED=0
 
-.PHONY: verify verify-settings verify-exceptions verify-origin verify-rust verify-wasm verify-go
+.PHONY: verify verify-settings verify-exceptions verify-origin verify-rust verify-package verify-wasm verify-go
 .PHONY: verify-readme
 .PHONY: verify-notices verify-licences verify-reuse verify-secrets verify-signoff fetch
 .PHONY: verify-engine-plants verify-api-plant verify-hook-scripts
@@ -27,9 +27,9 @@ GO_LOCAL := GOTOOLCHAIN=local GOFLAGS=-mod=readonly CGO_ENABLED=0
 verify-all: verify verify-engine-plants
 
 # This workspace's own checks; they need no engine.
-verify: verify-settings verify-exceptions verify-origin verify-rust verify-wasm verify-go \
+verify: verify-settings verify-exceptions verify-origin verify-rust verify-package verify-wasm verify-go \
 		verify-readme verify-notices verify-licences verify-reuse verify-secrets verify-signoff
-	@printf '%s\n' 'PASS: settings, exceptions, origin names, crate gate, module, Go binding,' \
+	@printf '%s\n' 'PASS: settings, exceptions, origin names, crate gate, packed crate, module, Go binding,' \
 		'README Go blocks, third-party notices, dependency licences, licence headers, secrets and sign-off check.'
 
 # The shared toolchain and lint settings equal the record in
@@ -75,6 +75,14 @@ verify-rust: fetch
 	cargo clippy --locked --offline --all-targets --all-features -- -D warnings
 	RUSTDOCFLAGS='-D warnings' cargo doc --locked --offline --no-deps
 
+# The library crate as the release packs it: cargo package compiles the packed
+# sources on their own, so a source that reads a file outside the crate or a
+# module the manifest leaves out fails here and not first on a tag. The
+# selftest plants one of each on a copy of the committed tree first.
+verify-package: fetch
+	python3 -B tools/package_check.py selftest
+	python3 -B tools/package_check.py check
+
 # The WebAssembly module: the export crate is linted for the target it is
 # built for (the host run above never compiles its export file), then the
 # module is built and compared byte for byte with the one the Go binding
@@ -98,6 +106,10 @@ gofmt_clean = unformatted="$$(gofmt -l $(1))" && test -z "$$unformatted" \
 # and listed nothing is not counted as a refusal. The tests run on the Go
 # release the modules declare as their oldest, so a newer Go in CI does not
 # leave that release untested; the selftest plants one mismatch per form.
+# The binding runs a second time as linux/386, an architecture wazero does
+# not compile for, where a linux/amd64 kernel runs it: Interpreted has to
+# pass every test there and New has to refuse Compiled. Other hosts say why
+# they skip it.
 verify-go: fetch verify-wasm
 	go version
 	python3 -B tools/go_minimum.py selftest
@@ -111,6 +123,10 @@ verify-go: fetch verify-wasm
 	@printf '%s\n' 'PASS: the planted unformatted file is refused.'
 	cd $(GO_BINDING) && $(GO_LOCAL) GOPROXY=off go vet ./...
 	cd $(GO_BINDING) && $(GO_LOCAL) GOPROXY=off go test -count=1 ./...
+	@host="$$(go env GOHOSTOS)/$$(go env GOHOSTARCH)"; if [ "$$host" = linux/amd64 ]; then \
+		cd $(GO_BINDING) && $(GO_LOCAL) GOPROXY=off GOARCH=386 go test -count=1 ./... \
+		&& printf '%s\n' 'PASS: the binding on linux/386: Interpreted runs, Compiled is refused.'; \
+	else printf 'SKIP: the linux/386 run needs a linux/amd64 host; this is %s.\n' "$$host"; fi
 	cd $(GO_CONSUMER) && $(call gofmt_clean,.)
 	cd $(GO_CONSUMER) && $(GO_LOCAL) GOPROXY=off go vet ./...
 	cd $(GO_CONSUMER) && $(GO_LOCAL) GOPROXY=off go test -count=1 ./...
