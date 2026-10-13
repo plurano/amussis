@@ -72,12 +72,13 @@ type Mode uint8
 
 const (
 	modeUnset Mode = iota
-	// Compiled translates the module to machine code at load. It needs
-	// amd64 or arm64 on an operating system wazero compiles for; New
-	// returns an error elsewhere.
+	// Compiled translates the module to machine code at load. wazero
+	// compiles for amd64 and arm64 only; New returns an error on any other
+	// architecture.
 	Compiled
-	// Interpreted runs on every platform Go does, about ninety times slower
-	// per decision as measured on amd64.
+	// Interpreted runs the module without machine code of its own, and so
+	// on architectures Compiled cannot serve. It takes about sixty times as
+	// long per decision as Compiled, as BenchmarkDecide measures on amd64.
 	Interpreted
 )
 
@@ -515,12 +516,21 @@ func call(ctx context.Context, function api.Function, params ...uint64) (uint32,
 	}
 	results, err := function.Call(ctx, params...)
 	if err != nil {
-		return 0, fmt.Errorf("decision: %s failed: %w", function.Definition().Name(), err)
+		return 0, fmt.Errorf("decision: %s failed: %w", exportName(function), err)
 	}
 	if len(results) != 1 {
-		return 0, fmt.Errorf("decision: %s returned %d values", function.Definition().Name(), len(results))
+		return 0, fmt.Errorf("decision: %s returned %d values", exportName(function), len(results))
 	}
 	return api.DecodeU32(results[0]), nil
+}
+
+// exportName names a function of the module by its export. The module
+// carries no name section, so the function has no name of its own.
+func exportName(function api.Function) string {
+	if names := function.Definition().ExportNames(); len(names) > 0 {
+		return names[0]
+	}
+	return function.Definition().DebugName()
 }
 
 // Mode returns the mode the module runs in.

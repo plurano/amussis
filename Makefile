@@ -103,9 +103,17 @@ gofmt_clean = unformatted="$$(gofmt -l $(1))" && test -z "$$unformatted" \
 # -count=1 keeps a cached result from standing in for a run. The second gofmt
 # run is the planted case: an unformatted file written at run time into a
 # scratch directory has to be refused by name, so a gofmt that could not run
-# and listed nothing is not counted as a refusal.
+# and listed nothing is not counted as a refusal. The tests run on the Go
+# release the modules declare as their oldest, so a newer Go in CI does not
+# leave that release untested; the selftest plants one mismatch per form.
+# The binding runs a second time as linux/386, an architecture wazero does
+# not compile for, where a linux/amd64 kernel runs it: Interpreted has to
+# pass every test there and New has to refuse Compiled. Other hosts say why
+# they skip it.
 verify-go: fetch verify-wasm
 	go version
+	python3 -B tools/go_minimum.py selftest
+	python3 -B tools/go_minimum.py check
 	cd $(GO_BINDING) && $(call gofmt_clean,.)
 	@dir=$$(mktemp -d) && printf 'package planted\n\nfunc  f( ) {}\n' > "$$dir/planted.go" \
 		&& out="$$( $(call gofmt_clean,"$$dir") 2>&1 )"; status=$$?; rm -rf "$$dir"; \
@@ -115,6 +123,10 @@ verify-go: fetch verify-wasm
 	@printf '%s\n' 'PASS: the planted unformatted file is refused.'
 	cd $(GO_BINDING) && $(GO_LOCAL) GOPROXY=off go vet ./...
 	cd $(GO_BINDING) && $(GO_LOCAL) GOPROXY=off go test -count=1 ./...
+	@host="$$(go env GOHOSTOS)/$$(go env GOHOSTARCH)"; if [ "$$host" = linux/amd64 ]; then \
+		cd $(GO_BINDING) && $(GO_LOCAL) GOPROXY=off GOARCH=386 go test -count=1 ./... \
+		&& printf '%s\n' 'PASS: the binding on linux/386: Interpreted runs, Compiled is refused.'; \
+	else printf 'SKIP: the linux/386 run needs a linux/amd64 host; this is %s.\n' "$$host"; fi
 	cd $(GO_CONSUMER) && $(call gofmt_clean,.)
 	cd $(GO_CONSUMER) && $(GO_LOCAL) GOPROXY=off go vet ./...
 	cd $(GO_CONSUMER) && $(GO_LOCAL) GOPROXY=off go test -count=1 ./...

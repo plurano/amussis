@@ -74,7 +74,10 @@ func (w *world) config(mode Mode) Config {
 func inBothModes(t *testing.T, test func(t *testing.T, mode Mode)) {
 	t.Helper()
 	for _, mode := range []Mode{Compiled, Interpreted} {
-		t.Run(mode.String(), func(t *testing.T) { test(t, mode) })
+		t.Run(mode.String(), func(t *testing.T) {
+			needCompiler(t, mode)
+			test(t, mode)
+		})
 	}
 }
 
@@ -92,6 +95,7 @@ func closeAtEnd(t *testing.T, engine *Engine) {
 
 func engineFor(t *testing.T, w *world, mode Mode) *Engine {
 	t.Helper()
+	needCompiler(t, mode)
 	engine, err := New(t.Context(), w.config(mode))
 	if err != nil {
 		t.Fatalf("New: %v", err)
