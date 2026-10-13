@@ -7,7 +7,7 @@
   "files": {
     "rust-toolchain.toml": "sha256:5f9d3d3c4631ca1573d281f569cd6bc69ba3034119ebbdb0816232c5fadca1f7",
     "clippy.toml": "sha256:7de98ec20641598fa1b20d874909f229f2028a80d5e0b36c018c17c5bd002c1a",
-    "rustfmt.toml": "sha256:7950250dad48734fd1ee559a544a51fe5676b5eca6fe6b63092ff0a606412892"
+    "rustfmt.toml": "sha256:d5b11811de4b3a0c29d2f2e071de1d7d0cb8885142ec4e2236194732ad263998"
   },
   "manifest_settings": {
     "resolver": "3",
