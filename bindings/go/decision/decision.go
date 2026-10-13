@@ -515,12 +515,21 @@ func call(ctx context.Context, function api.Function, params ...uint64) (uint32,
 	}
 	results, err := function.Call(ctx, params...)
 	if err != nil {
-		return 0, fmt.Errorf("decision: %s failed: %w", function.Definition().Name(), err)
+		return 0, fmt.Errorf("decision: %s failed: %w", exportName(function), err)
 	}
 	if len(results) != 1 {
-		return 0, fmt.Errorf("decision: %s returned %d values", function.Definition().Name(), len(results))
+		return 0, fmt.Errorf("decision: %s returned %d values", exportName(function), len(results))
 	}
 	return api.DecodeU32(results[0]), nil
+}
+
+// exportName names a function of the module by its export. The module
+// carries no name section, so the function has no name of its own.
+func exportName(function api.Function) string {
+	if names := function.Definition().ExportNames(); len(names) > 0 {
+		return names[0]
+	}
+	return function.Definition().DebugName()
 }
 
 // Mode returns the mode the module runs in.
