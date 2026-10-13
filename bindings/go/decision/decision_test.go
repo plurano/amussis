@@ -364,6 +364,59 @@ func TestAClosedEngineBlocks(t *testing.T) {
 	}
 }
 
+// Closing twice is no fault: the second Close returns no error and the engine
+// still blocks with the error of the first.
+func TestASecondCloseIsNoFault(t *testing.T) {
+	inBothModes(t, func(t *testing.T, mode Mode) {
+		engine := engineFor(t, newWorld(), mode)
+		for round := 1; round <= 2; round++ {
+			if err := engine.Close(t.Context()); err != nil {
+				t.Fatalf("Close %d: %v", round, err)
+			}
+		}
+		outcome, err := engine.Decide(t.Context(), []byte(routine))
+		if !errors.Is(err, errClosed) || outcome != loaderFault {
+			t.Fatalf("an engine closed twice gave %+v and the error %v", outcome, err)
+		}
+	})
+}
+
+// Close keeps the first fault: an engine poisoned before it was closed goes
+// on answering with the fault that poisoned it, not with the closed error.
+func TestClosingAPoisonedEngineKeepsItsFault(t *testing.T) {
+	w := newWorld()
+	engine := engineFor(t, w, Interpreted)
+	w.sinkPanics = true
+	_, fault := engine.Decide(t.Context(), []byte(routine))
+	if fault == nil {
+		t.Fatal("a panicking sink did not poison the engine")
+	}
+	if err := engine.Close(t.Context()); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	outcome, err := engine.Decide(t.Context(), []byte(routine))
+	if !errors.Is(err, fault) || errors.Is(err, errClosed) || outcome != loaderFault {
+		t.Fatalf("after Close the poisoned engine gave %+v and the error %v, not %v", outcome, err, fault)
+	}
+}
+
+// Each mode names itself; a value that is no mode, the zero value among
+// them, reads as unset.
+func TestModeNames(t *testing.T) {
+	names := map[Mode]string{
+		Compiled:    "compiled",
+		Interpreted: "interpreted",
+		modeUnset:   "unset",
+		Mode(9):     "unset",
+		Mode(255):   "unset",
+	}
+	for mode, want := range names {
+		if got := mode.String(); got != want {
+			t.Errorf("Mode(%d).String() = %q, want %q", uint8(mode), got, want)
+		}
+	}
+}
+
 func TestTwoEnginesKeepSeparateChains(t *testing.T) {
 	first, second := newWorld(), newWorld()
 	one, two := engineFor(t, first, Compiled), engineFor(t, second, Compiled)
