@@ -186,20 +186,24 @@ jobs:
       - name: Verification gate
         run: make verify-all REUSE="pipx run --spec reuse[charset-normalizer]==${REUSE_VERSION} reuse"
 
+      # The gate ran this check's selftest (make verify-signoff) above.
       - name: Sign-off on pull request commits
         if: github.event_name == 'pull_request'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          missing=0
-          for sha in $(git rev-list --no-merges "$BASE_SHA..$HEAD_SHA"); do
-            if ! git log -1 --format=%B "$sha" | grep -q '^Signed-off-by: '; then
-              echo "::error::commit $sha lacks a Signed-off-by trailer"
-              missing=1
-            fi
-          done
-          exit "$missing"
+        run: python3 -B tools/signoff_check.py check --base "$BASE_SHA" --head "$HEAD_SHA"
+
+      # The API compatibility gate of the Go API workflow has to refuse a
+      # removed exported method. It builds the gate's checker from the Go
+      # module proxy with the toolchain that workflow lets Go select, so it
+      # runs here and not in the offline gate; one platform is enough, as the
+      # workflow itself runs on Linux only.
+      - name: Planted API break
+        if: runner.os == 'Linux'
+        env:
+          GOTOOLCHAIN: auto
+        run: make verify-api-plant
 
   verify-macos:
     name: Verification gate (macOS)

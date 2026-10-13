@@ -13,19 +13,22 @@ WASM_TARGET := wasm32-unknown-unknown
 GO_LOCAL := GOTOOLCHAIN=local GOFLAGS=-mod=readonly CGO_ENABLED=0
 
 .PHONY: verify verify-settings verify-exceptions verify-origin verify-rust verify-wasm verify-go
-.PHONY: verify-notices verify-licences verify-reuse verify-secrets fetch
+.PHONY: verify-notices verify-licences verify-reuse verify-secrets verify-signoff fetch
+.PHONY: verify-engine-plants verify-api-plant
 
 # The one gate is `make verify-all`: CI runs exactly that target, so a local
 # green run and a green status check mean the same thing. Its recipe, at the
 # end of this file, belongs to the engine and runs the standards audit; the
-# prerequisite here puts this workspace's own checks in front of it.
-verify-all: verify
+# prerequisites here put this workspace's own checks in front of it, and then
+# one planted defect per engine check, so an engine check that stopped
+# refusing anything fails before its clean run is trusted.
+verify-all: verify verify-engine-plants
 
 # This workspace's own checks; they need no engine.
 verify: verify-settings verify-exceptions verify-origin verify-rust verify-wasm verify-go \
-		verify-notices verify-licences verify-reuse verify-secrets
+		verify-notices verify-licences verify-reuse verify-secrets verify-signoff
 	@printf '%s\n' 'PASS: settings, exceptions, origin names, crate gate, module, Go binding,' \
-		'third-party notices, dependency licences, licence headers and secrets.'
+		'third-party notices, dependency licences, licence headers, secrets and sign-off check.'
 
 # The shared toolchain and lint settings equal the record in
 # settings-source.json; the selftest plants one defect per setting first, so a
@@ -78,13 +81,25 @@ verify-wasm: fetch
 	python3 -B tools/wasm_module.py selftest
 	python3 -B tools/wasm_module.py check
 
+# gofmt exits 0 when it lists files, so its output is the test. One
+# definition serves the binding and the planted case below.
+gofmt_clean = unformatted="$$(gofmt -l $(1))" && test -z "$$unformatted" \
+	|| { printf 'FAIL: gofmt: %s\n' "$$unformatted" >&2; exit 1; }
+
 # The Go binding, on the module verify-wasm has just held to the source.
-# gofmt exits 0 when it lists files, so its output is the test; -count=1
-# keeps a cached result from standing in for a run.
+# -count=1 keeps a cached result from standing in for a run. The second gofmt
+# run is the planted case: an unformatted file written at run time into a
+# scratch directory has to be refused by name, so a gofmt that could not run
+# and listed nothing is not counted as a refusal.
 verify-go: fetch verify-wasm
 	go version
-	cd $(GO_BINDING) && unformatted="$$(gofmt -l .)" && test -z "$$unformatted" \
-		|| { printf 'FAIL: gofmt: %s\n' "$$unformatted" >&2; exit 1; }
+	cd $(GO_BINDING) && $(call gofmt_clean,.)
+	@dir=$$(mktemp -d) && printf 'package planted\n\nfunc  f( ) {}\n' > "$$dir/planted.go" \
+		&& out="$$( $(call gofmt_clean,"$$dir") 2>&1 )"; status=$$?; rm -rf "$$dir"; \
+		test "$$status" -eq 1 && case "$$out" in *planted.go*) true ;; *) false ;; esac \
+		|| { printf 'FAIL: the planted unformatted file was not refused: exit %s: %s\n' \
+		"$$status" "$$out" >&2; exit 1; }
+	@printf '%s\n' 'PASS: the planted unformatted file is refused.'
 	cd $(GO_BINDING) && $(GO_LOCAL) GOPROXY=off go vet ./...
 	cd $(GO_BINDING) && $(GO_LOCAL) GOPROXY=off go test -count=1 ./...
 
@@ -140,6 +155,25 @@ verify-secrets:
 		test "$$status" -eq 3 || { printf 'FAIL: the planted token was not found: gitleaks exited %s, not 3\n' \
 		"$$status" >&2; exit 1; }
 	@printf '%s\n' 'PASS: the planted token is found.'
+
+# The sign-off check CI runs on a pull request's commits. The selftest builds
+# a scratch history and requires an unsigned commit to be refused and a signed
+# range to pass.
+verify-signoff:
+	python3 -B tools/signoff_check.py selftest
+
+# One planted defect per engine check of the recipe below, each on a scratch
+# clone of the committed tree: a vendor file that drifted from AGENTS.md, filler
+# prose and a recursive Go function each have to be refused by name.
+verify-engine-plants:
+	python3 -B tools/gate_plants.py engine --praetorctl "$(PRAETORCTL)"
+
+# The API compatibility gate the Go API workflow runs: an exported method
+# removed on a scratch clone has to be refused. It builds the gate's checker
+# from the Go module proxy, so it stands outside the offline gate and CI runs
+# it on Linux.
+verify-api-plant:
+	python3 -B tools/gate_plants.py api-gate
 
 # Praetor declared verification; existing project recipes remain unchanged.
 # Praetor ships one binary under two names; resolve whichever is installed.
