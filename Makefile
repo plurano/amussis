@@ -13,7 +13,7 @@ WASM_TARGET := wasm32-unknown-unknown
 # The Go steps use the installed Go, change no go.mod and build without cgo.
 GO_LOCAL := GOTOOLCHAIN=local GOFLAGS=-mod=readonly CGO_ENABLED=0
 
-.PHONY: verify verify-settings verify-exceptions verify-origin verify-rust verify-wasm verify-go
+.PHONY: verify verify-settings verify-exceptions verify-origin verify-rust verify-package verify-wasm verify-go
 .PHONY: verify-readme
 .PHONY: verify-notices verify-licences verify-reuse verify-secrets verify-signoff fetch
 .PHONY: verify-engine-plants verify-api-plant verify-hook-scripts
@@ -27,9 +27,9 @@ GO_LOCAL := GOTOOLCHAIN=local GOFLAGS=-mod=readonly CGO_ENABLED=0
 verify-all: verify verify-engine-plants
 
 # This workspace's own checks; they need no engine.
-verify: verify-settings verify-exceptions verify-origin verify-rust verify-wasm verify-go \
+verify: verify-settings verify-exceptions verify-origin verify-rust verify-package verify-wasm verify-go \
 		verify-readme verify-notices verify-licences verify-reuse verify-secrets verify-signoff
-	@printf '%s\n' 'PASS: settings, exceptions, origin names, crate gate, module, Go binding,' \
+	@printf '%s\n' 'PASS: settings, exceptions, origin names, crate gate, packed crate, module, Go binding,' \
 		'README Go blocks, third-party notices, dependency licences, licence headers, secrets and sign-off check.'
 
 # The shared toolchain and lint settings equal the record in
@@ -74,6 +74,14 @@ verify-rust: fetch
 	cargo test --locked --offline --all-features
 	cargo clippy --locked --offline --all-targets --all-features -- -D warnings
 	RUSTDOCFLAGS='-D warnings' cargo doc --locked --offline --no-deps
+
+# The library crate as the release packs it: cargo package compiles the packed
+# sources on their own, so a source that reads a file outside the crate or a
+# module the manifest leaves out fails here and not first on a tag. The
+# selftest plants one of each on a copy of the committed tree first.
+verify-package: fetch
+	python3 -B tools/package_check.py selftest
+	python3 -B tools/package_check.py check
 
 # The WebAssembly module: the export crate is linted for the target it is
 # built for (the host run above never compiles its export file), then the
