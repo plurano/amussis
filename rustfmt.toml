@@ -6,4 +6,3 @@ edition = "2024"
 max_width = 100
 newline_style = "Unix"
 use_field_init_shorthand = true
-# Planted line: this file now differs from the source, and nothing else changes.
