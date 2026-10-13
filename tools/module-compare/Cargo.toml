@@ -1,0 +1,23 @@
+# SPDX-FileCopyrightText: 2026 Lusoris <lusoris@pm.me>
+# SPDX-License-Identifier: EUPL-1.2
+
+[package]
+name = "amussis-module-compare"
+description = "WebAssembly module order-free comparator: code and data section equivalence."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[[bin]]
+name = "amussis-module-compare"
+path = "src/main.rs"
+
+[dependencies]
+wasmparser.workspace = true
+
+[lints]
+workspace = true

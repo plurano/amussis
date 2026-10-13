@@ -304,11 +304,13 @@ check` rebuilds it with the machine's paths rewritten and fails on one differing
 byte. After a change to the engine or the export crate, run
 `python3 tools/wasm_module.py update` and commit the module with the change.
 The module is the build of a Linux x86_64 host, and only such a host is held
-to its bytes today. A Windows host never builds them, and a macOS host builds
-them with some lock files and not with others, so on those two the check skips
-the comparison when the bytes differ, prints the reason and tests the binding
-on the committed module; `update` is refused there (see
-[Exceptions](#exceptions)).
+to its exact bytes. A Windows or macOS host can build the same functions in
+another order, so when its bytes differ the check runs
+`tools/module-compare` (package `amussis-module-compare`), which compares the
+two modules up to function order. A difference in code fails on every host.
+On macOS the data section must be equal too. On Windows a differing data
+section is skipped while the exception for it is live (see
+[Exceptions](#exceptions)). `update` is refused on both hosts.
 
 ## Identities in the audit chain
 
@@ -387,25 +389,33 @@ without one, and an entry is refused once no such name is left. No job here
 calls another workflow today, so the list holds no such entry; the selftest
 plants a calling job to keep the rule proven.
 
-The third entry kind excuses the byte comparison of the committed module on a
-Windows host and on a macOS host. On Windows, `rustc` embeds five source paths
-with that host's separators, which no flag of the stable toolchain rewrites,
-and six functions come out in another order: the order follows the
-`-C metadata` values cargo passes to the compiler, which differ from host to
-host and which no stable setting fixes. A macOS host embeds the same paths as
-Linux, but it passes other values too. Its build was equal to the Linux build
-until one crate version changed in the lock file, and differed after: the
-equality was a coincidence of those values, never a property of the build. The
-entry in `exceptions.toml` names the issue, which holds the measurements.
+The third entry kind excuses one part of the module comparison on a Windows
+host: the data section. On Windows, `rustc` embeds five source paths with that
+host's separators, which no flag of the stable toolchain rewrites, and the data
+section also differs in string-pool order and in the pointers of panic
+locations. Functions also come out in another order on Windows and on macOS:
+the order follows the `-C metadata` values cargo passes to the compiler, which
+differ from host to host and which no stable setting fixes. The entry in
+`exceptions.toml` names the issue, which holds the measurements.
 
-While the entry is live, `tools/wasm_module.py check` on those two hosts skips
-that one comparison when the bytes differ and says so in its output. It still
-refuses a build that is no module or holds a machine path, and a missing
-module. On Windows it refuses the entry itself once the host builds the
-committed bytes; on macOS an equal build passes and proves nothing about the
-entry. Past the entry's date both jobs fail like the Linux job would. The host
-rule names those two hosts and no group of hosts: every other host is held to
-the bytes.
+`tools/module-compare` removes the order from the comparison. It labels every
+function by its type, locals and instructions, with call targets replaced by
+the labels of the called functions over twelve rounds, and compares the two
+sets of labels. Element segments, exports and the start function are compared
+through those labels. Every other section is compared byte for byte, and the
+data section is reported as its own class. The tool refuses a module it cannot
+fully read, such as one with a duplicate data or start section or element
+items in expression form, instead of passing it.
+
+On a host whose build differs from the committed bytes, `tools/wasm_module.py
+check` fails on any code difference. On macOS it also fails on a data
+difference and passes an order-only difference with a notice; macOS needs no
+exception. On Windows it skips a data difference only while the entry is live,
+says so in its output, and refuses the entry once the build matches the
+committed module up to function order. It still refuses a build that is no
+module or holds a machine path, and a missing module. Past the entry's date the
+Windows job fails like the Linux job would. Every other host is held to the
+bytes.
 
 The cause of the other order was found with the *Module diagnosis* workflow
 (`.github/workflows/module-diagnosis.yml`). It is started by hand, builds the
