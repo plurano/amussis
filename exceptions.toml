@@ -17,5 +17,5 @@ expires = "2027-01-09"
 [[exception]]
 rule = "module-byte-comparison"
 path = "bindings/go/decision/amussis_decision.wasm"
-reason = "a Windows host cannot build the bytes of the committed module: rustc embeds five source paths with the host's separators, which no flag of the stable toolchain rewrites, and six functions come out in another order, which follows cargo's `-C metadata` values that differ from host to host and that no stable setting fixes (plurano/amussis#2); a macOS host embeds the same paths as Linux and, by those values, has the same order with some lock files only: it builds the committed bytes with thiserror 2.0.20 in the lock file and not with 2.0.21; the Windows and macOS jobs skip only this comparison and test the Go binding on the committed module"
+reason = "a Windows host cannot build the data section bytes of the committed module: rustc embeds path separators, string-pool order, and panic Location pointers in the data section, which no stable toolchain flag rewrites; the code section is held on all hosts by order-free comparison (amussis-module-compare) and a macOS host is held with no exception; this entry excuses only the Windows data section comparison under category A (interval stated: 90 days) while testing the Go binding on the committed module"
 expires = "2027-01-09"
