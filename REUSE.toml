@@ -69,6 +69,7 @@ path = [
     ".github/actionlint.yaml",
     ".github/pull_request_template.md",
     ".github/workflows/praetor-api.yml",
+    ".github/workflows/praetor-docs.yml",
     ".github/workflows/reuse.yml",
     ".paperclip/**",
     ".vscode/**",
@@ -84,7 +85,29 @@ path = [
     "CONTRIBUTING.md",
     "SECURITY.md",
     "lefthook.yml",
+    "tools/figures/**",
+    "tools/markdownlint/**",
 ]
 precedence = "closest"
 SPDX-FileCopyrightText = "2026 Lusoris <lusoris@pm.me>"
 SPDX-License-Identifier = "EUPL-1.2"
+
+# The figure tools vendor interfig, and the committed player bundles it with
+# React, react-dom and scheduler; dist/THIRD-PARTY-LICENSES.txt carries their
+# MIT texts. Both tables mirror the engine's own REUSE.toml and must stay after
+# the table above: when several tables match a file, the last one decides.
+[[annotations]]
+path = ["tools/figures/third_party/interfig/upstream/**"]
+precedence = "override"
+SPDX-FileCopyrightText = "2025 Vectorize AI, Inc."
+SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = ["tools/figures/dist/**"]
+precedence = "override"
+SPDX-FileCopyrightText = [
+    "2026 Lusoris <lusoris@proton.me>",
+    "2025 Vectorize AI, Inc.",
+    "Meta Platforms, Inc. and affiliates",
+]
+SPDX-License-Identifier = "EUPL-1.2 AND MIT"

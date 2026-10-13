@@ -12,6 +12,12 @@ GO_CONSUMER := examples/go-consumer
 WASM_TARGET := wasm32-unknown-unknown
 # The Go steps use the installed Go, change no go.mod and build without cgo.
 GO_LOCAL := GOTOOLCHAIN=local GOFLAGS=-mod=readonly CGO_ENABLED=0
+# The documentation gate (the Praetor block at the end of this file) installs
+# the npm packages its lock file names on every run. npm takes them from the
+# cache `make fetch` fills and never from the registry: a package missing there
+# fails the gate instead of being downloaded.
+NPM_LOCKED := tools/markdownlint
+export npm_config_offline := true
 
 .PHONY: verify verify-settings verify-exceptions verify-origin verify-rust verify-package verify-wasm verify-go
 .PHONY: verify-readme
@@ -53,15 +59,23 @@ verify-origin:
 	python3 -B tools/origin_names.py selftest
 	python3 -B tools/origin_names.py check
 
-# The only step that reaches a third-party host: the crates.io registry and
-# the Go module proxy. It downloads every platform's locked crates, which the
-# dependency-closure tests need because they read `cargo metadata` without a
-# platform filter, and the Go modules go.sum names. Everything after it runs
-# with --offline or GOPROXY=off.
+# The only step that reaches a third-party host: the crates.io registry, the
+# Go module proxy and the npm registry. It downloads every platform's locked
+# crates, which the dependency-closure tests need because they read `cargo
+# metadata` without a platform filter, the Go modules go.sum names, and the npm
+# packages of the documentation gate's lock file into npm's cache, by a locked
+# install in a directory that is removed again. Everything after it runs with
+# --offline, GOPROXY=off or npm's offline mode.
 fetch:
 	cargo fetch --locked
 	cd $(GO_BINDING) && $(GO_LOCAL) go mod download
 	cd $(GO_CONSUMER) && $(GO_LOCAL) go mod download
+	scratch="$$(mktemp -d)" && cp $(NPM_LOCKED)/package.json $(NPM_LOCKED)/package-lock.json "$$scratch" \
+		&& (cd "$$scratch" && npm_config_offline=false npm ci --ignore-scripts --no-audit --no-fund); \
+		status=$$?; rm -rf "$$scratch"; exit $$status
+
+# The documentation gate reads the npm cache that fetch fills.
+docs-lint: fetch
 
 # The crate gate on the toolchain rust-toolchain.toml pins. The toolchain is
 # printed first so the log names the rustc that actually ran.
@@ -249,3 +263,13 @@ compile-context:
 
 audit:
 	@$(PRAETORCTL) audit
+
+# BEGIN praetor documentation gate
+.PHONY: docs-lint docs-figures
+verify-all: docs-lint docs-figures
+docs-lint:
+	@node tools/markdownlint/verify.mjs
+docs-figures:
+	@node tools/figures/build.mjs check
+	@node tools/figures/build.mjs sources
+# END praetor documentation gate
