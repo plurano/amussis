@@ -36,7 +36,7 @@ env:
   GITLEAKS_SHA256_MACOS: "b40ab0ae55c505963e365f271a8d3846efbc170aa17f2607f13df610a9aeb6a5"
   GITLEAKS_SHA256_WINDOWS: "d29144deff3a68aa93ced33dddf84b7fdc26070add4aa0f4513094c8332afc4e"
   # Published Praetor commit that builds the praetorctl this gate pins.
-  PRAETOR_COMMIT: "3bbde07342bdece12c46f74b0ee2c1f51129478f"
+  PRAETOR_COMMIT: "82cd4ed60de9e1a6e9136f4b595bdfd7a3850634"
   CARGO_TERM_COLOR: never
 
 # One shell on every platform: the steps are written for bash, which the
