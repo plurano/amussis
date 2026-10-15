@@ -86,7 +86,10 @@ fn a_planted_md5_crate_fails_the_sweep() -> Result<(), String> {
 fn a_prefixed_md5_name_is_not_a_hit() -> Result<(), String> {
     let prefixed = dependency_closure::synthetic(PACKAGE, &["md5-asm", "md-5-extra"]);
     let names = dependency_closure::closure(&prefixed, PACKAGE)?;
-    assert!(dependency_closure::hits(&names, &FORBIDDEN).is_empty());
+    assert_eq!(
+        dependency_closure::hits(&names, &FORBIDDEN),
+        [] as [&str; 0]
+    );
     Ok(())
 }
 

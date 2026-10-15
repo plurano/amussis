@@ -295,7 +295,7 @@ fn a_halt_record_that_failed_is_written_by_the_next_halt() -> Fallible<()> {
         Some(SINGLE),
         "halted all the same"
     );
-    assert!(flaky.ledger().sink().inner.accepted().is_empty());
+    assert_eq!(flaky.ledger().sink().inner.accepted(), []);
 
     flaky.halt_unnamed(HaltReason::OperatorStop, SINGLE)?;
     flaky.halt_unnamed(HaltReason::OperatorStop, SINGLE)?;
@@ -585,7 +585,7 @@ fn a_release_that_cannot_be_recorded_does_not_release() -> Fallible<()> {
         "{unsigned:?}"
     );
     assert!(no_signer.killswitch().is_engaged());
-    assert!(no_signer.ledger().sink().accepted().is_empty());
+    assert_eq!(no_signer.ledger().sink().accepted(), []);
     Ok(())
 }
 
@@ -666,7 +666,7 @@ fn a_named_halt_that_cannot_be_recorded_still_halts() -> Fallible<()> {
         "{unwritten:?}"
     );
     assert_eq!(unsigned.killswitch().level(), Some(SINGLE));
-    assert!(unsigned.ledger().sink().accepted().is_empty());
+    assert_eq!(unsigned.ledger().sink().accepted(), []);
     let outcome = unsigned.decide(&action("intent-after", RiskTier::TierCRoutineBounded)?);
     assert_eq!(
         outcome.block_reason(),
@@ -686,7 +686,7 @@ fn a_halt_that_cannot_be_recorded_still_halts() -> Fallible<()> {
         "{unwritten:?}"
     );
     assert_eq!(unsigned.killswitch().level(), Some(SINGLE));
-    assert!(unsigned.ledger().sink().accepted().is_empty());
+    assert_eq!(unsigned.ledger().sink().accepted(), []);
     let outcome = unsigned.decide(&action("intent-after", RiskTier::TierCRoutineBounded)?);
     assert_eq!(
         outcome.block_reason(),

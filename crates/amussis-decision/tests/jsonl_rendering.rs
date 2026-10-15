@@ -149,7 +149,7 @@ fn a_record_of_the_halt_latch_renders_without_an_action() -> Fallible<()> {
         assert_eq!(parsed.block_reason, None);
         assert_eq!(parsed.maker.as_deref(), named.map(|_| "maker-01"));
         assert_eq!(parsed.level, named.map(|who| who.level.tag()));
-        assert!(parsed.checkers.is_empty());
+        assert_eq!(parsed.checkers, [] as [std::string::String; 0]);
     }
     Ok(())
 }
@@ -186,7 +186,7 @@ fn a_line_names_who_its_record_names() -> Fallible<()> {
     let line = jsonl::project(record).map_err(|_| FixtureError::Render)?;
     assert_eq!(line.maker.as_deref(), Some("maker-01"));
     assert_eq!(line.level, Some(1));
-    assert!(line.checkers.is_empty());
+    assert_eq!(line.checkers, [] as [std::string::String; 0]);
     Ok(())
 }
 
