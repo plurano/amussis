@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Lusoris <lusoris@pm.me>
 // SPDX-License-Identifier: EUPL-1.2
 
-//! The D02 hashing boundary.
+//! The SHA-256-only hashing boundary.
 //!
 //! The ledger never names a hash function directly: it goes through
 //! [`LedgerHasher`]. [`HashAlgorithm`] has exactly one variant, `Sha256`. MD5 is
@@ -149,7 +149,7 @@ impl fmt::Display for Digest32 {
     }
 }
 
-/// The ledger's hashing boundary (decision D02).
+/// The ledger's hashing boundary.
 pub trait LedgerHasher {
     /// The algorithm this implementation records in every audit record.
     const ALGORITHM: HashAlgorithm;
@@ -171,7 +171,8 @@ pub trait LedgerHasher {
 ///
 /// The chain digest is taken over this encoding rather than over a
 /// serialiser's output, so no serialisation library release can alter a
-/// historical digest, and the record wire schema stays free for M14 to pin.
+/// historical digest, and canonical hashing remains independent of the record
+/// wire schema, whose versioned consumer form is not built yet.
 /// Every variable-length field is length-prefixed, so re-splitting a field
 /// boundary changes the pre-image.
 #[derive(Debug, Clone, Copy)]

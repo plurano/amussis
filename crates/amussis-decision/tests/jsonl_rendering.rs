@@ -232,7 +232,7 @@ fn a_persisted_md5_line_is_refused() {
 }
 
 /// Boundary: an unknown field is refused rather than silently dropped, so the
-/// schema cannot drift unnoticed before M14 pins it.
+/// schema cannot drift unnoticed before a versioned consumer schema is built.
 #[test]
 fn an_unknown_field_is_refused() -> Fallible<()> {
     let ledger = one_record(RecordStatus::Blocked, Some(BlockReason::AuditUnavailable))?;

@@ -3,10 +3,10 @@
 
 //! The record-signing boundary.
 //!
-//! Milestone M02 ships no production signer: TPM2 sealing is deferred to M20.
-//! The deferral is a typed hole rather than a placeholder string. The default
+//! This crate ships no production signer; TPM2 sealing is not built yet.
+//! The missing backend is a typed hole rather than a placeholder string. The default
 //! binding is [`SignerBinding::Unbound`], which hard-errors, so "a missing
-//! signer returns an error" is the deferral proof itself.
+//! signer returns an error" is the fail-closed proof itself.
 
 use crate::MAX_SIGNATURE_BYTES;
 use crate::identity::SignerKeyId;
@@ -14,17 +14,17 @@ use crate::ledger::hash::Digest32;
 
 /// Reasons a record cannot be sealed.
 ///
-/// Every variant has a producer in this module, and only those two conditions
-/// are representable in milestone M02: [`SignerBinding::Unbound`] produces
-/// [`Self::Unavailable`] and [`Signature::new`] produces [`Self::TooLong`]. A
-/// backend-specific refusal has no producer here because M02 ships no backend,
-/// so it is not a variant; M20 adds one with the TPM2 path that raises it.
+/// Every variant has a producer in this module, and only two conditions are
+/// representable: [`SignerBinding::Unbound`] produces [`Self::Unavailable`]
+/// and [`Signature::new`] produces [`Self::TooLong`]. A backend-specific
+/// refusal has no producer or variant because this crate ships no backend;
+/// the TPM2 path that would raise one is not built yet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum SignError {
-    /// The signing backend is unusable. [`SignerBinding::Unbound`], the
-    /// milestone M02 default, is the in-crate producer.
-    #[error("the record signer is unavailable; TPM2 sealing is deferred to M20")]
+    /// The signing backend is unusable. [`SignerBinding::Unbound`], the default
+    /// binding, is the in-crate producer.
+    #[error("the record signer is unavailable; TPM2 sealing is not built yet")]
     Unavailable,
     /// The signature the backend produced exceeded the scalar bound.
     #[error("signature of {actual} bytes exceeds the bound of {max}")]
@@ -109,7 +109,7 @@ pub trait RecordSigner {
 
 /// Whether a signer is bound to the ledger.
 ///
-/// `Unbound` is the milestone M02 default and always errors.
+/// `Unbound` is the default binding and always errors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SignerBinding<S: RecordSigner> {
     /// A signer is bound.
@@ -132,7 +132,7 @@ impl<S: RecordSigner> SignerBinding<S> {
         }
     }
 
-    /// Returns the milestone M02 default binding: no signer at all.
+    /// Returns the default binding: no signer at all.
     ///
     /// `Default` is deliberately not implemented: deriving it would demand
     /// `S: Default`, and a signer backend has no meaningful default.

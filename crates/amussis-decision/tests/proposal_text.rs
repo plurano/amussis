@@ -243,7 +243,7 @@ fn text_that_is_no_object_is_refused() {
 fn another_version_is_named_as_the_cause() -> Fallible<()> {
     for tag in [
         "amussis.decision.proposal.v2",
-        "aegis.p09-p06.action-proposal.v1",
+        "foreign.system.action-proposal.v1",
         "amussis.decision.proposal.v1.",
     ] {
         assert_eq!(

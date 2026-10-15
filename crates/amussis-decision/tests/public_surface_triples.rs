@@ -8,7 +8,7 @@
 //! positive, negative and boundary case for one group of items the sweep
 //! reported, so the surface is covered by intent rather than by coincidence.
 //!
-//! Two items are structurally unreachable in milestone M02 and are covered as
+//! Two items are structurally unreachable in the current implementation and are covered as
 //! such rather than pretended to be exercised:
 //! [`LedgerError::AlgorithmMismatch`], because `HashAlgorithm` admits exactly
 //! one algorithm, and [`BlockReason::RequestMalformed`], because every registry
@@ -125,8 +125,8 @@ fn the_canonical_preimage_commits_to_the_version_and_the_position() -> Fallible<
     Ok(())
 }
 
-/// `Sha256Ledger`: the concrete alias is the shape M02 ships, and a record
-/// sealed through it starts at [`Sequence::FIRST`].
+/// `Sha256Ledger`: the concrete alias this crate provides, through which a
+/// sealed record starts at [`Sequence::FIRST`].
 #[test]
 fn the_sha256_alias_seals_a_chain_from_the_first_position() -> Fallible<()> {
     let mut chain = ledger()?;
@@ -340,9 +340,9 @@ fn only_a_killswitch_refusal_carries_a_halt_tag() {
     }
 }
 
-/// `BlockReason::RequestMalformed`: unreachable from `decide` in M02, because
-/// every registry refusal it can hit maps elsewhere, so it is pinned by its
-/// stable encodings instead of by a path.
+/// `BlockReason::RequestMalformed`: unreachable from `decide` because every
+/// registry refusal it can hit maps elsewhere, so it is pinned by its stable
+/// encodings instead of by a path.
 #[test]
 fn the_malformed_request_reason_keeps_its_stable_encoding() {
     assert_eq!(BlockReason::RequestMalformed.name(), "request-malformed");
