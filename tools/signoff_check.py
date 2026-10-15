@@ -25,14 +25,12 @@ import sys
 import tempfile
 from pathlib import Path
 
+from toolkit import CheckError
+
 MAX_COMMITS = 1000
 DEADLINE_SECONDS = 60
 SIGNED = re.compile(r"^Signed-off-by: \S", re.MULTILINE)
 SIGN_OFF = "Signed-off-by: Plant <plant@example.invalid>"
-
-
-class CheckError(Exception):
-    """The check could not run; distinct from a commit that lacks a sign-off."""
 
 
 def git(repo: Path, *args: str) -> str:

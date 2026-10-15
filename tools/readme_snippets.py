@@ -28,8 +28,15 @@ import argparse
 import re
 import shutil
 import sys
-import tempfile
 from pathlib import Path
+
+from toolkit import (
+    CheckError,
+    planted as toolkit_planted,
+    read_lines,
+    replace_in,
+    run_selftest,
+)
 
 README = "README.md"
 EXAMPLES = "examples/go-consumer"
@@ -37,17 +44,6 @@ MAX_EXAMPLES = 64
 FENCE_OPEN = "```go"
 FENCE_CLOSE = "```"
 IMPORT = re.compile(r'^import "([^"]+)"$')
-
-
-class CheckError(Exception):
-    """The check could not run; distinct from a block that was not found."""
-
-
-def read_lines(path: Path) -> list[str]:
-    try:
-        return path.read_text(encoding="utf-8").splitlines()
-    except (OSError, UnicodeDecodeError) as error:
-        raise CheckError(f"cannot read {path}: {error}") from error
 
 
 def normal(line: str) -> str:
@@ -108,23 +104,14 @@ def check(root: Path) -> tuple[list[str], int]:
     return found, len(held)
 
 
-def planted(root: Path, edit) -> Path:
-    """A throwaway copy of the README and the examples with one edit applied."""
-    copy = Path(tempfile.mkdtemp(prefix="readme-snippets-"))
+def copy_readme_examples(root: Path, copy: Path) -> None:
     shutil.copyfile(root / README, copy / README)
     shutil.copytree(root / EXAMPLES, copy / EXAMPLES)
-    edit(copy)
-    return copy
 
 
-def replace_in(name: str, old: str, new: str):
-    def edit(copy: Path) -> None:
-        text = (copy / name).read_text(encoding="utf-8")
-        if old not in text:
-            raise CheckError(f"selftest plant: {name} does not contain {old!r}")
-        (copy / name).write_text(text.replace(old, new, 1), encoding="utf-8")
-
-    return edit
+def planted(root: Path, edit) -> Path:
+    """A throwaway copy of the README and the examples with one edit applied."""
+    return toolkit_planted(root, "readme-snippets-", copy_readme_examples, edit)
 
 
 def in_go_blocks(transform):
@@ -185,20 +172,7 @@ LOOK_ALIKES = {
 
 def selftest(root: Path) -> list[str]:
     """Each plant must be refused and each look-alike accepted."""
-    failures = [f"the unplanted tree is refused: {line}" for line in check(root)[0]]
-    cases = [(name, edit, True) for name, edit in PLANTS.items()]
-    cases += [(name, edit, False) for name, edit in LOOK_ALIKES.items()]
-    for name, edit, refused in cases:
-        copy = planted(root, edit)
-        try:
-            found = check(copy)[0]
-            if refused and not found:
-                failures.append(f"plant passed: {name}")
-            if not refused and found:
-                failures.append(f"look-alike refused: {name}: {found[0]}")
-        finally:
-            shutil.rmtree(copy, ignore_errors=True)
-    return failures
+    return run_selftest(root, check, planted, PLANTS, LOOK_ALIKES)
 
 
 def main() -> int:

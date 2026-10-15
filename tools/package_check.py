@@ -35,6 +35,8 @@ import tarfile
 import tempfile
 from pathlib import Path
 
+from toolkit import CheckError
+
 CRATE = "amussis-decision"
 LIB = f"crates/{CRATE}/src/lib.rs"
 MANIFEST = f"crates/{CRATE}/Cargo.toml"
@@ -43,10 +45,6 @@ DEADLINE_SECONDS = 900
 OUTSIDE = '\n/// Planted.\n#[doc = include_str!("../../../README.md")]\npub mod planted {}\n'
 INSIDE = '\n/// Planted.\n#[doc = include_str!("../Cargo.toml")]\npub mod planted {}\n'
 LEFT_OUT = 'publish = false\nexclude = ["src/ledger/hash.rs"]\n'
-
-
-class CheckError(Exception):
-    """The check could not run; distinct from a crate that does not build."""
 
 
 def package(tree: Path, target: Path) -> tuple[int, str]:

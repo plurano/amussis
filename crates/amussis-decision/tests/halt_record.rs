@@ -20,16 +20,16 @@ mod common;
 use std::cell::Cell;
 
 use amussis_decision::{
-    ActionType, AgentId, AuditRecord, BlockReason, CheckerId, CheckerSet, Clock, ClockError,
-    DecisionEngine, DecisionError, Digest32, FixedClock, HaltReason, HashAlgorithm, InMemorySink,
-    IntentId, InterceptorOutcome, IoDeadline, KillswitchState, LedgerError, LedgerSink, MakerId,
+    ActionType, AgentId, AuditRecord, BlockReason, Clock, ClockError, DecisionEngine,
+    DecisionError, Digest32, FixedClock, HaltReason, HashAlgorithm, InMemorySink, IntentId,
+    InterceptorOutcome, IoDeadline, KillswitchState, LedgerError, LedgerSink, MakerId,
     OversightClass, OversightError, PreimageError, RecordBody, RecordDraft, RecordPrincipals,
     RecordStatus, RecordSubject, ReleaseError, RequestId, RequiredApproval, RiskLevel, RiskTier,
     Sequence, Sha256Hasher, SignerBinding, SinkError, UnavailableSink, UnixSeconds, Vote,
 };
 use common::{
     FIXTURE_AUDIT_BOUND, Fallible, FaultyClock, FixtureError, FixtureSigner, START, TestEngine,
-    anchor_of, config, engine, faulty_clock_engine, intent, io_deadline, unsigned_engine,
+    anchor_of, config, engine, faulty_clock_engine, intent, io_deadline, one, two, unsigned_engine,
 };
 
 /// A level whose actions pass with a notice and no checker.
@@ -51,19 +51,6 @@ type EngineWith<K, C> = DecisionEngine<Sha256Hasher, FixtureSigner, K, C>;
 /// The person who asks for a release.
 fn releaser() -> Fallible<MakerId> {
     Ok(MakerId::parse("olga")?)
-}
-
-/// A panel of one checker.
-fn one(name: &str) -> Fallible<CheckerSet> {
-    Ok(CheckerSet::single(CheckerId::parse(name)?))
-}
-
-/// A panel of two checkers.
-fn two(first: &str, second: &str) -> Fallible<CheckerSet> {
-    Ok(CheckerSet::dual(
-        CheckerId::parse(first)?,
-        CheckerId::parse(second)?,
-    )?)
 }
 
 /// An engine halted at `level` with no person named: its store ends on the

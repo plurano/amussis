@@ -304,6 +304,27 @@ pub fn named_for(status: RecordStatus) -> Result<Option<RecordPrincipals>, Decis
     }))
 }
 
+/// A panel of one checker.
+///
+/// # Errors
+///
+/// Propagates an identity parse failure.
+pub fn one(name: &str) -> Fallible<CheckerSet> {
+    Ok(CheckerSet::single(CheckerId::parse(name)?))
+}
+
+/// A panel of two checkers.
+///
+/// # Errors
+///
+/// Propagates an identity parse failure or duplicate checker error.
+pub fn two(first: &str, second: &str) -> Fallible<CheckerSet> {
+    Ok(CheckerSet::dual(
+        CheckerId::parse(first)?,
+        CheckerId::parse(second)?,
+    )?)
+}
+
 // --- Fixtures for the encoding rules ---------------------------------------
 
 /// A non-empty seal, produced through the library's own signer rather than

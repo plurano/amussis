@@ -32,6 +32,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from toolkit import CheckError
+
 MAX_RULES = 100
 MAX_LINES = 1000
 DEADLINE_SECONDS = 60
@@ -60,10 +62,6 @@ PLANTED_SEMGREP_RULES = {
     "hiss-02-python-urlopen-without-timeout",
     "hiss-07-rust-unwrap",
 }
-
-
-class CheckError(Exception):
-    """The scanner check could not run; distinct from a finding or selftest failure."""
 
 
 def run_cmd(

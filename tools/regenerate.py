@@ -32,6 +32,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from toolkit import CheckError
+
 WASM_PATH = "bindings/go/decision/amussis_decision.wasm"
 NOTICES_PATH = "bindings/go/decision/THIRD-PARTY-NOTICES.txt"
 
@@ -45,10 +47,6 @@ MODULE_TIMEOUT_SECONDS = 1200
 DEFAULT_TIMEOUT_SECONDS = 300
 GIT_TIMEOUT_SECONDS = 60
 MAX_STATUS_ENTRIES = 2048
-
-
-class CheckError(Exception):
-    """The tool or update command could not run; distinct from unexpected changes."""
 
 
 def declared_paths(text: str) -> list[str]:

@@ -26,8 +26,16 @@ import argparse
 import re
 import shutil
 import sys
-import tempfile
 from pathlib import Path
+
+from toolkit import (
+    CheckError,
+    append_to,
+    planted as toolkit_planted,
+    read_lines,
+    replace_in,
+    run_selftest,
+)
 
 CRATES = "crates"
 SOURCES = "**/*.rs"
@@ -46,17 +54,6 @@ ORIGIN = {
         "//! It was cut from the Aegis OS repository, where it is component P06",
     ),
 }
-
-
-class CheckError(Exception):
-    """The check could not run; distinct from a name that was found."""
-
-
-def read_lines(path: Path) -> list[str]:
-    try:
-        return path.read_text(encoding="utf-8").splitlines()
-    except (OSError, UnicodeDecodeError) as error:
-        raise CheckError(f"cannot read {path}: {error}") from error
 
 
 def sources(root: Path) -> list[Path]:
@@ -99,35 +96,16 @@ def check(root: Path) -> tuple[list[str], int]:
     return found, len(files)
 
 
-def planted(root: Path, edit) -> Path:
-    """A throwaway copy of every Rust source under crates/ with one edit applied."""
-    copy = Path(tempfile.mkdtemp(prefix="origin-names-"))
+def copy_sources(root: Path, copy: Path) -> None:
     for path in sources(root):
         target = copy / path.relative_to(root)
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(path, target)
-    edit(copy)
-    return copy
 
 
-def append_to(name: str, line: str):
-    def edit(copy: Path) -> None:
-        path = copy / name
-        if not path.is_file():
-            raise CheckError(f"selftest plant: {name} is not a source")
-        path.write_text(path.read_text(encoding="utf-8") + line + "\n", encoding="utf-8")
-
-    return edit
-
-
-def replace_in(name: str, old: str, new: str):
-    def edit(copy: Path) -> None:
-        text = (copy / name).read_text(encoding="utf-8")
-        if old not in text:
-            raise CheckError(f"selftest plant: {name} does not contain {old!r}")
-        (copy / name).write_text(text.replace(old, new, 1), encoding="utf-8")
-
-    return edit
+def planted(root: Path, edit) -> Path:
+    """A throwaway copy of every Rust source under crates/ with one edit applied."""
+    return toolkit_planted(root, "origin-names-", copy_sources, edit)
 
 
 ENGINE = "crates/amussis-decision/src/engine.rs"
@@ -138,12 +116,12 @@ ORIGIN_FILE = "crates/amussis-decision/src/lib.rs"
 ORIGIN_LINE = ORIGIN[ORIGIN_FILE][0]
 
 PLANTS = {
-    "component number in a comment": append_to(ENGINE, "// the gate of P09"),
-    "component number in an identifier": append_to(ENGINE, "const P06_GATE: u8 = 0;"),
-    "lower-case component numbers": append_to(ENGINE, 'const EDGE: &str = "x.p09-p06.y";'),
-    "schema tag in a string": append_to(ENGINE, 'const TAG: &str = "aegis.audit-record.v1";'),
-    "milestone number in a comment": append_to(ENGINE, "// production signer arrives in M20"),
-    "decision number in a string": append_to(ENGINE, 'const RULE: &str = "decision D111";'),
+    "component number in a comment": append_to(ENGINE, "// the gate of P09\n"),
+    "component number in an identifier": append_to(ENGINE, "const P06_GATE: u8 = 0;\n"),
+    "lower-case component numbers": append_to(ENGINE, 'const EDGE: &str = "x.p09-p06.y";\n'),
+    "schema tag in a string": append_to(ENGINE, 'const TAG: &str = "aegis.audit-record.v1";\n'),
+    "milestone number in a comment": append_to(ENGINE, "// production signer arrives in M20\n"),
+    "decision number in a string": append_to(ENGINE, 'const RULE: &str = "decision D111";\n'),
     "roadmap path in a doc comment": append_to(NESTED, "/// See docs/roadmap/requirements.md."),
     "name in a nested module": append_to(NESTED, "// read by P16"),
     "name in the second crate": append_to(SECOND_CRATE, "// sent by P09"),
@@ -159,31 +137,18 @@ PLANTS = {
 }
 
 LOOK_ALIKES = {
-    "three digits": append_to(ENGINE, "// the curve P256 and the port p8080"),
-    "inside a longer word": append_to(ENGINE, "// step06, mp06x and cp09"),
-    "milestone look-alikes": append_to(ENGINE, "// M2, M123, and AM20x"),
-    "decision look-alikes": append_to(ENGINE, "// D3D11 and lower-case d02"),
-    "hash algorithm": append_to(ENGINE, "// SHA-256"),
-    "the system's name without a tag": append_to(ENGINE, "// unlike aegis-style adapters"),
+    "three digits": append_to(ENGINE, "// the curve P256 and the port p8080\n"),
+    "inside a longer word": append_to(ENGINE, "// step06, mp06x and cp09\n"),
+    "milestone look-alikes": append_to(ENGINE, "// M2, M123, and AM20x\n"),
+    "decision look-alikes": append_to(ENGINE, "// D3D11 and lower-case d02\n"),
+    "hash algorithm": append_to(ENGINE, "// SHA-256\n"),
+    "the system's name without a tag": append_to(ENGINE, "// unlike aegis-style adapters\n"),
 }
 
 
 def selftest(root: Path) -> list[str]:
     """Each plant must be refused and each look-alike accepted."""
-    failures = [f"the unplanted tree is refused: {line}" for line in check(root)[0]]
-    cases = [(name, edit, True) for name, edit in PLANTS.items()]
-    cases += [(name, edit, False) for name, edit in LOOK_ALIKES.items()]
-    for name, edit, refused in cases:
-        copy = planted(root, edit)
-        try:
-            found = check(copy)[0]
-            if refused and not found:
-                failures.append(f"plant passed: {name}")
-            if not refused and found:
-                failures.append(f"look-alike refused: {name}: {found[0]}")
-        finally:
-            shutil.rmtree(copy, ignore_errors=True)
-    return failures
+    return run_selftest(root, check, planted, PLANTS, LOOK_ALIKES)
 
 
 def main() -> int:

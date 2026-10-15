@@ -29,7 +29,7 @@ use amussis_decision::{
 };
 use common::{
     FIXTURE_AUDIT_BOUND, Fallible, FixtureError, FixtureSigner, START, TestEngine, anchor_of,
-    config, engine, filler, intent, io_deadline, stored_head,
+    config, engine, filler, intent, io_deadline, one, stored_head, two,
 };
 
 /// A level whose actions pass with a notice and no checker.
@@ -55,19 +55,6 @@ const LARGEST_PREIMAGE: usize = 454;
 
 /// The maker every fixture action is proposed by.
 const MAKER: &str = "maker-alice";
-
-/// A panel of one checker.
-fn one(name: &str) -> Fallible<CheckerSet> {
-    Ok(CheckerSet::single(CheckerId::parse(name)?))
-}
-
-/// A panel of two checkers.
-fn two(first: &str, second: &str) -> Fallible<CheckerSet> {
-    Ok(CheckerSet::dual(
-        CheckerId::parse(first)?,
-        CheckerId::parse(second)?,
-    )?)
-}
 
 /// A panel written as a literal, which names what it is given.
 fn literal(first: &str, second: &str) -> Fallible<CheckerSet> {
