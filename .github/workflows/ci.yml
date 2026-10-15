@@ -265,6 +265,8 @@ jobs:
             *) bin="$RUNNER_TEMP/semgrep/bin" ;;
           esac
           "$bin/pip" install --require-hashes --no-deps -r tools/semgrep/requirements.txt
+          # A --no-deps install skips the resolver; check that locked pins satisfy bounds.
+          "$bin/pip" check
           echo "$bin" >> "$GITHUB_PATH"
           "$bin/semgrep" --version
 

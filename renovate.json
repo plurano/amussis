@@ -7,6 +7,11 @@
     "github>plurano/horistes",
     "github>plurano/horistes:settings-sync"
   ],
+  "pip-compile": {
+    "managerFilePatterns": [
+      "/^tools/semgrep/requirements\\.txt$/"
+    ]
+  },
   "packageRules": [
     {
       "description": "praetor-managed files: praetorctl adopt ships their updates and praetorctl audit locks them byte for byte",
@@ -52,6 +57,16 @@
       "schedule": [
         "before 4am on monday"
       ]
+    },
+    {
+      "description": "The semgrep lock moves only by re-running the uv pip compile command in its header (pip-compile manager); bumping one pin of it alone breaks the bounds of the others",
+      "matchManagers": [
+        "pip_requirements"
+      ],
+      "matchFileNames": [
+        "tools/semgrep/requirements.txt"
+      ],
+      "enabled": false
     }
   ],
   "customManagers": [
