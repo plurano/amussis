@@ -276,7 +276,8 @@ impl Position {
 /// The terminal or interim status a record carries.
 ///
 /// `Blocked` and `Halted` extend the three-value vocabulary of the imported
-/// oversight sketch; M14 must take the superset into the versioned schema.
+/// oversight sketch. A versioned consumer schema for this superset is not
+/// built yet.
 /// `HaltEngaged` and `HaltReleased` are the two records of the halt latch
 /// itself; they decide no action.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -798,7 +799,8 @@ impl AuditRecord {
     }
 }
 
-/// Receives sealed records. Milestone M02 ships [`InMemorySink`] only.
+/// Receives sealed records. [`InMemorySink`] is the only accepting sink this
+/// crate provides.
 pub trait LedgerSink {
     /// Accepts one sealed record.
     ///
@@ -822,9 +824,9 @@ pub trait LedgerSink {
 
 /// A sink that accepts nothing.
 ///
-/// This is the sink dual of [`SignerBinding::Unbound`]: the durable sink is M14
-/// work, so "no sink bound" is a typed hole that fails closed rather than a
-/// silent drop. It is also the only producer of [`SinkError::Unavailable`].
+/// This is the sink dual of [`SignerBinding::Unbound`]: a durable sink is not
+/// built yet, so "no sink bound" is a typed hole that fails closed rather than
+/// a silent drop. It is also the only producer of [`SinkError::Unavailable`].
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct UnavailableSink;
 
@@ -977,7 +979,7 @@ pub struct AuditLedger<H: LedgerHasher, S: RecordSigner, K: LedgerSink> {
     hasher: core::marker::PhantomData<H>,
 }
 
-/// The SHA-256 ledger, the only instantiation milestone M02 ships.
+/// The SHA-256 ledger, the concrete ledger instantiation this crate provides.
 pub type Sha256Ledger<S, K> = AuditLedger<Sha256Hasher, S, K>;
 
 impl<H: LedgerHasher, S: RecordSigner, K: LedgerSink> AuditLedger<H, S, K> {

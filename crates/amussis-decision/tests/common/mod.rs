@@ -47,7 +47,7 @@ pub type Fallible<T> = Result<T, Box<dyn std::error::Error>>;
 
 /// A signer that seals a record with the digest itself. It exists only in the
 /// test crate; the library deliberately ships no production signer, because
-/// TPM2 sealing is deferred to milestone M20.
+/// TPM2 sealing is not built yet.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FixtureSigner {
     key_id: SignerKeyId,

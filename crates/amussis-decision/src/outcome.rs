@@ -7,25 +7,23 @@
 //! returning an outcome cannot allocate, and a test asserts on a variant rather
 //! than on prose.
 //!
-//! # Four variants against the three the requirements name
+//! # Why the engine returns four variants
 //!
-//! `docs/roadmap/requirements.md` records the M02 behavioural contract as
-//! "Allow, Block or Escalate(DecisionRequest)". This crate ships four variants,
-//! and the fourth is a recorded refinement rather than a drift:
+//! The engine must allow, block, or hold an action for approval. This crate
+//! ships four variants because the permissive outcome has two forms:
 //!
-//! * [`InterceptorOutcome::RequireApproval`] is the requirement's `Escalate`,
-//!   renamed for what it does to the action (it is held, not forwarded) and
-//!   carrying an [`ApprovalTicket`] in place of a `DecisionRequest` schema,
-//!   which this library does not declare.
-//! * [`InterceptorOutcome::Warn`] splits the requirement's `Allow`. The
-//!   requirements also mandate a Tier B monitored notice; folding that into
+//! * [`InterceptorOutcome::RequireApproval`] names what happens to the action
+//!   (it is held, not forwarded) and carries an [`ApprovalTicket`]. This
+//!   library does not declare a separate decision-request schema.
+//! * [`InterceptorOutcome::Warn`] splits [`InterceptorOutcome::Allow`]. A Tier
+//!   B action needs a monitored notice; folding that into
 //!   `Allow` would leave the notice untyped, so the only way a caller could
 //!   honour it would be to re-derive the tier, duplicating the classification
 //!   the engine just performed. `Warn` and `Allow` are both permissive
 //!   ([`InterceptorOutcome::permits_execution`] returns `true` for both), so the
 //!   refinement adds an obligation and removes no permission.
 //!
-//! M14 takes the four-value vocabulary into the versioned consumer schema.
+//! A versioned consumer schema for this four-value vocabulary is not built yet.
 
 use crate::killswitch::HaltReason;
 use crate::oversight::ApprovalTicket;

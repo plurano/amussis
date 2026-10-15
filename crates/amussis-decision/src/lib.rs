@@ -43,9 +43,9 @@
 //! # Memory arithmetic behind the default bounds
 //!
 //! An [`AuditRecord`] is dominated by its [`MAX_SIGNATURE_BYTES`]-byte inline
-//! signature. Milestone M02 retains every record **twice** -- once in
-//! [`AuditLedger`] for the chain re-walk and once in the [`InMemorySink`] that
-//! stands in for the durable sink M14 pins -- so the default retention is
+//! signature. This crate retains every record **twice** -- once in
+//! [`AuditLedger`] for the chain re-walk and once in [`InMemorySink`]. A
+//! durable sink is not built yet, so the default in-memory retention is
 //!
 //! ```text
 //! 2 x MAX_LEDGER_RECORDS x size_of::<AuditRecord>()

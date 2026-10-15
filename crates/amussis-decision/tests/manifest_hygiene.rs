@@ -3,7 +3,7 @@
 
 //! Executable checks on the workspace manifests.
 //!
-//! Decision D02 excludes MD5, the milestone pins the toolchain, and the
+//! The SHA-256-only hashing rule excludes MD5, the repository pins the toolchain, and the
 //! workspace activates exactly one crate. Each of those is a claim about files
 //! rather than about code, so each is asserted here rather than left as prose.
 
@@ -15,15 +15,15 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
-/// This crate's package name, the start of its closure (D78).
+/// This crate's package name, the start of its dependency closure.
 const PACKAGE: &str = "amussis-decision";
 
-/// The MD5 implementations D02 excludes from this crate's closure. The lock-wide
-/// sweep before D78 searched for four spellings, `"md5"`, `"md-5"`,
+/// The MD5 implementations the SHA-256-only rule excludes from this crate's
+/// closure. The earlier lock-wide sweep searched for four spellings, `"md5"`, `"md-5"`,
 /// `name = "md5` and `name = "md-5`; they name these two packages, and the
 /// closure matches names exactly. The last two had no closing quote, so they
 /// also refused any package whose name merely starts with `md5` or `md-5`
-/// (`md5-asm`, say); D78's exact-name rule gives that prefix coverage up, and
+/// (`md5-asm`, say); the exact-name closure rule gives that prefix coverage up, and
 /// `a_prefixed_md5_name_is_not_a_hit` records it.
 const FORBIDDEN: [&str; 2] = ["md5", "md-5"];
 
@@ -40,16 +40,16 @@ fn read(name: &str) -> Option<String> {
 
 /// The resolved dependency graph contains no MD5 implementation.
 ///
-/// Since M27 the graph is this crate's own dependency closure, read from
-/// `cargo metadata` (D78), rather than the whole lock; D02's SHA-256
-/// implementation must still be locked and in the closure.
+/// The graph is this crate's own dependency closure, read from `cargo metadata`,
+/// rather than the whole lock; the SHA-256 implementation must still be locked
+/// and in the closure.
 #[test]
 fn the_lock_file_contains_no_md5_implementation() -> Result<(), String> {
     let names = dependency_closure::own_closure(PACKAGE)?;
     let found = dependency_closure::hits(&names, &FORBIDDEN);
     assert!(
         found.is_empty(),
-        "the closure of {PACKAGE} must not contain {found:?}: D02 excludes MD5"
+        "the closure of {PACKAGE} must not contain {found:?}: SHA-256-only hashing excludes MD5"
     );
     assert!(
         names.contains("sha2"),
@@ -64,8 +64,8 @@ fn the_lock_file_contains_no_md5_implementation() -> Result<(), String> {
     Ok(())
 }
 
-/// Negative (D78): an MD5 implementation planted in this crate's closure, as
-/// a dev or a normal dependency, fails the sweep.
+/// Negative: an MD5 implementation planted in this crate's own closure, as a
+/// dev or a normal dependency, fails the sweep.
 #[test]
 fn a_planted_md5_crate_fails_the_sweep() -> Result<(), String> {
     let mut planted = dependency_closure::metadata()?;
@@ -79,8 +79,8 @@ fn a_planted_md5_crate_fails_the_sweep() -> Result<(), String> {
     Ok(())
 }
 
-/// Boundary (D78): names match exactly, so a package whose name only starts
-/// with an MD5 spelling is not a hit. The pre-D78 lock search refused it
+/// Boundary: names match exactly, so a package whose name only starts with an
+/// MD5 spelling is not a hit. The earlier lock-wide search refused it
 /// through its unterminated `name = "md5` token; that coverage is given up.
 #[test]
 fn a_prefixed_md5_name_is_not_a_hit() -> Result<(), String> {
@@ -102,11 +102,17 @@ fn a_prefixed_md5_name_is_not_a_hit() -> Result<(), String> {
 fn the_crate_manifest_declares_only_the_reviewed_dependencies() {
     let manifest = read("crates/amussis-decision/Cargo.toml").unwrap_or_default();
     assert!(!manifest.is_empty(), "the crate manifest must exist");
-    assert!(!manifest.contains("md5"), "D02 excludes MD5");
-    assert!(!manifest.contains("md-5"), "D02 excludes MD5");
+    assert!(
+        !manifest.contains("md5"),
+        "SHA-256-only hashing excludes MD5"
+    );
+    assert!(
+        !manifest.contains("md-5"),
+        "SHA-256-only hashing excludes MD5"
+    );
     assert!(
         !manifest.contains("[[bin]]"),
-        "milestone M02 ships a library only"
+        "this crate ships a library only"
     );
     for expected in ["sha2", "base16ct", "thiserror", "serde", "serde_json"] {
         assert!(
@@ -125,7 +131,7 @@ fn the_crate_manifest_declares_only_the_reviewed_dependencies() {
     for deferred in ["tokio", "dbus", "zbus", "tss-esapi", "aya", "libbpf"] {
         assert!(
             !manifest.contains(deferred),
-            "{deferred} is deferred past milestone M02"
+            "{deferred} is not part of this crate"
         );
     }
 }
@@ -223,7 +229,7 @@ fn highest_declared(metadata: &Value) -> Result<(RustVersion, Vec<String>), Stri
 
 /// The workspace `rust-version` is the pinned toolchain, the only Rust any
 /// job builds with, and no resolved package declares more than that pin.
-/// The settings source decided the same (Aegis-OS D111).
+/// The settings source requires the same equality.
 fn judge_rust_version(
     declared: RustVersion,
     pin: RustVersion,
@@ -300,20 +306,14 @@ fn the_graph_may_reach_the_pin_and_no_further() -> Result<(), String> {
 
 /// The workspace activates exactly the crate directories that have a manifest.
 ///
-/// In the source repository M02 promoted `aegis-justitia`, M03 promoted
-/// `aegis-fabrica-defs`, M15 promoted `aegis-janus-lifecycle`, M17 promoted
-/// `aegis-vulcan` and
-/// `aegis-hestia`, M05 promoted `aegis-tellus` and `aegis-athena`, and M06 promoted
-/// `aegis-minerva` and `aegis-vesta`, so the
-/// list grows by a named entry per milestone. What must not change is that it
-/// is written out: a glob would activate the reserved crate directories the
-/// moment one of them gained a manifest, with no review.
+/// The member list is written out: a glob would activate any reserved crate
+/// directory the moment it gained a manifest, with no review.
 ///
 /// The count is derived rather than written down. A literal had to be edited
-/// in three crates at once each time a milestone adds members, which is duplicated
-/// mutable state of exactly the kind the repository has a gate against. The
-/// invariant behind it -- a directory with a manifest is a member, and nothing
-/// else is -- is what is held here.
+/// in three crates at once each time the workspace added members, which is
+/// duplicated mutable state of exactly the kind the repository has a gate
+/// against. The invariant behind it -- a directory with a manifest is a member,
+/// and nothing else is -- is what is held here.
 #[test]
 fn the_workspace_activates_only_the_promoted_crates() {
     let root = read("Cargo.toml").unwrap_or_default();
@@ -425,7 +425,7 @@ fn the_crate_source_names_no_md5_implementation() {
     }
     assert!(
         offenders.is_empty(),
-        "D02 excludes MD5 from the crate itself, found: {offenders:?}"
+        "SHA-256-only hashing excludes MD5 from the crate itself, found: {offenders:?}"
     );
 }
 
