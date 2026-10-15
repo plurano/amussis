@@ -241,7 +241,7 @@ fn an_unreadable_identifier_makes_the_refusal_anonymous() -> Fallible<()> {
 fn a_value_wider_than_the_buffer_is_refused_and_leaves_it_empty() -> Fallible<()> {
     let about = identified()?;
     let mut buffer = PayloadBuffer::new();
-    assert!(!encode_into(&envelope()?, about, &mut buffer)?.is_empty());
+    assert_ne!(encode_into(&envelope()?, about, &mut buffer)?, "");
     let wide = filler(MAX_CONTRACT_PAYLOAD_BYTES);
     assert_eq!(
         encode_into(&wide, about, &mut buffer),
