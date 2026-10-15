@@ -44,7 +44,7 @@ TARGET = "target/package-check"
 DEADLINE_SECONDS = 900
 OUTSIDE = '\n/// Planted.\n#[doc = include_str!("../../../README.md")]\npub mod planted {}\n'
 INSIDE = '\n/// Planted.\n#[doc = include_str!("../Cargo.toml")]\npub mod planted {}\n'
-LEFT_OUT = 'publish = false\nexclude = ["src/ledger/hash.rs"]\n'
+LEFT_OUT = 'exclude = ["src/ledger/hash.rs"]\n\n[lib]\n'
 
 
 def package(tree: Path, target: Path) -> tuple[int, str]:
@@ -96,7 +96,7 @@ def replace(name: str, old: str, new: str):
 PLANTS = {
     "a source reads a file outside the crate": (append(LIB, OUTSIDE), "README.md"),
     "the manifest leaves a module out of the package": (
-        replace(MANIFEST, "publish = false\n", LEFT_OUT), "hash.rs"),
+        replace(MANIFEST, "[lib]\n", LEFT_OUT), "hash.rs"),
 }
 
 LOOK_ALIKES = {
