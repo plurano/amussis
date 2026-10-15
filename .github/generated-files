@@ -1,0 +1,10 @@
+# SPDX-FileCopyrightText: 2026 Lusoris <lusoris@pm.me>
+# SPDX-License-Identifier: EUPL-1.2
+#
+# Files the merge train may commit to a dependency update from the artifact
+# regenerated-<head sha> of .github/workflows/regenerate.yml (contract:
+# plurano/horistes, decision record 0032). One path per line; the train reads
+# this file from the default branch and never commits a path missing here.
+# tools/regenerate.py refuses a list that differs from its own table.
+bindings/go/decision/amussis_decision.wasm
+bindings/go/decision/THIRD-PARTY-NOTICES.txt

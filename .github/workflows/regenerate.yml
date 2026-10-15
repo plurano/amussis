@@ -1,0 +1,75 @@
+# SPDX-FileCopyrightText: 2026 Lusoris <lusoris@pm.me>
+# SPDX-License-Identifier: EUPL-1.2
+---
+name: Generated files
+
+on:
+  push:
+    branches:
+      - 'renovate/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: regen-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: never
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  regenerate:
+    name: Regenerate generated files
+    # The committed module is held to the Linux build byte for byte, so
+    # regeneration runs on the same Ubuntu 24.04 image as the Linux gate.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Same step as the verification gate: with no toolchain argument rustup
+      # installs the channel rust-toolchain.toml pins, and the WebAssembly
+      # target is added and checked in a step of its own.
+      - name: Materialise the pinned Rust toolchain
+        run: |
+          rustup toolchain install --no-self-update --profile minimal
+          rustup target add wasm32-unknown-unknown
+          rustup show active-toolchain
+          rustup target list --installed | grep -qx wasm32-unknown-unknown
+
+      # The module tool builds without the network, as the gate does.
+      - name: Fetch the locked crates
+        run: cargo fetch --locked
+
+      - name: Regenerate generated files
+        run: python3 -B tools/regenerate.py write --out "$RUNNER_TEMP/regenerated"
+
+      - name: Write step summary
+        env:
+          MANIFEST: ${{ runner.temp }}/regenerated/manifest.json
+        run: |
+          python3 -B - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json, os, pathlib
+          path = pathlib.Path(os.environ["MANIFEST"])
+          if path.is_file():
+              manifest = json.loads(path.read_text(encoding="utf-8"))
+              print(manifest["head"] + ": " + ", ".join(f["path"] for f in manifest["files"]))
+          else:
+              print("nothing to regenerate")
+          PY
+
+      - name: Upload regenerated files
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: regenerated-${{ github.sha }}
+          path: ${{ runner.temp }}/regenerated
+          if-no-files-found: ignore
+          retention-days: 7

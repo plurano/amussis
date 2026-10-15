@@ -19,7 +19,7 @@ GO_LOCAL := GOTOOLCHAIN=local GOFLAGS=-mod=readonly CGO_ENABLED=0
 NPM_LOCKED := tools/markdownlint
 export npm_config_offline := true
 
-.PHONY: verify verify-settings verify-exceptions verify-origin verify-rust verify-package verify-wasm verify-go
+.PHONY: verify verify-settings verify-exceptions verify-origin verify-rust verify-package verify-wasm verify-regenerate verify-go
 .PHONY: verify-readme
 .PHONY: verify-notices verify-licences verify-reuse verify-secrets verify-signoff fetch
 .PHONY: verify-engine-plants verify-api-plant verify-hook-scripts
@@ -33,7 +33,7 @@ export npm_config_offline := true
 verify-all: verify verify-engine-plants
 
 # This workspace's own checks; they need no engine.
-verify: verify-settings verify-exceptions verify-origin verify-rust verify-package verify-wasm verify-go \
+verify: verify-settings verify-exceptions verify-origin verify-rust verify-package verify-wasm verify-regenerate verify-go \
 		verify-readme verify-notices verify-licences verify-reuse verify-secrets verify-signoff
 	@printf '%s\n' 'PASS: settings, exceptions, origin names, crate gate, packed crate, module, Go binding,' \
 		'README Go blocks, third-party notices, dependency licences, licence headers, secrets and sign-off check.'
@@ -105,6 +105,13 @@ verify-wasm: fetch
 	cargo clippy --locked --offline -p amussis-decision-wasm --target $(WASM_TARGET) -- -D warnings
 	python3 -B tools/wasm_module.py selftest
 	python3 -B tools/wasm_module.py check
+
+# The regeneration tool holding the committed module and notices to updates
+# on renovate branches; the selftest runs on a throwaway repository with
+# fake update commands first.
+verify-regenerate:
+	python3 -B tools/regenerate.py selftest
+	python3 -B tools/regenerate.py check
 
 # gofmt exits 0 when it lists files, so its output is the test. One
 # definition serves the binding and the planted case below.
