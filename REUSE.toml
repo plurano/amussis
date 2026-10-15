@@ -78,6 +78,7 @@ path = [
     "docs/adr/**",
     ".editorconfig",
     ".gitattributes",
+    ".gosec.json",
     ".standards-baseline.json",
     ".standards.lock",
     ".standards.yaml",

@@ -254,8 +254,10 @@ func encodeAdjudication(adjudication Adjudication) ([]byte, bool) {
 			return nil, false
 		}
 		if index == 1 {
+			// #nosec G115 -- the check above holds the checkers to 1 to MaxCheckers (2).
 			encoded = append(encoded, byte(len(adjudication.Checkers)))
 		}
+		// #nosec G115 -- the check above holds a name to 1 to MaxPersonBytes (64).
 		encoded = append(encoded, byte(len(name)))
 		encoded = append(encoded, name...)
 	}
@@ -304,11 +306,13 @@ func encodeRelease(release *Release) ([]byte, error) {
 		return nil, fmt.Errorf("%w: it names %d checkers, at most %d", ErrRelease, len(release.Checkers), MaxCheckers)
 	}
 	persons := append([]string{release.Releaser}, release.Checkers...)
+	// #nosec G115 -- the check above holds the checkers to MaxCheckers (2), so persons is at most 3.
 	encoded := []byte{byte(len(persons))}
 	for _, person := range persons {
 		if len(person) == 0 || len(person) > MaxPersonBytes {
 			return nil, fmt.Errorf("%w: a person has %d bytes, outside 1 to %d", ErrRelease, len(person), MaxPersonBytes)
 		}
+		// #nosec G115 -- the check above holds a person to 1 to MaxPersonBytes (64).
 		encoded = append(encoded, byte(len(person)))
 		encoded = append(encoded, person...)
 	}
