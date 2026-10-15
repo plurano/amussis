@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: 2026 Lusoris <lusoris@pm.me>
 # SPDX-License-Identifier: EUPL-1.2
-"""Count the names of the system this library was cut from in its sources.
+"""Refuse source-repository-only names throughout every crate Rust source.
 
 The library came out of an operating system that numbers its components (P06,
-P09) and tags its schemas `aegis.<...>`. Those names belong to that system's
-adapter. Here they may stand in one place: the sentence that says where the
-crate came from, named line for line in ORIGIN below.
+P09), milestones (M02), and decisions (D02), tags its schemas `aegis.<...>`,
+and keeps its requirements under `docs/roadmap/`. Those names belong to that
+system's repository or adapter. Here component and system names may stand in
+one place: the sentence that says where the crate came from, named line for
+line in ORIGIN below. Milestone numbers, decision numbers, and the roadmap path
+have no allowance.
 
-    check       every line of crates/*/src/ that carries such a name is an
-                origin line, and every origin line is still there
+    check       every line of every crates/**/*.rs source that carries such a
+                name is an origin line, and every origin line is still there
     selftest    plant one name per form and place and require each to fail;
-                require look-alikes (P256, a longer word) to pass
+                require look-alikes (P256, M2, d02, SHA-256) to pass
 
 Exit status: 0 no name outside the origin lines, 1 a name was found or an origin
 line is gone, 2 the check itself could not run.
@@ -27,12 +30,15 @@ import tempfile
 from pathlib import Path
 
 CRATES = "crates"
-SOURCES = "*/src/**/*.rs"
+SOURCES = "**/*.rs"
 MAX_SOURCES = 512
 # A component number is P and two digits standing alone: `P06`, `p09-p06` and
 # `P06_GATE` count, `P256` and `step06` do not.
 NAMES = {
     "component number": re.compile(r"(?<![A-Za-z0-9])[Pp][0-9]{2}(?![A-Za-z0-9])"),
+    "milestone number": re.compile(r"(?<![A-Za-z0-9])M[0-9]{2}(?![A-Za-z0-9])"),
+    "decision number": re.compile(r"(?<![A-Za-z0-9])D[0-9]{2,3}(?![A-Za-z0-9])"),
+    "roadmap path": re.compile(r"docs/roadmap/"),
     "schema tag": re.compile(r"aegis\."),
 }
 ORIGIN = {
@@ -54,7 +60,7 @@ def read_lines(path: Path) -> list[str]:
 
 
 def sources(root: Path) -> list[Path]:
-    """Every Rust source under a crate's src/, refusing a tree it cannot bound."""
+    """Every Rust source under crates/, refusing a tree it cannot bound."""
     found = sorted((root / CRATES).glob(SOURCES))
     if not found:
         raise CheckError(f"no source matches {CRATES}/{SOURCES} under {root}")
@@ -94,7 +100,7 @@ def check(root: Path) -> tuple[list[str], int]:
 
 
 def planted(root: Path, edit) -> Path:
-    """A throwaway copy of every crate's src/ with one edit applied."""
+    """A throwaway copy of every Rust source under crates/ with one edit applied."""
     copy = Path(tempfile.mkdtemp(prefix="origin-names-"))
     for path in sources(root):
         target = copy / path.relative_to(root)
@@ -127,6 +133,7 @@ def replace_in(name: str, old: str, new: str):
 ENGINE = "crates/amussis-decision/src/engine.rs"
 NESTED = "crates/amussis-decision/src/ledger/mod.rs"
 SECOND_CRATE = "crates/amussis-decision-wasm/src/wire.rs"
+TEST_SOURCE = "crates/amussis-decision/tests/interface_triples.rs"
 ORIGIN_FILE = "crates/amussis-decision/src/lib.rs"
 ORIGIN_LINE = ORIGIN[ORIGIN_FILE][0]
 
@@ -135,8 +142,12 @@ PLANTS = {
     "component number in an identifier": append_to(ENGINE, "const P06_GATE: u8 = 0;"),
     "lower-case component numbers": append_to(ENGINE, 'const EDGE: &str = "x.p09-p06.y";'),
     "schema tag in a string": append_to(ENGINE, 'const TAG: &str = "aegis.audit-record.v1";'),
+    "milestone number in a comment": append_to(ENGINE, "// production signer arrives in M20"),
+    "decision number in a string": append_to(ENGINE, 'const RULE: &str = "decision D111";'),
+    "roadmap path in a doc comment": append_to(NESTED, "/// See docs/roadmap/requirements.md."),
     "name in a nested module": append_to(NESTED, "// read by P16"),
     "name in the second crate": append_to(SECOND_CRATE, "// sent by P09"),
+    "name in a tests source": append_to(TEST_SOURCE, "// sent by P09"),
     "second name beside the origin line": append_to(ORIGIN_FILE, "// see also P05"),
     "origin line reworded, its allowance left": replace_in(
         ORIGIN_FILE, ORIGIN_LINE, ORIGIN_LINE.replace("component P06", "the decision engine")
@@ -150,6 +161,9 @@ PLANTS = {
 LOOK_ALIKES = {
     "three digits": append_to(ENGINE, "// the curve P256 and the port p8080"),
     "inside a longer word": append_to(ENGINE, "// step06, mp06x and cp09"),
+    "milestone look-alikes": append_to(ENGINE, "// M2, M123, and AM20x"),
+    "decision look-alikes": append_to(ENGINE, "// D3D11 and lower-case d02"),
+    "hash algorithm": append_to(ENGINE, "// SHA-256"),
     "the system's name without a tag": append_to(ENGINE, "// unlike aegis-style adapters"),
 }
 
@@ -184,7 +198,10 @@ def main() -> int:
         else:
             found, read = check(args.root)
             lines = sum(len(allowed) for allowed in ORIGIN.values())
-            detail = f"{read} sources, {lines} origin line, 0 names elsewhere"
+            detail = (
+                f"{read} Rust sources under crates/, {lines} origin line, "
+                "0 source-repository names elsewhere"
+            )
     except CheckError as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 2

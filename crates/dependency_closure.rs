@@ -1,15 +1,15 @@
 // SPDX-FileCopyrightText: 2026 Lusoris <lusoris@pm.me>
 // SPDX-License-Identifier: EUPL-1.2
 
-//! D78: a crate's own dependency closure, read from `cargo metadata`.
+//! A crate's own dependency closure, read from `cargo metadata`.
 //!
 //! One file, included by path into the manifest-hygiene test of every crate
 //! whose negative sweep reads its closure (`#[path = "../../dependency_closure.rs"]`),
-//! so the rule D78 records has one definition rather than one per crate. It is
+//! so the closure rule has one definition rather than one per crate. It is
 //! not a crate and has no manifest: a test helper that were a workspace member
 //! would enter every closure it is meant to read.
 //!
-//! The closure is read the way D78 records it: from
+//! The closure is read from
 //! `cargo metadata --format-version 1 --locked --offline --all-features`
 //! without `--filter-platform`, starting at the one workspace member with the
 //! crate's name, following every `resolve.nodes[].deps[].pkg` edge whatever its
@@ -19,8 +19,8 @@
 //! deadline (HISS-02), unparsable output, a null resolve, and zero or several
 //! start nodes; an offline failure names `cargo fetch --locked` as the cure.
 //!
-//! What D78 gives up is recorded with it: no test forbids a crate
-//! workspace-wide any more, so each sweep's guarantee holds for its own crate.
+//! This own-closure rule does not forbid a crate workspace-wide, so each
+//! sweep's guarantee holds for its own crate.
 
 #![allow(dead_code)]
 
@@ -47,7 +47,7 @@ const MAX_POLLS: u32 = 4_800;
 /// an output file.
 static RUNS: AtomicU32 = AtomicU32::new(0);
 
-/// The arguments D78 records, in order.
+/// The `cargo metadata` arguments for the closure query, in order.
 pub const METADATA_ARGS: [&str; 6] = [
     "metadata",
     "--format-version",
@@ -95,7 +95,7 @@ pub struct Invocation {
 }
 
 impl Invocation {
-    /// The invocation D78 records, in this workspace, under its deadline.
+    /// The workspace's closure-query invocation under its deadline.
     ///
     /// # Errors
     ///

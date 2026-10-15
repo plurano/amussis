@@ -9,7 +9,7 @@ use sha2::Digest as _;
 use crate::DIGEST_LEN;
 use crate::ledger::hash::{Digest32, HashAlgorithm, HashError, LedgerHasher};
 
-/// FIPS 180-4 SHA-256, the algorithm decision D02 records.
+/// FIPS 180-4 SHA-256, the only hash algorithm this crate supports.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Sha256Hasher;
 
