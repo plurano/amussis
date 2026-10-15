@@ -60,9 +60,10 @@ import json
 import re
 import shutil
 import sys
-import tempfile
 import tomllib
 from pathlib import Path
+
+from toolkit import CheckError, append_to, planted as toolkit_planted, replace_in
 
 LIST = "exceptions.toml"
 MANIFEST = "Cargo.toml"
@@ -91,10 +92,6 @@ LOWERING = re.compile(r"\b(?:allow|expect|warn)\s*\((?:[^()]|\([^()]*\))*\bunsaf
 JOB = re.compile(r"^  ([A-Za-z_][A-Za-z0-9_-]*):\s*(?:#.*)?$")
 JOB_KEY = re.compile(r"^    (name|uses|runs-on):\s*(\S.*)$")
 CALL = re.compile(r"^    uses: ", re.MULTILINE)
-
-
-class CheckError(Exception):
-    """The check could not run; distinct from a rule that is broken."""
 
 
 def read_text(path: Path) -> str:
@@ -329,23 +326,6 @@ def unsafe_findings(root: Path, by_path: dict[str, str], today: datetime.date) -
     for path in sorted(set(by_path) - lowering_files):
         found.append(f"{LIST}: the entry for {path} excuses nothing; the file does not lower {RULE}")
     return found
-
-
-def replace_in(name: str, old: str, new: str):
-    def edit(tree: Path) -> None:
-        text = read_text(tree / name)
-        if old not in text:
-            raise CheckError(f"selftest plant: {name} does not contain {old!r}")
-        (tree / name).write_text(text.replace(old, new, 1), encoding="utf-8")
-
-    return edit
-
-
-def append_to(name: str, text: str):
-    def edit(tree: Path) -> None:
-        (tree / name).write_text(read_text(tree / name) + text, encoding="utf-8")
-
-    return edit
 
 
 def one_entry(tree: Path) -> str:
@@ -597,9 +577,7 @@ def plant_module_entry(tree: Path, end: datetime.date) -> None:
         append_to(LIST, entry)(tree)
 
 
-def planted(root: Path, end: datetime.date, edit) -> Path:
-    """A throwaway copy of the manifests, the list, the rule set, the module, the workflows and the member sources."""
-    tree = Path(tempfile.mkdtemp(prefix="exceptions-check-"))
+def copy_exceptions_tree(root: Path, tree: Path, end: datetime.date) -> None:
     (tree / RULESET).parent.mkdir(parents=True)
     (tree / MODULE).parent.mkdir(parents=True)
     for name in (MANIFEST, LIST, RULESET, MODULE):
@@ -609,9 +587,13 @@ def planted(root: Path, end: datetime.date, edit) -> Path:
     plant_caller(tree, end)
     plant_module_entry(tree, end)
     same_end(tree, end)
-    if edit is not None:
-        edit(tree)
-    return tree
+
+
+def planted(root: Path, end: datetime.date, edit) -> Path:
+    """A throwaway copy of the manifests, the list, the rule set, the module, the workflows and the member sources."""
+    return toolkit_planted(
+        root, "exceptions-check-", lambda r, c: copy_exceptions_tree(r, c, end), edit
+    )
 
 
 def refusals(root: Path, end: datetime.date, edit, day: datetime.date) -> list[str]:

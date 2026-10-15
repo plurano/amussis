@@ -28,14 +28,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+from toolkit import CheckError
+
 MODULES = ("bindings/go/go.mod", "examples/go-consumer/go.mod")
 DIRECTIVE = re.compile(r"^go (\d+)\.(\d+)(?:\.\d+)?$")
 GOVERSION = re.compile(r"^go(\d+)\.(\d+)(?:\.\d+)?(?:[-+ ].*)?$")
 DEADLINE_SECONDS = 60
-
-
-class CheckError(Exception):
-    """The check could not run; distinct from releases that differ."""
 
 
 def directive(text: str) -> tuple[int, int] | None:

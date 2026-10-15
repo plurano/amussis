@@ -50,6 +50,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from toolkit import CheckError, run_command
+
 # The list of exceptions has one reader; both tools run from this directory.
 import exceptions_check
 
@@ -74,22 +76,10 @@ MAX_MODULE_BYTES = 4 * 1024 * 1024
 DIFFERING_HOSTS = {"-windows-": True, "-apple-darwin": False}
 
 
-class CheckError(Exception):
-    """The check could not run; distinct from a module that differs."""
-
-
 def finished(
     args: list[str], root: Path, env: dict[str, str], deadline: int
 ) -> subprocess.CompletedProcess[str]:
-    try:
-        done = subprocess.run(
-            args, cwd=root, env=env, capture_output=True, text=True, timeout=deadline, check=False
-        )
-    except (OSError, subprocess.TimeoutExpired) as error:
-        raise CheckError(f"{' '.join(args)} could not run: {error}") from error
-    if done.returncode != 0:
-        raise CheckError(f"{' '.join(args)} exited {done.returncode}:\n{done.stderr.strip()}")
-    return done
+    return run_command(args, root, deadline, env=env)
 
 
 def run(args: list[str], root: Path, env: dict[str, str], deadline: int) -> str:

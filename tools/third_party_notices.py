@@ -33,10 +33,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import subprocess
 import sys
 import tomllib
 from pathlib import Path
+
+from toolkit import CheckError, run_command
 
 TARGET = "wasm32-unknown-unknown"
 PACKAGE = "amussis-decision-wasm"
@@ -66,18 +67,8 @@ standard library part of the pinned toolchain; do not edit it by hand.
 """
 
 
-class CheckError(Exception):
-    """The check could not run; distinct from notices that differ."""
-
-
 def run(args: list[str], root: Path, deadline: int) -> str:
-    try:
-        done = subprocess.run(args, cwd=root, capture_output=True, text=True, timeout=deadline, check=False)
-    except (OSError, subprocess.TimeoutExpired) as error:
-        raise CheckError(f"{' '.join(args)} could not run: {error}") from error
-    if done.returncode != 0:
-        raise CheckError(f"{' '.join(args)} exited {done.returncode}:\n{done.stderr.strip()}")
-    return done.stdout
+    return run_command(args, root, deadline).stdout
 
 
 def read_text(path: Path) -> str | None:

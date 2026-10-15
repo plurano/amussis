@@ -33,15 +33,13 @@ import tempfile
 import tomllib
 from pathlib import Path
 
+from toolkit import CheckError, planted as toolkit_planted, replace_in
+
 RECORD = "settings-source.json"
 MANIFEST = "Cargo.toml"
 COPIED_FILES = ("rust-toolchain.toml", "clippy.toml", "rustfmt.toml")
 SETTINGS_FILES = (*COPIED_FILES, MANIFEST, RECORD)
 GIT_DEADLINE_SECONDS = 30
-
-
-class CheckError(Exception):
-    """The check could not run; distinct from a setting that differs."""
 
 
 def sha256(data: bytes) -> str:
@@ -153,23 +151,14 @@ def update(root: Path, source: Path) -> list[str]:
     return differences(root, record, "local")
 
 
-def planted(root: Path, edit) -> Path:
-    """A throwaway copy of the tracked settings with one edit applied."""
-    copy = Path(tempfile.mkdtemp(prefix="settings-sync-"))
+def copy_settings(root: Path, copy: Path) -> None:
     for name in SETTINGS_FILES:
         shutil.copyfile(root / name, copy / name)
-    edit(copy)
-    return copy
 
 
-def replace_in(name: str, old: str, new: str):
-    def edit(copy: Path) -> None:
-        text = (copy / name).read_text(encoding="utf-8")
-        if old not in text:
-            raise CheckError(f"selftest plant: {name} does not contain {old!r}")
-        (copy / name).write_text(text.replace(old, new, 1), encoding="utf-8")
-
-    return edit
+def planted(root: Path, edit) -> Path:
+    """A throwaway copy of the tracked settings with one edit applied."""
+    return toolkit_planted(root, "settings-sync-", copy_settings, edit)
 
 
 PLANTS = {
