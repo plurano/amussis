@@ -1,0 +1,13 @@
+# SPDX-FileCopyrightText: 2026 Lusoris <lusoris@pm.me>
+# SPDX-License-Identifier: EUPL-1.2
+#
+# Parameters of the shared read-back (plurano/horistes tools/readback.py) for
+# the release files. release-build.yml signs and attests; release.yml calls it
+# and must not pass in its place.
+repository = "plurano/amussis"
+signer = ".github/workflows/release-build.yml"
+other_workflows = [".github/workflows/release.yml"]
+
+[blobs]
+checksums = "checksums.txt"
+signature = "checksums.txt.sigstore.json"

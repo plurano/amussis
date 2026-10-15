@@ -514,8 +514,11 @@ gh attestation verify amussis-decision-0.1.0.crate --repo plurano/amussis \
 ```
 
 The run does the same before it stores the files (job `Read the release files
-back`): each check once on the file as built, and once on a copy with a planted
-change or against the wrong workflow, which has to be refused.
+back`). It calls the shared read-back of plurano/horistes (`tools/readback.py`,
+pinned by commit) on the built files with the parameters in
+`.github/release-readback.toml`, without credentials. Each check runs once as
+built and once with one expectation changed, which has to be refused. A last
+step changes one file and requires the read-back to fail on it.
 
 Limits as of this state:
 

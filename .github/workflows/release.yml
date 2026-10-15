@@ -29,28 +29,43 @@ jobs:
       attestations: write
     uses: ./.github/workflows/release-build.yml
 
-  # Reads the files back without the builder's rights. Each check runs twice:
-  # on the file as built, which has to pass, and on a copy with one planted
-  # defect, which has to be refused. A check that accepts its plant fails the
-  # release.
+  # Reads the files back the way a stranger does, with the shared read-back of
+  # plurano/horistes (tools/readback.py, ADR-0033 there): no credentials, the
+  # files of the build job from a local folder, before the draft exists. Every
+  # check is asked again with one expectation changed and has to be refused.
+  # The last step plants a changed file and requires the tool to fail on it.
   verify:
     name: Read the release files back
     needs: [build]
     runs-on: ubuntu-26.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
       contents: read
-      attestations: read
     env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      BUILDER: ${{ github.repository }}/.github/workflows/release-build.yml
-      SIGNER: ${{ github.server_url }}/${{ github.repository }}/.github/workflows/release-build.yml@${{ github.ref }}
-      ISSUER: https://token.actions.githubusercontent.com
+      READBACK: horistes/tools/readback.py
+      PARAMS: .github/release-readback.toml
     steps:
+      - name: Check out the parameter file
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/release-readback.toml
+          sparse-checkout-cone-mode: false
+
+      - name: Check out the shared read-back
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: plurano/horistes
+          ref: 7bd2c439f559324a3fef0d6cdd742436c1963219
+          path: horistes
+          persist-credentials: false
+          sparse-checkout: tools
+          sparse-checkout-cone-mode: true
+
       - name: Install Cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
         with:
-          cosign-release: v3.1.3
+          cosign-release: v2.6.3
 
       - name: Fetch the release files
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -58,61 +73,22 @@ jobs:
           name: release-files
           path: dist
 
-      - name: Every file matches its checksum
-        working-directory: dist
-        run: sha256sum --check --strict checksums.txt
+      - name: Read the files back
+        env:
+          TAG: ${{ github.ref_name }}
+        run: python3 -I "$READBACK" verify --params "$PARAMS" --tag "$TAG" --local dist --work "$RUNNER_TEMP/readback"
 
-      - name: The checksums are signed by the release builder
+      - name: A changed file is refused
+        env:
+          TAG: ${{ github.ref_name }}
         run: |
-          cosign verify-blob \
-            --certificate-identity "$SIGNER" \
-            --certificate-oidc-issuer "$ISSUER" \
-            --bundle dist/checksums.txt.sigstore.json \
-            dist/checksums.txt
-
-      - name: Changed checksums are refused
-        run: |
-          cp dist/checksums.txt planted-checksums.txt
-          printf 'planted\n' >> planted-checksums.txt
-          if cosign verify-blob \
-            --certificate-identity "$SIGNER" \
-            --certificate-oidc-issuer "$ISSUER" \
-            --bundle dist/checksums.txt.sigstore.json \
-            planted-checksums.txt; then
-            echo "FAIL: changed checksums passed the signature check" >&2
-            exit 1
-          fi
-
-      - name: A signature by another workflow is refused
-        run: |
-          if cosign verify-blob \
-            --certificate-identity "${SIGNER/release-build.yml/release.yml}" \
-            --certificate-oidc-issuer "$ISSUER" \
-            --bundle dist/checksums.txt.sigstore.json \
-            dist/checksums.txt; then
-            echo "FAIL: the signature passed for a workflow that did not sign" >&2
-            exit 1
-          fi
-
-      - name: Every file carries provenance from the release builder
-        run: |
-          while read -r _ name; do
-            gh attestation verify "dist/${name}" \
-              --repo "$GITHUB_REPOSITORY" \
-              --signer-workflow "$BUILDER" \
-              --source-ref "$GITHUB_REF"
-          done < dist/checksums.txt
-
-      - name: A changed file carries no provenance
-        run: |
+          cp -r dist planted
           read -r _ name < dist/checksums.txt
-          cp "dist/${name}" planted-file
-          printf 'planted\n' >> planted-file
-          if gh attestation verify planted-file \
-            --repo "$GITHUB_REPOSITORY" \
-            --signer-workflow "$BUILDER" \
-            --source-ref "$GITHUB_REF"; then
-            echo "FAIL: a changed file passed the provenance check" >&2
+          printf 'planted\n' >> "planted/${name}"
+          code=0
+          python3 -I "$READBACK" verify --params "$PARAMS" --tag "$TAG" --local planted --work "$RUNNER_TEMP/planted" || code=$?
+          if [ "$code" -ne 1 ]; then
+            echo "FAIL: the read-back gave exit code ${code} for a changed ${name}, not 1" >&2
             exit 1
           fi
 
