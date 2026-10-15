@@ -3,7 +3,10 @@
 
 package decision
 
-import "fmt"
+import (
+	"encoding/binary"
+	"fmt"
+)
 
 // Class is what the engine decided about one proposal, or what came of the
 // checkers' decision of a held action.
@@ -130,7 +133,9 @@ const (
 // exactly the bytes the module writes for it. The classes of an adjudication
 // are none the module writes for a proposal.
 func decode(code uint32) (Outcome, error) {
-	class, detail, halt, rest := uint8(code), uint8(code>>8), uint8(code>>16), uint8(code>>24)
+	var parts [4]byte
+	binary.LittleEndian.PutUint32(parts[:], code)
+	class, detail, halt, rest := parts[0], parts[1], parts[2], parts[3]
 	if rest != 0 {
 		return Outcome{}, fmt.Errorf("outcome code %#x sets a reserved byte", code)
 	}
@@ -178,7 +183,9 @@ func decodeUnhaltedProposal(class, detail uint8) (Class, bool) {
 // code and no other; a warning, a hold and a block are none the module
 // writes for an adjudication.
 func decodeAdjudication(code uint32) (Outcome, error) {
-	class, detail, halt, rest := uint8(code), uint8(code>>8), uint8(code>>16), uint8(code>>24)
+	var parts [4]byte
+	binary.LittleEndian.PutUint32(parts[:], code)
+	class, detail, halt, rest := parts[0], parts[1], parts[2], parts[3]
 	if rest != 0 {
 		return Outcome{}, fmt.Errorf("outcome code %#x sets a reserved byte", code)
 	}

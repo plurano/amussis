@@ -185,9 +185,12 @@ func encodeFrame(record Record) ([]byte, error) {
 		return nil, errFrame
 	}
 	frame := []byte{frameVersion}
+	// #nosec G115 -- the check above refuses a preimage longer than math.MaxUint16.
 	frame = binary.LittleEndian.AppendUint16(frame, uint16(len(record.Preimage)))
 	frame = append(append(frame, record.Preimage...), record.Digest[:]...)
+	// #nosec G115 -- the check above refuses a key id longer than math.MaxUint8.
 	frame = append(append(frame, byte(len(record.KeyID))), record.KeyID...)
+	// #nosec G115 -- the check above refuses a signature longer than math.MaxUint16.
 	frame = binary.LittleEndian.AppendUint16(frame, uint16(len(record.Signature)))
 	return append(frame, record.Signature...), nil
 }
