@@ -49,12 +49,3 @@ register:
         kind: message
         format: json
         selector: invariants.*
-exceptions:
-  - rule: declared-linters
-    tool: semgrep
-    reason: no semgrep rule set is pinned in this repository and registry rules are fetched at run time, while the gate reaches third-party hosts only in make fetch; the HISS scan of praetorctl audit covers the declared invariants until a pinned rule set and job land
-    expires: "2027-01-11"
-  - rule: declared-linters
-    tool: trivy
-    reason: a trivy scan needs a vulnerability database fetched at run time, while the gate reaches third-party hosts only in make fetch; cargo-deny runs licences only, so a pinned vulnerability scan job is open work
-    expires: "2027-01-11"

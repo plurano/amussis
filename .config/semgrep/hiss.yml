@@ -1,0 +1,101 @@
+# SPDX-FileCopyrightText: 2026 Lusoris <lusoris@pm.me>
+# SPDX-License-Identifier: EUPL-1.2
+---
+# Pinned HISS invariant rules for the repository's Rust, Go, Python, and bash code.
+# Run in make verify-semgrep via tools/scanners.py (planted selftest and tree scan).
+rules:
+  # HISS-02: every I/O call carries a deadline, through a context the caller controls.
+  - id: hiss-02-go-exec-without-context
+    pattern: exec.Command(...)
+    message: "[HISS-02] exec.Command takes no context, so nothing can stop the child. fix: exec.CommandContext."
+    languages: [go]
+    severity: ERROR
+
+  - id: hiss-02-go-dial-without-context
+    pattern-either:
+      - pattern: net.Dial(...)
+      - pattern: tls.Dial(...)
+    message: "[HISS-02] Dial has no deadline. fix: a net.Dialer's DialContext with a context that carries one."
+    languages: [go]
+    severity: ERROR
+
+  - id: hiss-02-go-http-without-context
+    pattern-either:
+      - pattern: http.Get(...)
+      - pattern: http.Head(...)
+      - pattern: http.Post(...)
+      - pattern: http.PostForm(...)
+      - pattern: http.DefaultClient.$M(...)
+    message: "[HISS-02] the default HTTP client has no timeout and these helpers take no context. fix: http.NewRequestWithContext on a client with a Timeout."
+    languages: [go]
+    severity: ERROR
+
+  - id: hiss-02-go-context-todo
+    pattern: context.TODO()
+    message: "[HISS-02] context.TODO carries no deadline and marks unfinished plumbing. fix: pass the caller's context."
+    languages: [go]
+    severity: ERROR
+
+  # HISS-08: no dynamic code execution.
+  - id: hiss-08-go-shell-command
+    pattern-either:
+      - pattern: exec.Command("=~/^(sh|bash|dash|zsh)$/", "-c", ...)
+      - pattern: exec.CommandContext($CTX, "=~/^(sh|bash|dash|zsh)$/", "-c", ...)
+    message: "[HISS-08] a shell -c string is code built at run time. fix: run the program with an argument list."
+    languages: [go]
+    severity: ERROR
+
+  - id: hiss-08-bash-eval
+    pattern: eval ...
+    message: "[HISS-08] eval prohibited. fix: build an argument array."
+    languages: [bash]
+    severity: ERROR
+
+  - id: hiss-08-python-eval
+    pattern-either:
+      - pattern: eval(...)
+      - pattern: exec(...)
+      - pattern: compile(...)
+    message: "[HISS-08] dynamic code execution prohibited. fix: parse structured data or dispatch on known names."
+    languages: [python]
+    severity: ERROR
+
+  - id: hiss-08-python-shell
+    pattern-either:
+      - pattern: subprocess.$F(..., shell=True, ...)
+      - pattern: os.system(...)
+      - pattern: os.popen(...)
+    message: "[HISS-08] a shell string is code built at run time. fix: pass an argument list with shell=False."
+    languages: [python]
+    severity: ERROR
+
+  - id: hiss-02-python-subprocess-without-timeout
+    patterns:
+      - pattern-either:
+          - pattern: subprocess.run(...)
+          - pattern: subprocess.check_output(...)
+          - pattern: subprocess.check_call(...)
+          - pattern: subprocess.call(...)
+      - pattern-not: subprocess.$F(..., timeout=$T, ...)
+    message: "[HISS-02] subprocess execution without timeout. fix: pass timeout=DEADLINE_SECONDS."
+    languages: [python]
+    severity: ERROR
+
+  - id: hiss-02-python-urlopen-without-timeout
+    patterns:
+      - pattern: urllib.request.urlopen(...)
+      - pattern-not: urllib.request.urlopen(..., timeout=$T, ...)
+    message: "[HISS-02] urllib.request.urlopen without timeout. fix: pass timeout=DEADLINE_SECONDS."
+    languages: [python]
+    severity: ERROR
+
+  - id: hiss-07-rust-unwrap
+    patterns:
+      - pattern-either:
+          - pattern: $X.unwrap()
+          - pattern: $X.expect(...)
+    paths:
+      exclude: ["tests/", "*_test.rs", "benches/"]
+    message: "[HISS-07] unwrap or expect outside tests risks unhandled panic. fix: handle the error or return Result."
+    languages: [rust]
+    severity: ERROR

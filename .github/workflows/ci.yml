@@ -41,6 +41,13 @@ env:
   GOLANGCI_LINT_SHA256_LINUX: "ab90aeb7b066f92a33415b638a50fe5344bbb75a0d32ad30cc248d88f81032ab"
   GOLANGCI_LINT_SHA256_MACOS: "5ef5f36a7147e91dc58ef9ef4d11bb7bad5ead0c76eb6c01327a73c641d1dcc3"
   GOLANGCI_LINT_SHA256_WINDOWS: "b15f903d1649283a2ab6e8d2f0c317eaf1f9f6b3763950e7e8b7e72a43dd724f"
+  # trivy scans dependencies offline for vulnerabilities (HISS-11). Each
+  # digest is the one its release publishes for that platform's archive of this
+  # version.
+  TRIVY_VERSION: "0.76.0"
+  TRIVY_SHA256_LINUX: "e24b1c51293c1b15e4ba8d45bbc7891ba053f90278ec2698f3562c993e145fe7"
+  TRIVY_SHA256_MACOS: "e7ec0d21fe842553f59af99aba2efbcc822369fbaed27019c575408b6d135fce"
+  TRIVY_SHA256_WINDOWS: "7b4762a5a5326cb4b83dfd2bb5d9aaf15a1ed867c75cad7dd8b38840a28e7be6"
   # Published Praetor commit that builds the praetorctl this gate pins.
   PRAETOR_COMMIT: "2d23b292417386fe8259da29690266ce331062c6"
   CARGO_TERM_COLOR: never
@@ -214,6 +221,53 @@ jobs:
           install -m 0755 "golangci-lint-unpacked/golangci-lint-${GOLANGCI_LINT_VERSION}-${platform}/golangci-lint${exe}" "bin/golangci-lint${exe}"
           golangci-lint version
 
+      # The same rule for trivy: the archive is held to its pinned digest
+      # before anything of it is unpacked.
+      - name: Install the pinned trivy
+        run: |
+          exe=""
+          case "${RUNNER_OS}-${RUNNER_ARCH}" in
+            Linux-X64) platform=Linux-64bit; kind=tar.gz; want="$TRIVY_SHA256_LINUX" ;;
+            macOS-ARM64) platform=macOS-ARM64; kind=tar.gz; want="$TRIVY_SHA256_MACOS" ;;
+            Windows-X64) platform=windows-64bit; kind=zip; want="$TRIVY_SHA256_WINDOWS"; exe=.exe ;;
+            *) echo "::error::no trivy archive is pinned for ${RUNNER_OS}-${RUNNER_ARCH}"; exit 1 ;;
+          esac
+          archive="trivy_${TRIVY_VERSION}_${platform}.${kind}"
+          base="https://github.com/aquasecurity/trivy/releases/download"
+          cd "$RUNNER_TEMP"
+          curl --fail --silent --show-error --location --max-time 120 \
+            --output "${archive}" "${base}/v${TRIVY_VERSION}/${archive}"
+          got="$(python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "${archive}")"
+          if [ "$got" != "$want" ]; then
+            echo "::error::${archive} has sha256 ${got}, not the pinned ${want}"
+            exit 1
+          fi
+          mkdir trivy-unpacked
+          python3 -c 'import shutil, sys; shutil.unpack_archive(sys.argv[1], sys.argv[2])' "${archive}" trivy-unpacked
+          install -m 0755 "trivy-unpacked/trivy${exe}" "bin/trivy${exe}"
+          trivy --version
+
+      # semgrep's hashed wheels are locked for Python 3.12. The interpreter
+      # only builds semgrep's venv; the gate keeps the runner's python3.
+      - id: semgrep-python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          update-environment: false
+
+      - name: Install semgrep
+        env:
+          SEMGREP_PYTHON: ${{ steps.semgrep-python.outputs.python-path }}
+        run: |
+          "$SEMGREP_PYTHON" -m venv "$RUNNER_TEMP/semgrep"
+          case "$RUNNER_OS" in
+            Windows) bin="$RUNNER_TEMP/semgrep/Scripts" ;;
+            *) bin="$RUNNER_TEMP/semgrep/bin" ;;
+          esac
+          "$bin/pip" install --require-hashes --no-deps -r tools/semgrep/requirements.txt
+          echo "$bin" >> "$GITHUB_PATH"
+          "$bin/semgrep" --version
+
       # The documentation gate runs on Node.js; its packages come from the npm
       # cache that `make fetch` fills, so the action keeps no cache of its own.
       - name: Set up Node.js for the documentation gate
@@ -225,9 +279,11 @@ jobs:
       - name: Name the tools the gate will run
         run: |
           uname -a
-          command -v make sh python3 go cargo rustup pipx praetorctl cargo-deny gitleaks golangci-lint node npm
+          command -v make sh python3 go cargo rustup pipx praetorctl cargo-deny gitleaks golangci-lint semgrep trivy node npm
           make --version | head -1
           python3 --version
+          semgrep --version
+          trivy --version | head -1
           node --version
 
       - name: Verification gate

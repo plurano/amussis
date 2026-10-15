@@ -6,6 +6,9 @@ SHELL := /bin/sh
 REUSE ?= reuse
 CARGO_DENY ?= cargo deny
 GITLEAKS ?= gitleaks
+SEMGREP ?= semgrep
+TRIVY ?= trivy
+export SEMGREP TRIVY
 
 GO_BINDING := bindings/go
 GO_CONSUMER := examples/go-consumer
@@ -22,6 +25,7 @@ export npm_config_offline := true
 .PHONY: verify verify-settings verify-exceptions verify-origin verify-rust verify-package verify-wasm verify-regenerate verify-go
 .PHONY: verify-go-lint verify-readme
 .PHONY: verify-notices verify-licences verify-reuse verify-secrets verify-signoff fetch
+.PHONY: verify-semgrep verify-trivy
 .PHONY: verify-engine-plants verify-api-plant verify-hook-scripts
 
 # The one gate is `make verify-all`: CI runs exactly that target, so a local
@@ -34,9 +38,11 @@ verify-all: verify verify-engine-plants
 
 # This workspace's own checks; they need no engine.
 verify: verify-settings verify-exceptions verify-origin verify-rust verify-package verify-wasm verify-regenerate verify-go \
-		verify-go-lint verify-readme verify-notices verify-licences verify-reuse verify-secrets verify-signoff
+		verify-go-lint verify-readme verify-notices verify-licences verify-reuse verify-secrets verify-signoff \
+		verify-semgrep verify-trivy
 	@printf '%s\n' 'PASS: settings, exceptions, origin names, crate gate, packed crate, module, Go binding,' \
-		'Go linter, README Go blocks, third-party notices, dependency licences, licence headers, secrets and sign-off check.'
+		'Go linter, README Go blocks, third-party notices, dependency licences, licence headers, secrets,' \
+		'sign-off check, semgrep and trivy scanner checks.'
 
 # The shared toolchain and lint settings equal the record in
 # settings-source.json; the selftest plants one defect per setting first, so a
@@ -60,12 +66,13 @@ verify-origin:
 	python3 -B tools/origin_names.py check
 
 # The only step that reaches a third-party host: the crates.io registry, the
-# Go module proxy and the npm registry. It downloads every platform's locked
-# crates, which the dependency-closure tests need because they read `cargo
-# metadata` without a platform filter, the Go modules go.sum names, and the npm
-# packages of the documentation gate's lock file into npm's cache, by a locked
-# install in a directory that is removed again. Everything after it runs with
-# --offline, GOPROXY=off or npm's offline mode.
+# Go module proxy, the npm registry and ghcr.io for the trivy vulnerability
+# database. It downloads every platform's locked crates, which the
+# dependency-closure tests need because they read `cargo metadata` without a
+# platform filter, the Go modules go.sum names, the npm packages of the
+# documentation gate's lock file into npm's cache, and the pinned vulnerability
+# database for trivy. Everything after it runs with --offline, GOPROXY=off,
+# npm's offline mode or trivy's offline scan.
 fetch:
 	cargo fetch --locked
 	cd $(GO_BINDING) && $(GO_LOCAL) go mod download
@@ -73,6 +80,7 @@ fetch:
 	scratch="$$(mktemp -d)" && cp $(NPM_LOCKED)/package.json $(NPM_LOCKED)/package-lock.json "$$scratch" \
 		&& (cd "$$scratch" && npm_config_offline=false npm ci --ignore-scripts --no-audit --no-fund); \
 		status=$$?; rm -rf "$$scratch"; exit $$status
+	python3 -B tools/scanners.py fetch-db
 
 # The documentation gate reads the npm cache that fetch fills.
 docs-lint: fetch
@@ -237,6 +245,21 @@ verify-secrets:
 # range to pass.
 verify-signoff:
 	python3 -B tools/signoff_check.py selftest
+
+# Semgrep checks the repository against its own HISS invariant rules. The
+# selftest plants one finding per rule in a scratch directory first, so a rule
+# that stopped refusing anything fails before the tree scan is trusted.
+verify-semgrep:
+	python3 -B tools/scanners.py selftest semgrep
+	python3 -B tools/scanners.py check semgrep
+
+# Trivy scans dependencies offline for known vulnerabilities against the
+# database pinned by digest. The selftest plants vulnerable Go and Rust
+# manifests in a scratch directory first, so a scanner that stopped reporting
+# advisories fails before the tree scan is trusted.
+verify-trivy: fetch
+	python3 -B tools/scanners.py selftest trivy
+	python3 -B tools/scanners.py check trivy
 
 # One planted defect per engine check of the recipe below, each on a scratch
 # clone of the committed tree: a vendor file that drifted from AGENTS.md, filler

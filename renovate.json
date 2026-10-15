@@ -43,6 +43,30 @@
         ".github/workflows/reuse.yml"
       ],
       "enabled": false
+    },
+    {
+      "description": "Trivy vulnerability database update schedule",
+      "matchDepNames": [
+        "ghcr.io/aquasecurity/trivy-db"
+      ],
+      "schedule": [
+        "before 4am on monday"
+      ]
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Trivy vulnerability database pinned by digest",
+      "managerFilePatterns": [
+        "/^tools/scanners\\.py$/"
+      ],
+      "matchStrings": [
+        "TRIVY_DB_DIGEST = \"(?<currentDigest>sha256:[a-f0-9]{64})\""
+      ],
+      "depNameTemplate": "ghcr.io/aquasecurity/trivy-db",
+      "datasourceTemplate": "docker",
+      "currentValueTemplate": "2"
     }
   ]
 }
