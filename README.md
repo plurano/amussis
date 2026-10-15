@@ -45,7 +45,8 @@ Public since 2026-10-11. The first release is
 [`v0.1.0`](https://github.com/plurano/amussis/releases/tag/v0.1.0): a decision
 engine (risk levels, second-person approval, tamper-evident log, kill switch)
 that moves here from the operating-system repository. Its files are on the
-forge and on no package registry; see [Releases](#releases).
+forge only; from the next release on, publishing a release also publishes both
+crates to crates.io and tags the Go module; see [Releases](#releases).
 
 ## Layout
 
@@ -485,8 +486,10 @@ and `v0.1.0` was set after that run had ended green
 This section says what the workflow files do.
 
 A version tag, `v` and the version in `Cargo.toml` (`v0.1.0`), starts
-`.github/workflows/release.yml`. The run publishes nothing: it ends in a draft
-release on the forge, which a person reads and publishes.
+`.github/workflows/release.yml`. It builds the release files and stores them
+in a draft release on the forge. When a maintainer publishes that draft (not
+a pre-release), `.github/workflows/publish.yml` publishes `amussis-decision`
+and `amussis-decision-wasm` to crates.io and tags `bindings/go/v<version>`.
 
 | File of a release | What it is |
 | :--- | :--- |
@@ -531,13 +534,17 @@ step changes one file and requires the read-back to fail on it.
 Limits as of this state:
 
 - `praetorctl audit` measures the declared supply chain (build level 3, signed
-  checksums, a dependency inventory) from the two workflow files; it reads no
-  published signature. The signatures and attestations of a published release
+  checksums, a dependency inventory) from the release workflow files; it reads
+  no published signature. The signatures and attestations of a published release
   are checked by the commands above, not by the gate.
-- Nothing goes to a package registry. Both crates carry `publish = false`, and
-  the export crate ships as the module it builds, not as a crate file.
-- The run sets no tag for the Go module. A module in a subdirectory is fetched
-  by a tag of its own, `bindings/go/v<version>`.
+- Package publishing runs only when the draft release is published:
+  `publish.yml` publishes `amussis-decision` and `amussis-decision-wasm` to
+  crates.io and tags `bindings/go/v<version>` at the release commit. A
+  pre-release does not publish to crates.io.
+- Maintainer setup before the first release: create the `crates-io`
+  environment and set the `CARGO_REGISTRY_TOKEN` secret. After the initial
+  publish, trusted publishing on crates.io (workflow `publish.yml`, environment
+  `crates-io`) replaces the token.
 
 ## Dependencies
 

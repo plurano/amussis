@@ -10,7 +10,12 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-publish = false
+readme = "README.md"
+documentation = "https://docs.rs/amussis-decision"
+homepage = "https://github.com/plurano/amussis"
+keywords = ["decision-engine", "audit", "governance", "ledger", "maker-checker"]
+categories = ["algorithms", "data-structures"]
+publish = true
 
 [lib]
 path = "src/lib.rs"

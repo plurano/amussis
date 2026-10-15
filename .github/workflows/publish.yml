@@ -1,0 +1,98 @@
+# SPDX-FileCopyrightText: 2026 Lusoris <lusoris@pm.me>
+# SPDX-License-Identifier: EUPL-1.2
+---
+# Publish: publishing a GitHub release publishes the crates to crates.io and
+# tags the Go module. release.yml builds the release and stores it as a draft;
+# when a maintainer publishes the draft, this workflow runs. Pre-releases
+# are skipped: an rc must not land on crates.io for good.
+name: Publish
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  crates:
+    name: Publish crates to crates.io
+    # Skip pre-releases: an rc must not land on crates.io for good (crates.io
+    # releases are immutable and permanent).
+    if: ${{ !github.event.release.prerelease }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    environment: crates-io
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          persist-credentials: false
+
+      # Same step as release-build.yml: with no toolchain argument rustup
+      # installs the channel rust-toolchain.toml pins, and the WebAssembly
+      # target is added and checked in a step of its own.
+      - name: Materialise the pinned Rust toolchain
+        run: |
+          rustup toolchain install --no-self-update --profile minimal
+          rustup target add wasm32-unknown-unknown
+          rustup show active-toolchain
+          rustup target list --installed | grep -qx wasm32-unknown-unknown
+
+      - name: Verify release tag matches workspace version
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          ws_version="$(cargo metadata --no-deps --format-version 1 --locked | python3 -I -c 'import sys, json; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"] == "amussis-decision"))')"
+          if [ "$TAG" != "v${ws_version}" ]; then
+            echo "FAIL: release tag ${TAG} does not match expected version v${ws_version}" >&2
+            exit 1
+          fi
+          echo "PASS: release tag ${TAG} matches workspace version v${ws_version}"
+
+      # crates.io takes the first publish of a crate only with an API token
+      # (https://crates.io/docs/trusted-publishing, "Prerequisites"). After it,
+      # trusted publishing (workflow publish.yml, environment crates-io)
+      # replaces the stored token in a change of its own; the step never falls
+      # back from one to the other.
+      - name: Publish crates to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          cargo publish --locked -p amussis-decision -p amussis-decision-wasm
+
+  # Tags the Go module at the release commit. The tag name pattern
+  # (bindings/go/v*) does not match release.yml's `v*`, so it starts no
+  # release run.
+  go-module:
+    name: Tag the Go module
+    needs: [crates]
+    if: ${{ !github.event.release.prerelease }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Tag the Go module at the release commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          commit_sha="$(gh api "repos/${GH_REPO}/commits/${TAG}" -q .sha)"
+          gh api "repos/${GH_REPO}/git/refs" \
+            -f "ref=refs/tags/bindings/go/${TAG}" \
+            -f "sha=${commit_sha}"
+          tag_ref="$(gh api "repos/${GH_REPO}/git/ref/tags/bindings/go/${TAG}" -q .ref)"
+          if [ "$tag_ref" != "refs/tags/bindings/go/${TAG}" ]; then
+            echo "FAIL: tag refs/tags/bindings/go/${TAG} was not verified" >&2
+            exit 1
+          fi
+          echo "PASS: verified tag ${tag_ref} at ${commit_sha}"

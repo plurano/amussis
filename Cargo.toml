@@ -23,6 +23,7 @@ repository = "https://github.com/plurano/amussis"
 authors = ["Lusoris <lusoris@pm.me>"]
 
 [workspace.dependencies]
+amussis-decision = { path = "crates/amussis-decision", version = "=0.1.0" }
 base16ct = { version = "1.0.0", default-features = false }
 serde = { version = "1.0.229", default-features = false, features = ["derive"] }
 serde_json = { version = "1.0.151", default-features = false, features = ["std"] }

@@ -10,7 +10,12 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-publish = false
+readme = "README.md"
+documentation = "https://docs.rs/amussis-decision-wasm"
+homepage = "https://github.com/plurano/amussis"
+keywords = ["decision-engine", "wasm", "webassembly", "audit", "governance"]
+categories = ["wasm", "data-structures"]
+publish = true
 
 # cdylib is the WebAssembly module; rlib lets the integration tests drive the
 # same binding with test hosts on the build machine.
@@ -19,7 +24,7 @@ path = "src/lib.rs"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-amussis-decision = { path = "../amussis-decision" }
+amussis-decision.workspace = true
 
 # This crate cannot write `workspace = true`: the workspace forbids unsafe code,
 # a forbid cannot be lowered in source, and a WebAssembly export needs
