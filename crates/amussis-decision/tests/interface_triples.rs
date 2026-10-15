@@ -443,7 +443,7 @@ fn signature_positive_negative_and_boundary() -> Fallible<()> {
     Ok(())
 }
 
-/// An unbound signer binding always errors; that is the M20 deferral proof.
+/// An unbound signer binding always errors, proving missing signing fails closed.
 #[test]
 fn signer_binding_positive_negative_and_boundary() -> Fallible<()> {
     let bound: SignerBinding<FixtureSigner> = SignerBinding::Bound(FixtureSigner::new()?);
