@@ -90,7 +90,9 @@ headers with `reuse lint` and scans every commit of the clone for credentials
 with [gitleaks](https://github.com/gitleaks/gitleaks), which has to find a
 token planted at run time. It checks the repository against its own HISS rules
 with [semgrep](https://github.com/semgrep/semgrep) (`.config/semgrep/hiss.yml`),
-which has to find a planted finding per rule. It scans dependencies offline for
+which has to find a planted finding per rule; its hash-locked install
+(`tools/semgrep/requirements.txt`, compiled from `requirements.in`) is refused
+when one pin breaks the bounds of another. It scans dependencies offline for
 vulnerabilities with [trivy](https://github.com/aquasecurity/trivy), which
 requires a database pinned by digest from `make fetch` and has to find planted Go
 and Rust advisories. Its second half is
