@@ -62,6 +62,16 @@ func moduleImports() map[string]signature {
 // functions and its memory and nothing else. A module that asks for more than
 // a clock, a signer and a sink is not this library's module.
 func checkSurface(module wazero.CompiledModule) error {
+	if err := checkImportedFunctions(module); err != nil {
+		return err
+	}
+	if err := checkExportedFunctions(module); err != nil {
+		return err
+	}
+	return checkExportedMemories(module)
+}
+
+func checkImportedFunctions(module wazero.CompiledModule) error {
 	if imported := module.ImportedMemories(); len(imported) != 0 {
 		return fmt.Errorf("the module imports %d memories; it must own its memory", len(imported))
 	}
@@ -84,7 +94,10 @@ func checkSurface(module wazero.CompiledModule) error {
 	if len(seen) != len(wanted) {
 		return fmt.Errorf("the module imports %d of the %d host effects", len(seen), len(wanted))
 	}
+	return nil
+}
 
+func checkExportedFunctions(module wazero.CompiledModule) error {
 	exports := moduleExports()
 	exported := module.ExportedFunctions()
 	for name, definition := range exported {
@@ -99,6 +112,10 @@ func checkSurface(module wazero.CompiledModule) error {
 	if len(exported) != len(exports) {
 		return fmt.Errorf("the module exports %d of the %d functions", len(exported), len(exports))
 	}
+	return nil
+}
+
+func checkExportedMemories(module wazero.CompiledModule) error {
 	memories := module.ExportedMemories()
 	if _, ok := memories[exportMemory]; !ok || len(memories) != 1 {
 		return fmt.Errorf("the module must export exactly one memory, named %q", exportMemory)

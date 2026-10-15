@@ -59,24 +59,47 @@ func readReleasedChain(t *testing.T) (int, []Record) {
 	if err != nil {
 		t.Fatalf("the stored chain: %v", err)
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			t.Errorf("close %s: %v", releasedChain, err)
+		}
+	}()
 	version, records := 0, []Record{}
 	lines := bufio.NewScanner(file)
 	for lines.Scan() && len(records) <= maxReleasedRecords {
 		line := strings.TrimSpace(lines.Text())
-		if value, found := strings.CutPrefix(line, "interface "); found {
-			version, err = strconv.Atoi(value)
-		} else if line != "" && !strings.HasPrefix(line, "#") {
-			records = append(records, releasedRecord(t, line))
-		}
+		record, ok, err := parseReleasedLine(t, line, &version)
 		if err != nil {
 			t.Fatalf("%s: %q: %v", releasedChain, line, err)
 		}
+		if ok {
+			records = append(records, record)
+		}
 	}
-	if err := lines.Err(); err != nil || len(records) == 0 || len(records) > maxReleasedRecords {
-		t.Fatalf("%s holds %d records, error %v", releasedChain, len(records), err)
-	}
+	checkReleasedScan(t, lines, len(records))
 	return version, records
+}
+
+func parseReleasedLine(t *testing.T, line string, version *int) (Record, bool, error) {
+	if value, found := strings.CutPrefix(line, "interface "); found {
+		v, err := strconv.Atoi(value)
+		if err != nil {
+			return Record{}, false, err
+		}
+		*version = v
+		return Record{}, false, nil
+	}
+	if line == "" || strings.HasPrefix(line, "#") {
+		return Record{}, false, nil
+	}
+	return releasedRecord(t, line), true, nil
+}
+
+func checkReleasedScan(t *testing.T, lines *bufio.Scanner, count int) {
+	t.Helper()
+	if err := lines.Err(); err != nil || count == 0 || count > maxReleasedRecords {
+		t.Fatalf("%s holds %d records, error %v", releasedChain, count, err)
+	}
 }
 
 func releasedRecord(t *testing.T, line string) Record {

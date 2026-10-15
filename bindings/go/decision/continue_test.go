@@ -140,17 +140,25 @@ func haltedWorld(t *testing.T, mode Mode) *world {
 
 // wantRefused holds a release to the error it is refused with: no engine, no
 // record, and the chain still continues halted.
-func wantRefused(t *testing.T, w *world, mode Mode, from Continuation, refusal error) error {
+func wantRefused(t *testing.T, w *world, mode Mode, from Continuation, refusal error) {
+	t.Helper()
+	wantRefusedDetail(t, w, mode, from, refusal, "")
+}
+
+// wantRefusedDetail holds a release to its refusal error and the detail it names.
+func wantRefusedDetail(t *testing.T, w *world, mode Mode, from Continuation, refusal error, detail string) {
 	t.Helper()
 	stored, offered := len(w.stored), w.offered
 	engine, err := Continue(t.Context(), w.config(mode), from)
 	if !errors.Is(err, refusal) || engine != nil {
 		t.Fatalf("the release by %+v gave the error %v, want %v", from.Release, err, refusal)
 	}
+	if detail != "" && !strings.Contains(err.Error(), detail) {
+		t.Fatalf("the release was refused with %v, want %q", err, detail)
+	}
 	if len(w.stored) != stored || (refusal != ErrReleaseFailed && w.offered != offered) {
 		t.Fatalf("a refused release left %d records of %d offered, was %d of %d", len(w.stored), w.offered, stored, offered)
 	}
-	return err
 }
 
 // wantHalted holds a chain to continuing halted from its head.
@@ -437,10 +445,7 @@ func TestAReleaseThatNamesNoPersonIsRefused(t *testing.T) {
 		t.Run(plant.name, func(t *testing.T) {
 			inBothModes(t, func(t *testing.T, mode Mode) {
 				w := haltedOver(t, mode, biometric)
-				err := wantRefused(t, w, mode, Continuation{Head: head(t, w), Release: plant.release}, ErrRelease)
-				if !strings.Contains(err.Error(), plant.refusal) {
-					t.Fatalf("the release was refused with %v, want %q", err, plant.refusal)
-				}
+				wantRefusedDetail(t, w, mode, Continuation{Head: head(t, w), Release: plant.release}, ErrRelease, plant.refusal)
 				wantHalted(t, w, mode, HaltClockUnavailable)
 			})
 		})

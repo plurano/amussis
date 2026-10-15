@@ -125,8 +125,8 @@ if err != nil {
     return err
 }
 outcome, err := engine.Decide(ctx, proposalJSON)
-if !outcome.Permits() {
-    // the action does not run
+if outcome.Permits() {
+    act() // only a permitted action runs
 }
 ```
 
@@ -213,7 +213,7 @@ outcome, err := engine.Adjudicate(ctx, decision.Adjudication{
     Checkers: []string{"carol"},
 })
 if outcome.Permits() {
-    // approved: the held action runs
+    act() // approved: the held action runs
 }
 ```
 

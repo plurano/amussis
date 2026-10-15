@@ -20,7 +20,7 @@ NPM_LOCKED := tools/markdownlint
 export npm_config_offline := true
 
 .PHONY: verify verify-settings verify-exceptions verify-origin verify-rust verify-package verify-wasm verify-regenerate verify-go
-.PHONY: verify-readme
+.PHONY: verify-go-lint verify-readme
 .PHONY: verify-notices verify-licences verify-reuse verify-secrets verify-signoff fetch
 .PHONY: verify-engine-plants verify-api-plant verify-hook-scripts
 
@@ -34,9 +34,9 @@ verify-all: verify verify-engine-plants
 
 # This workspace's own checks; they need no engine.
 verify: verify-settings verify-exceptions verify-origin verify-rust verify-package verify-wasm verify-regenerate verify-go \
-		verify-readme verify-notices verify-licences verify-reuse verify-secrets verify-signoff
+		verify-go-lint verify-readme verify-notices verify-licences verify-reuse verify-secrets verify-signoff
 	@printf '%s\n' 'PASS: settings, exceptions, origin names, crate gate, packed crate, module, Go binding,' \
-		'README Go blocks, third-party notices, dependency licences, licence headers, secrets and sign-off check.'
+		'Go linter, README Go blocks, third-party notices, dependency licences, licence headers, secrets and sign-off check.'
 
 # The shared toolchain and lint settings equal the record in
 # settings-source.json; the selftest plants one defect per setting first, so a
@@ -151,6 +151,26 @@ verify-go: fetch verify-wasm
 	cd $(GO_CONSUMER) && $(call gofmt_clean,.)
 	cd $(GO_CONSUMER) && $(GO_LOCAL) GOPROXY=off go vet ./...
 	cd $(GO_CONSUMER) && $(GO_LOCAL) GOPROXY=off go test -count=1 ./...
+
+# The Go linter on the binding and its consumer module: golangci-lint checks
+# standard linters together with gocyclo and gocognit for the HISS-04 complexity
+# caps. The third run is the planted case: a scratch module with a function of
+# cyclomatic complexity over 10 and one of cognitive complexity over 15 must be
+# refused by gocyclo and gocognit, so a linter run that skipped either check is
+# not counted as clean.
+verify-go-lint: fetch
+	golangci-lint version
+	cd $(GO_BINDING) && $(GO_LOCAL) GOPROXY=off golangci-lint run ./...
+	cd $(GO_CONSUMER) && $(GO_LOCAL) GOPROXY=off golangci-lint run ./...
+	@dir=$$(mktemp -d) && printf 'module planted\n\ngo 1.27\n' > "$$dir/go.mod" \
+		&& printf 'package planted\n\nfunc f(x int) int {\n\tif x == 1 { return 1 }\n\tif x == 2 { return 2 }\n\tif x == 3 { return 3 }\n\tif x == 4 { return 4 }\n\tif x == 5 { return 5 }\n\tif x == 6 { return 6 }\n\tif x == 7 { return 7 }\n\tif x == 8 { return 8 }\n\tif x == 9 { return 9 }\n\tif x == 10 { return 10 }\n\tif x == 11 { return 11 }\n\treturn 0\n}\n' > "$$dir/planted.go" \
+		&& printf 'package planted\n\nfunc g(a, b, c, d int) int {\n\tif a > 0 {\n\t\tif b > 0 {\n\t\t\tif c > 0 {\n\t\t\t\tif d > 0 {\n\t\t\t\t\treturn 1\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t}\n\tif d > 0 {\n\t\tif c > 0 {\n\t\t\tif b > 0 {\n\t\t\t\tif a > 0 {\n\t\t\t\t\treturn 2\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t}\n\treturn 0\n}\n' > "$$dir/nested.go" \
+		&& out="$$(cd "$$dir" && $(GO_LOCAL) GOPROXY=off golangci-lint run --config "$(CURDIR)/.golangci.yml" ./... 2>&1)"; status=$$?; rm -rf "$$dir"; \
+		test "$$status" -ne 0 && case "$$out" in *gocyclo*) true ;; *) false ;; esac \
+		&& case "$$out" in *gocognit*) true ;; *) false ;; esac \
+		|| { printf 'FAIL: the planted complexity defects were not both refused: exit %s: %s\n' \
+		"$$status" "$$out" >&2; exit 1; }
+	@printf '%s\n' 'PASS: the planted cyclomatic and cognitive defects are refused.'
 
 # Every Go block of the README stands line for line in the examples that
 # verify-go compiles and runs; the selftest plants one changed block per form
