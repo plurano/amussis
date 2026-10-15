@@ -432,19 +432,30 @@ func link(ctx context.Context, mode Mode, settings wazero.RuntimeConfig, module 
 	if err := checkSurface(compiled); err != nil {
 		return nil, fmt.Errorf("decision: %w", err)
 	}
-	builder := runtime.NewHostModuleBuilder(hostModule)
-	for _, function := range functions {
-		builder.NewFunctionBuilder().WithGoModuleFunction(function.call, function.params, function.results).Export(function.name)
-	}
-	if _, err := builder.Instantiate(ctx); err != nil {
-		return nil, fmt.Errorf("decision: the host functions cannot be set up: %w", err)
+	if err := linkHostFunctions(ctx, runtime, functions); err != nil {
+		return nil, err
 	}
 	// A host function the module imports and the host does not hold fails here.
 	instance, err := runtime.InstantiateModule(ctx, compiled, wazero.NewModuleConfig().WithName("").WithStartFunctions())
 	if err != nil {
 		return nil, fmt.Errorf("decision: the module cannot be linked to its host functions: %w", err)
 	}
-	engine = &Engine{
+	return newEngineInstance(mode, runtime, instance)
+}
+
+func linkHostFunctions(ctx context.Context, runtime wazero.Runtime, functions []hostFunction) error {
+	builder := runtime.NewHostModuleBuilder(hostModule)
+	for _, function := range functions {
+		builder.NewFunctionBuilder().WithGoModuleFunction(function.call, function.params, function.results).Export(function.name)
+	}
+	if _, err := builder.Instantiate(ctx); err != nil {
+		return fmt.Errorf("decision: the host functions cannot be set up: %w", err)
+	}
+	return nil
+}
+
+func newEngineInstance(mode Mode, runtime wazero.Runtime, instance api.Module) (*Engine, error) {
+	engine := &Engine{
 		mode: mode, runtime: runtime, instance: instance, memory: instance.Memory(),
 		decide:     instance.ExportedFunction(exportDecide),
 		adjudicate: instance.ExportedFunction(exportAdjudicate),

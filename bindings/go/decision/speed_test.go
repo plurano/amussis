@@ -73,26 +73,30 @@ func TestCompiledDecidesFasterThanInterpreted(t *testing.T) {
 func BenchmarkDecide(b *testing.B) {
 	for _, mode := range []Mode{Compiled, Interpreted} {
 		b.Run(mode.String(), func(b *testing.B) {
-			w := newWorld()
-			engine, err := New(b.Context(), w.config(mode))
-			if err != nil {
-				b.Fatalf("New: %v", err)
-			}
-			b.Cleanup(func() {
-				if err := engine.Close(context.Background()); err != nil {
-					b.Errorf("Close: %v", err)
-				}
-			})
-			proposal := []byte(routine)
-			b.ResetTimer()
-			for range b.N {
-				outcome, err := engine.Decide(b.Context(), proposal)
-				if err != nil || outcome != (Outcome{Class: Allowed}) {
-					b.Fatalf("Decide: %+v, %v", outcome, err)
-				}
-				w.stored = w.stored[:0]
-			}
+			benchmarkMode(b, mode)
 		})
+	}
+}
+
+func benchmarkMode(b *testing.B, mode Mode) {
+	w := newWorld()
+	engine, err := New(b.Context(), w.config(mode))
+	if err != nil {
+		b.Fatalf("New: %v", err)
+	}
+	b.Cleanup(func() {
+		if err := engine.Close(context.Background()); err != nil {
+			b.Errorf("Close: %v", err)
+		}
+	})
+	proposal := []byte(routine)
+	b.ResetTimer()
+	for range b.N {
+		outcome, err := engine.Decide(b.Context(), proposal)
+		if err != nil || outcome != (Outcome{Class: Allowed}) {
+			b.Fatalf("Decide: %+v, %v", outcome, err)
+		}
+		w.stored = w.stored[:0]
 	}
 }
 

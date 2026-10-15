@@ -51,18 +51,6 @@ register:
         selector: invariants.*
 exceptions:
   - rule: declared-linters
-    tool: gocognit
-    reason: adoption scaffolds no CI job for gocognit declared by profile "framework"; run it in a workflow, or remove this entry
-    expires: "2027-01-11"
-  - rule: declared-linters
-    tool: gocyclo
-    reason: adoption scaffolds no CI job for gocyclo declared by profile "framework"; run it in a workflow, or remove this entry
-    expires: "2027-01-11"
-  - rule: declared-linters
-    tool: golangci-lint
-    reason: adoption scaffolds no CI job for golangci-lint declared by profile "framework"; run it in a workflow, or remove this entry
-    expires: "2027-01-11"
-  - rule: declared-linters
     tool: semgrep
     reason: no semgrep rule set is pinned in this repository and registry rules are fetched at run time, while the gate reaches third-party hosts only in make fetch; the HISS scan of praetorctl audit covers the declared invariants until a pinned rule set and job land
     expires: "2027-01-11"

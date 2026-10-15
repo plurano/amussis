@@ -152,6 +152,17 @@ func (h *host) store(ctx context.Context, memory api.Memory, frameAt, length, mi
 // identifier and signature, each length-prefixed, with nothing after them. It
 // refuses a frame whose digest is not the SHA-256 of its pre-image.
 func parseFrame(frame []byte) (Record, error) {
+	record, err := unpackFrame(frame)
+	if err != nil {
+		return Record{}, err
+	}
+	if sha256.Sum256(record.Preimage) != record.Digest || len(record.KeyID) == 0 || len(record.Signature) == 0 {
+		return Record{}, errFrame
+	}
+	return record, nil
+}
+
+func unpackFrame(frame []byte) (Record, error) {
 	if len(frame) == 0 || frame[0] != frameVersion {
 		return Record{}, errFrame
 	}
@@ -163,11 +174,7 @@ func parseFrame(frame []byte) (Record, error) {
 	if !ok || !okDigest || !okKey || !okSignature || len(rest) != 0 {
 		return Record{}, errFrame
 	}
-	record := Record{Preimage: preimage, Digest: [DigestBytes]byte(digest), KeyID: string(keyID), Signature: signature}
-	if sha256.Sum256(preimage) != record.Digest || len(keyID) == 0 || len(signature) == 0 {
-		return Record{}, errFrame
-	}
-	return record, nil
+	return Record{Preimage: preimage, Digest: [DigestBytes]byte(digest), KeyID: string(keyID), Signature: signature}, nil
 }
 
 // encodeFrame writes one record as the frame parseFrame reads. It refuses a

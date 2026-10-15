@@ -318,25 +318,29 @@ func TestATrapBlocksAndTheEngineAnswersBlockedFromThenOn(t *testing.T) {
 	for _, trap := range asksAfterTrap {
 		t.Run(trap.name, func(t *testing.T) {
 			inBothModes(t, func(t *testing.T, mode Mode) {
-				s := realSurface()
-				s.export(trap.export).traps = true
-				engine, err := loadShape(t, s, mode)
-				if err != nil {
-					t.Fatalf("load: %v", err)
-				}
-				outcome, fault := trap.ask(t, engine)
-				trapped(t, fault, trap.export)
-				if outcome != loaderFault || outcome.Permits() {
-					t.Fatalf("the trap gave %+v", outcome)
-				}
-				for _, then := range asksAfterTrap {
-					outcome, err := then.ask(t, engine)
-					if outcome != loaderFault || !errors.Is(err, fault) {
-						t.Fatalf("%s after the trap gave %+v and the error %v", then.name, outcome, err)
-					}
-				}
+				checkTrapBlocks(t, mode, trap)
 			})
 		})
+	}
+}
+
+func checkTrapBlocks(t *testing.T, mode Mode, trap askAfterTrap) {
+	s := realSurface()
+	s.export(trap.export).traps = true
+	engine, err := loadShape(t, s, mode)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	outcome, fault := trap.ask(t, engine)
+	trapped(t, fault, trap.export)
+	if outcome != loaderFault || outcome.Permits() {
+		t.Fatalf("the trap gave %+v", outcome)
+	}
+	for _, then := range asksAfterTrap {
+		outcome, err := then.ask(t, engine)
+		if outcome != loaderFault || !errors.Is(err, fault) {
+			t.Fatalf("%s after the trap gave %+v and the error %v", then.name, outcome, err)
+		}
 	}
 }
 

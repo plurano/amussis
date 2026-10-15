@@ -131,24 +131,46 @@ const (
 // are none the module writes for a proposal.
 func decode(code uint32) (Outcome, error) {
 	class, detail, halt, rest := uint8(code), uint8(code>>8), uint8(code>>16), uint8(code>>24)
-	outcome := Outcome{Detail: detail, Halt: halt}
-	switch {
-	case rest != 0:
+	if rest != 0 {
 		return Outcome{}, fmt.Errorf("outcome code %#x sets a reserved byte", code)
-	case class == wireAllow && detail == 0 && halt == 0:
-		outcome.Class = Allowed
-	case class == wireWarn && detail != 0 && halt == 0:
-		outcome.Class = Warned
-	case class == wireRequireApproval && detail == 0 && halt == 0:
-		outcome.Class = RequireApproval
-	case class == wireBlock && detail != 0 && detail != BlockLoaderFault:
-		outcome.Class = Blocked
-	case class == wireRefused && detail != 0 && halt == 0:
-		outcome.Class = Refused
-	default:
+	}
+	var (
+		c  Class
+		ok bool
+	)
+	if halt != 0 {
+		c, ok = decodeHaltedProposal(class, detail)
+	} else {
+		c, ok = decodeUnhaltedProposal(class, detail)
+	}
+	if !ok {
 		return Outcome{}, fmt.Errorf("outcome code %#x is not one the module writes", code)
 	}
-	return outcome, nil
+	return Outcome{Class: c, Detail: detail, Halt: halt}, nil
+}
+
+func decodeHaltedProposal(class, detail uint8) (Class, bool) {
+	if class == wireBlock && detail != 0 && detail != BlockLoaderFault {
+		return Blocked, true
+	}
+	return 0, false
+}
+
+func decodeUnhaltedProposal(class, detail uint8) (Class, bool) {
+	switch class {
+	case wireAllow:
+		return Allowed, detail == 0
+	case wireWarn:
+		return Warned, detail != 0
+	case wireRequireApproval:
+		return RequireApproval, detail == 0
+	case wireBlock:
+		return Blocked, detail != 0 && detail != BlockLoaderFault
+	case wireRefused:
+		return Refused, detail != 0
+	default:
+		return 0, false
+	}
 }
 
 // decodeAdjudication reads the module's outcome code for an adjudication, as
@@ -157,21 +179,34 @@ func decode(code uint32) (Outcome, error) {
 // writes for an adjudication.
 func decodeAdjudication(code uint32) (Outcome, error) {
 	class, detail, halt, rest := uint8(code), uint8(code>>8), uint8(code>>16), uint8(code>>24)
-	outcome := Outcome{Detail: detail, Halt: halt}
-	known := detail >= UnadjudicatedHalted && detail <= UnadjudicatedEngine
-	switch {
-	case rest != 0:
+	if rest != 0 {
 		return Outcome{}, fmt.Errorf("outcome code %#x sets a reserved byte", code)
-	case class == wireAllow && detail == 0 && halt == 0:
-		outcome.Class = Allowed
-	case class == wireRejected && detail == 0 && halt == 0:
-		outcome.Class = Rejected
-	case class == wireNotAdjudicated && known && (detail != UnadjudicatedHalted || halt != 0):
-		outcome.Class = NotAdjudicated
-	case class == wireRefused && detail != 0 && halt == 0:
-		outcome.Class = Refused
-	default:
+	}
+	c, ok := decodeAdjudicationClass(class, detail, halt)
+	if !ok {
 		return Outcome{}, fmt.Errorf("outcome code %#x is not one the module writes for an adjudication", code)
 	}
-	return outcome, nil
+	return Outcome{Class: c, Detail: detail, Halt: halt}, nil
+}
+
+func decodeAdjudicationClass(class, detail, halt uint8) (Class, bool) {
+	switch class {
+	case wireAllow:
+		return Allowed, detail == 0 && halt == 0
+	case wireRejected:
+		return Rejected, detail == 0 && halt == 0
+	case wireNotAdjudicated:
+		return NotAdjudicated, validNotAdjudicated(detail, halt)
+	case wireRefused:
+		return Refused, detail != 0 && halt == 0
+	default:
+		return 0, false
+	}
+}
+
+func validNotAdjudicated(detail, halt uint8) bool {
+	if detail < UnadjudicatedHalted || detail > UnadjudicatedEngine {
+		return false
+	}
+	return detail != UnadjudicatedHalted || halt != 0
 }

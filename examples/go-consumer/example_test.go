@@ -93,8 +93,8 @@ func name(class decision.Class) string {
 }
 
 // decideOnce is the README's first block: an engine is set up and decides
-// one proposal.
-func decideOnce(ctx context.Context, clock decision.Clock, signer decision.Signer, sink decision.Sink, proposalJSON []byte) error {
+// one proposal; act is the action, run only when the engine permits it.
+func decideOnce(ctx context.Context, clock decision.Clock, signer decision.Signer, sink decision.Sink, proposalJSON []byte, act func()) error {
 	engine, err := decision.New(ctx, decision.Config{
 		KeyID:        "host-key-01",
 		SinkDeadline: 250 * time.Millisecond,
@@ -105,8 +105,8 @@ func decideOnce(ctx context.Context, clock decision.Clock, signer decision.Signe
 		return err
 	}
 	outcome, err := engine.Decide(ctx, proposalJSON)
-	if !outcome.Permits() {
-		// the action does not run
+	if outcome.Permits() {
+		act() // only a permitted action runs
 	}
 	fmt.Println("decided:", name(outcome.Class))
 	return errors.Join(err, engine.Close(ctx))
@@ -133,15 +133,16 @@ func release(ctx context.Context, config decision.Config, lastStored decision.Re
 	return engine, err
 }
 
-// approve brings one checker's approval of the held action to the engine.
-func approve(ctx context.Context, engine *decision.Engine) error {
+// approve brings one checker's approval of the held action to the engine; act
+// is the held action.
+func approve(ctx context.Context, engine *decision.Engine, act func()) error {
 	outcome, err := engine.Adjudicate(ctx, decision.Adjudication{
 		IntentID: "intent-0042",
 		Vote:     decision.Approve,
 		Checkers: []string{"carol"},
 	})
 	if outcome.Permits() {
-		// approved: the held action runs
+		act() // approved: the held action runs
 	}
 	fmt.Println("adjudicated:", name(outcome.Class))
 	return err
@@ -161,7 +162,7 @@ func identity(key []byte, id string) string {
 
 func Example() {
 	host := &store{}
-	err := decideOnce(context.Background(), host, host, host, []byte(routine))
+	err := decideOnce(context.Background(), host, host, host, []byte(routine), func() {})
 	fmt.Println("records:", len(host.records), "error:", err)
 	// Output:
 	// decided: allowed
@@ -181,7 +182,7 @@ func Example_lifecycle() {
 	}
 	held, err := engine.Decide(ctx, []byte(consequential))
 	fmt.Println("decided:", name(held.Class), "error:", err)
-	fmt.Println("error:", approve(ctx, engine))
+	fmt.Println("error:", approve(ctx, engine, func() {}))
 	operator := identity([]byte("key of this log period"), "operator-7")
 	fmt.Println("halt recorded:", stop(ctx, engine, operator) == nil)
 	fmt.Println("closed:", engine.Close(ctx))

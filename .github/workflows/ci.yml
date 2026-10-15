@@ -35,6 +35,12 @@ env:
   GITLEAKS_SHA256_LINUX: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
   GITLEAKS_SHA256_MACOS: "b40ab0ae55c505963e365f271a8d3846efbc170aa17f2607f13df610a9aeb6a5"
   GITLEAKS_SHA256_WINDOWS: "d29144deff3a68aa93ced33dddf84b7fdc26070add4aa0f4513094c8332afc4e"
+  # golangci-lint lints the Go binding and examples (HISS-04). Each digest is
+  # the one its release publishes for that platform's archive of this version.
+  GOLANGCI_LINT_VERSION: "2.14.0"
+  GOLANGCI_LINT_SHA256_LINUX: "ab90aeb7b066f92a33415b638a50fe5344bbb75a0d32ad30cc248d88f81032ab"
+  GOLANGCI_LINT_SHA256_MACOS: "5ef5f36a7147e91dc58ef9ef4d11bb7bad5ead0c76eb6c01327a73c641d1dcc3"
+  GOLANGCI_LINT_SHA256_WINDOWS: "b15f903d1649283a2ab6e8d2f0c317eaf1f9f6b3763950e7e8b7e72a43dd724f"
   # Published Praetor commit that builds the praetorctl this gate pins.
   PRAETOR_COMMIT: "2d23b292417386fe8259da29690266ce331062c6"
   CARGO_TERM_COLOR: never
@@ -182,6 +188,32 @@ jobs:
           install -m 0755 "gitleaks-unpacked/gitleaks${exe}" "bin/gitleaks${exe}"
           gitleaks version
 
+      # The same rule for golangci-lint: the archive is held to its pinned digest
+      # before anything of it is unpacked.
+      - name: Install the pinned golangci-lint
+        run: |
+          exe=""
+          case "${RUNNER_OS}-${RUNNER_ARCH}" in
+            Linux-X64) platform=linux-amd64; kind=tar.gz; want="$GOLANGCI_LINT_SHA256_LINUX" ;;
+            macOS-ARM64) platform=darwin-arm64; kind=tar.gz; want="$GOLANGCI_LINT_SHA256_MACOS" ;;
+            Windows-X64) platform=windows-amd64; kind=zip; want="$GOLANGCI_LINT_SHA256_WINDOWS"; exe=.exe ;;
+            *) echo "::error::no golangci-lint archive is pinned for ${RUNNER_OS}-${RUNNER_ARCH}"; exit 1 ;;
+          esac
+          archive="golangci-lint-${GOLANGCI_LINT_VERSION}-${platform}.${kind}"
+          base="https://github.com/golangci/golangci-lint/releases/download"
+          cd "$RUNNER_TEMP"
+          curl --fail --silent --show-error --location --max-time 120 \
+            --output "${archive}" "${base}/v${GOLANGCI_LINT_VERSION}/${archive}"
+          got="$(python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "${archive}")"
+          if [ "$got" != "$want" ]; then
+            echo "::error::${archive} has sha256 ${got}, not the pinned ${want}"
+            exit 1
+          fi
+          mkdir golangci-lint-unpacked
+          python3 -c 'import shutil, sys; shutil.unpack_archive(sys.argv[1], sys.argv[2])' "${archive}" golangci-lint-unpacked
+          install -m 0755 "golangci-lint-unpacked/golangci-lint-${GOLANGCI_LINT_VERSION}-${platform}/golangci-lint${exe}" "bin/golangci-lint${exe}"
+          golangci-lint version
+
       # The documentation gate runs on Node.js; its packages come from the npm
       # cache that `make fetch` fills, so the action keeps no cache of its own.
       - name: Set up Node.js for the documentation gate
@@ -193,7 +225,7 @@ jobs:
       - name: Name the tools the gate will run
         run: |
           uname -a
-          command -v make sh python3 go cargo rustup pipx praetorctl cargo-deny gitleaks node npm
+          command -v make sh python3 go cargo rustup pipx praetorctl cargo-deny gitleaks golangci-lint node npm
           make --version | head -1
           python3 --version
           node --version
