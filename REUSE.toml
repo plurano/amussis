@@ -20,6 +20,8 @@ path = [
     "examples/go-consumer/go.sum",
     "tools/notices/refused/Cargo.lock",
     "renovate.json",
+    "tools/semgrep/requirements.in",
+    "tools/semgrep/requirements.txt",
 ]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Lusoris <lusoris@pm.me>"
