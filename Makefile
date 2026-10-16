@@ -277,7 +277,9 @@ verify-api-plant:
 # The checkpoint hook scripts are the engine's, copied in by adoption, and
 # tested where they are written: each has to equal the pinned engine source
 # PRAETOR_SRC names, and the engine's own test_checkpoint.py then runs on a
-# copy, so the tests leave nothing in that checkout. CI runs it before the
+# copy, so the tests leave nothing in that checkout. The copy keeps the
+# engine's layout: the tests load the agent checkpoint adapter from the
+# checkout root, three directories above themselves. CI runs it before the
 # engine checkout is removed; locally PRAETOR_SRC is a checkout of the commit
 # ci.yml pins. The planted case: a script that differs by one line has to
 # compare as different, and cmp exits 1 for a difference and 2 when it could
@@ -293,9 +295,11 @@ verify-hook-scripts:
 		"$(PRAETOR_SRC)/.config/lefthook/scripts/common.py" || status=$$?; rm -rf "$$dir"; \
 		test "$$status" -eq 1 || { printf 'FAIL: the planted script was not told apart: cmp exited %s, not 1\n' \
 		"$$status" >&2; exit 1; }
-	dir=$$(mktemp -d) && cp -R "$(PRAETOR_SRC)/.config/lefthook/scripts" "$$dir/scripts" \
-		&& (cd "$$dir/scripts" && python3 -B -m unittest test_checkpoint); status=$$?; \
-		rm -rf "$$dir"; exit $$status
+	dir=$$(mktemp -d) && mkdir -p "$$dir/.config/lefthook" "$$dir/.config/agent/hooks" \
+		&& cp -R "$(PRAETOR_SRC)/.config/lefthook/scripts" "$$dir/.config/lefthook/scripts" \
+		&& cp "$(PRAETOR_SRC)/.config/agent/hooks/checkpoint.py" "$$dir/.config/agent/hooks/" \
+		&& (cd "$$dir/.config/lefthook/scripts" && python3 -B -m unittest test_checkpoint); \
+		status=$$?; rm -rf "$$dir"; exit $$status
 
 # Praetor declared verification; existing project recipes remain unchanged.
 # Praetor ships one binary under two names; resolve whichever is installed.

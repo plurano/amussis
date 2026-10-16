@@ -48,8 +48,10 @@ env:
   TRIVY_SHA256_LINUX: "e24b1c51293c1b15e4ba8d45bbc7891ba053f90278ec2698f3562c993e145fe7"
   TRIVY_SHA256_MACOS: "e7ec0d21fe842553f59af99aba2efbcc822369fbaed27019c575408b6d135fce"
   TRIVY_SHA256_WINDOWS: "7b4762a5a5326cb4b83dfd2bb5d9aaf15a1ed867c75cad7dd8b38840a28e7be6"
-  # Published Praetor commit that builds the praetorctl this gate pins.
-  PRAETOR_COMMIT: "2d23b292417386fe8259da29690266ce331062c6"
+  # Published Praetor commit that builds the praetorctl this gate pins. The
+  # Git hooks read the same declaration (.config/lefthook/engine.sh), so a
+  # commit is judged locally by the engine that judges it here.
+  PRAETOR_REF: "8c99fd771eaaa889c81a8e0eb4965b5e26e18784"
   CARGO_TERM_COLOR: never
 
 # One shell on every platform: the steps are written for bash, which the
@@ -88,7 +90,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cordanaLLM/praetor
-          ref: ${{ env.PRAETOR_COMMIT }}
+          ref: ${{ env.PRAETOR_REF }}
           path: praetor-src
           persist-credentials: false
 
@@ -111,7 +113,7 @@ jobs:
           CGO_ENABLED: "0"
           GOFLAGS: -mod=readonly
         run: |
-          test "$(git -C praetor-src rev-parse HEAD)" = "$PRAETOR_COMMIT"
+          test "$(git -C praetor-src rev-parse HEAD)" = "$PRAETOR_REF"
           mkdir -p "$RUNNER_TEMP/bin"
           # go vet first: the Go compiler has no warnings, so vet is the
           # warnings-as-errors form for the one Go build this gate runs.
