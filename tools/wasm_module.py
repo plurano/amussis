@@ -44,6 +44,7 @@ from __future__ import annotations
 import argparse
 import datetime
 import hashlib
+import json
 import os
 import subprocess
 import sys
@@ -67,6 +68,9 @@ MAGIC = b"\x00asm\x01\x00\x00\x00"
 BUILD_DEADLINE_SECONDS = 900
 QUERY_DEADLINE_SECONDS = 30
 MAX_MODULE_BYTES = 4 * 1024 * 1024
+# Bounds on the source directories given a remapping of their own (HISS-02).
+MAX_PACKAGES = 512
+MAX_SOURCE_DIRS = 4096
 # The hosts whose toolchain does not build the committed bytes byte for byte,
 # by a part of the host triple, and whether such a host requires an exception
 # for its data section. A Windows host never builds the committed data section
@@ -115,6 +119,81 @@ def machine_prefixes(root: Path, env: dict[str, str], commit: str) -> list[tuple
     ]
 
 
+def source_directories(root: Path, env: dict[str, str], prefixes: list[tuple[Path, str]]) -> list[tuple[str, str]]:
+    """Each directory holding Rust source of a package the module builds from, as this host
+    spells it with a closing separator, and the name it is given with forward slashes.
+
+    rustc rewrites only the prefix of a path, so the remainder keeps the host separator
+    (issue #2). A remapping per source directory leaves no separator of the host behind it:
+    the directory itself is the prefix and the file name the remainder. Workspace crates
+    are passed to rustc by cargo relative to the root, so each also gets its relative
+    spelling. The names are what a build on a host with forward slashes embeds.
+    """
+    listed = run(
+        ["cargo", "metadata", "--locked", "--offline", "--format-version", "1", "--filter-platform", TARGET],
+        root,
+        env,
+        QUERY_DEADLINE_SECONDS,
+    )
+    found: list[tuple[str, str]] = []
+    for directory in library_roots(listed):
+        for walked, _, files in os.walk(directory):
+            if len(found) > MAX_SOURCE_DIRS:
+                raise CheckError(f"more than {MAX_SOURCE_DIRS} source directories to remap")
+            if any(name.endswith(".rs") for name in files):
+                found.extend(directory_names(Path(walked), root, prefixes))
+    # The last matching remapping wins, so a deeper directory comes after its parents.
+    return sorted(set(found), key=lambda pair: (len(pair[0]), pair[0]))
+
+
+def library_roots(listed: str) -> list[Path]:
+    """The source root of each library the module links: the module's package and its
+    normal dependencies, transitively, read from cargo metadata. Build scripts, procedural
+    macros and tests run on the host and embed no path in the module."""
+    try:
+        metadata = json.loads(listed)
+        packages = {package["id"]: package for package in metadata["packages"]}
+        nodes = {node["id"]: node for node in metadata["resolve"]["nodes"]}
+    except (ValueError, KeyError, TypeError) as error:
+        raise CheckError(f"cargo metadata gave no resolved package graph: {error}") from error
+    if len(packages) > MAX_PACKAGES:
+        raise CheckError(f"cargo metadata lists {len(packages)} packages, more than {MAX_PACKAGES}")
+    pending = [ident for ident, package in packages.items() if package["name"] == PACKAGE]
+    seen: set[str] = set()
+    roots: list[Path] = []
+    for _ in range(MAX_PACKAGES):
+        if not pending:
+            return roots
+        ident = pending.pop()
+        if ident in seen:
+            continue
+        seen.add(ident)
+        kinds = {kind for target in packages[ident]["targets"] for kind in target["kind"]}
+        if "proc-macro" in kinds:
+            continue
+        for target in packages[ident]["targets"]:
+            if {"lib", "rlib", "cdylib"} & set(target["kind"]):
+                roots.append(Path(target["src_path"]).parent)
+        for dep in nodes[ident]["deps"]:
+            if any(kind["kind"] is None for kind in dep["dep_kinds"]):
+                pending.append(dep["pkg"])
+    raise CheckError(f"the dependency graph of {PACKAGE} holds more than {MAX_PACKAGES} packages")
+
+
+def directory_names(directory: Path, root: Path, prefixes: list[tuple[Path, str]]) -> list[tuple[str, str]]:
+    """The spellings of one source directory and the name each is given."""
+    names = []
+    for prefix, name in prefixes:
+        if directory.is_relative_to(prefix):
+            rest = directory.relative_to(prefix).as_posix()
+            names.append((str(directory) + os.sep, f"{name}/{rest}/" if rest != "." else f"{name}/"))
+    if directory.is_relative_to(root):
+        relative = directory.relative_to(root)
+        if relative.parts:
+            names.append((str(relative) + os.sep, relative.as_posix() + "/"))
+    return names
+
+
 def record_calls(log: Path, record: str) -> None:
     """Write cargo's record of the build; a record without the module's compiler call is refused."""
     if MODULE_CALL not in record:
@@ -134,8 +213,9 @@ def build_env(root: Path) -> tuple[dict[str, str], list[bytes], str]:
     env.pop("CARGO_ENCODED_RUSTFLAGS", None)
     commit, host = toolchain(root, env)
     prefixes = machine_prefixes(root, env, commit)
-    env["RUSTFLAGS"] = " ".join(f"--remap-path-prefix={path}={name}" for path, name in prefixes)
-    if any(" " in str(path) for path, _ in prefixes):
+    remaps = [(str(path), name) for path, name in prefixes] + source_directories(root, env, prefixes)
+    env["RUSTFLAGS"] = " ".join(f"--remap-path-prefix={path}={name}" for path, name in remaps)
+    if any(" " in path for path, _ in remaps):
         raise CheckError("a machine path holds a space; RUSTFLAGS cannot carry it")
     return env, [str(path).encode() for path, _ in prefixes], host
 
