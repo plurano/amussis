@@ -535,10 +535,12 @@ Limits as of this state:
   `publish.yml` publishes `amussis-decision` and `amussis-decision-wasm` to
   crates.io and tags `bindings/go/v<version>` at the release commit. A
   pre-release does not publish to crates.io.
-- Maintainer setup before the first release: create the `crates-io`
-  environment and set the `CARGO_REGISTRY_TOKEN` secret. After the initial
-  publish, trusted publishing on crates.io (workflow `publish.yml`, environment
-  `crates-io`) replaces the token.
+- Publishing to crates.io uses trusted publishing: each crate's settings on
+  crates.io trust workflow `publish.yml` in environment `crates-io` of
+  plurano/amussis, and the job takes a short-lived token through
+  `rust-lang/crates-io-auth-action`. No registry token is stored in the
+  repository. A new crate in the workspace needs one first publish with an
+  API token before crates.io accepts its trusted-publisher entry.
 
 ## Dependencies
 
