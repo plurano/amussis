@@ -4,31 +4,38 @@
 # Publish: publishing a GitHub release publishes the crates to crates.io and
 # tags the Go module. release.yml builds the release and stores it as a draft;
 # when a maintainer publishes the draft, this workflow runs. Pre-releases
-# are skipped: an rc must not land on crates.io for good.
+# are skipped: an rc must not land on crates.io for good. A manual run
+# (workflow_dispatch) from a release tag only exchanges the OIDC token and
+# publishes nothing; it proves the trusted publisher between releases.
 name: Publish
 
 on:
   release:
     types: [published]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: publish-${{ github.event.release.tag_name }}
+  group: publish-${{ github.event.release.tag_name || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
   crates:
     name: Publish crates to crates.io
     # Skip pre-releases: an rc must not land on crates.io for good (crates.io
-    # releases are immutable and permanent).
-    if: ${{ !github.event.release.prerelease }}
+    # releases are immutable and permanent). The event is named: on a manual
+    # run github.event.release is empty, and the negation alone would pass.
+    if: ${{ github.event_name == 'release' && !github.event.release.prerelease }}
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     environment: crates-io
     permissions:
       contents: read
+      # Trusted publishing: crates.io exchanges the job's OIDC token for a
+      # publish token bound to this workflow and environment.
+      id-token: write
     steps:
       - name: Check out the release tag
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -57,14 +64,17 @@ jobs:
           fi
           echo "PASS: release tag ${TAG} matches workspace version v${ws_version}"
 
-      # crates.io takes the first publish of a crate only with an API token
-      # (https://crates.io/docs/trusted-publishing, "Prerequisites"). After it,
-      # trusted publishing (workflow publish.yml, environment crates-io)
-      # replaces the stored token in a change of its own; the step never falls
-      # back from one to the other.
+      # Trusted publishing (https://crates.io/docs/trusted-publishing): each
+      # crate trusts workflow publish.yml in environment crates-io. The action
+      # returns a token that expires within 30 minutes, and its post step
+      # revokes it when the job ends. No stored token remains to fall back on.
+      - name: Exchange the OIDC token for a crates.io token
+        id: crates-io-auth
+        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
+
       - name: Publish crates to crates.io
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.crates-io-auth.outputs.token }}
         run: |
           cargo publish --locked -p amussis-decision -p amussis-decision-wasm
 
@@ -74,7 +84,7 @@ jobs:
   go-module:
     name: Tag the Go module
     needs: [crates]
-    if: ${{ !github.event.release.prerelease }}
+    if: ${{ github.event_name == 'release' && !github.event.release.prerelease }}
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
@@ -96,3 +106,31 @@ jobs:
             exit 1
           fi
           echo "PASS: verified tag ${tag_ref} at ${commit_sha}"
+
+  # Manual run: the same environment and the same trusted publisher as the
+  # crates job, without a publish. The environment admits release tags only
+  # (deployment policy v*), so the run is started on a tag. The action's post
+  # step revokes the token when the job ends.
+  token-exchange:
+    name: Exchange the OIDC token without publishing
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    environment: crates-io
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Exchange the OIDC token for a crates.io token
+        id: crates-io-auth
+        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
+
+      - name: Require a token from the exchange
+        env:
+          TOKEN: ${{ steps.crates-io-auth.outputs.token }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "FAIL: crates.io returned no token" >&2
+            exit 1
+          fi
+          echo "PASS: crates.io exchanged the OIDC token of ${GITHUB_WORKFLOW_REF} (environment crates-io)"
