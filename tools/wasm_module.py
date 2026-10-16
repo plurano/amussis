@@ -11,21 +11,18 @@ pinned toolchain and compares it with the committed file byte for byte.
 The build names no machine path. Three prefixes are rewritten (the standard
 library source, the cargo home and the checkout), so two machines that build
 the same commit get the same bytes; a module that still holds one of the three
-is refused.
+is refused. Each source directory of the module's library closure is rewritten
+on its own as well, to its forward-slash name: rustc replaces only a prefix,
+and the rest of a path would keep a Windows host's separators in the data
+section (issue #2).
 
-Two hosts do not build those bytes byte for byte. On a Windows host rustc embeds
-the rest of each source path with the host's separators, string-pool order and
-panic Location pointers in the data section, and functions come out in another
-order. On a macOS host only the order differs, and only for some lock files: it
-follows values cargo derives on each host. When a host in DIFFERING_HOSTS builds
-bytes that differ from the committed module, tools/module-compare
-(amussis-module-compare) runs an order-free comparison. Code differences fail
-on any host. On a macOS host an equal code and data section passes with a notice
-("equal up to function order"); macOS needs no exception anymore. On a Windows
-host, order-free code equivalence is held, and data section differences are
-skipped only while exceptions.toml holds a live entry for the module under the
-rule `module-byte-comparison`; an equal code and data build excuses nothing and
-is refused. Every other host is held to the bytes.
+Two hosts do not build those bytes byte for byte: on Windows and macOS the
+functions can come out in another order, which follows values cargo derives on
+each host. When a host in ORDER_FREE_HOSTS builds bytes that differ from the
+committed module, tools/module-compare (amussis-module-compare) compares the
+two up to function order. A code or data difference fails; an equal pair passes
+with a notice ("equal up to function order"). No host has an exception. Every
+other host is held to the bytes.
 
     check       build, then compare with the committed module; no network
     update      build, then replace the committed module
@@ -42,7 +39,6 @@ Exit status: 0 equal, 1 the module differs, 2 the check itself could not run.
 from __future__ import annotations
 
 import argparse
-import datetime
 import hashlib
 import json
 import os
@@ -53,9 +49,6 @@ from pathlib import Path
 
 from toolkit import CheckError, run_command
 
-# The list of exceptions has one reader; both tools run from this directory.
-import exceptions_check
-
 TARGET = "wasm32-unknown-unknown"
 PROFILE = "wasm"
 PACKAGE = "amussis-decision-wasm"
@@ -63,7 +56,7 @@ COMPARE_PACKAGE = "amussis-module-compare"
 BUILT_NAME = "amussis_decision_wasm.wasm"
 # How cargo's verbose record names the compiler call that builds the module.
 MODULE_CALL = "--crate-name amussis_decision_wasm "
-COMMITTED = exceptions_check.MODULE
+COMMITTED = "bindings/go/decision/amussis_decision.wasm"
 MAGIC = b"\x00asm\x01\x00\x00\x00"
 BUILD_DEADLINE_SECONDS = 900
 QUERY_DEADLINE_SECONDS = 30
@@ -71,13 +64,10 @@ MAX_MODULE_BYTES = 4 * 1024 * 1024
 # Bounds on the source directories given a remapping of their own (HISS-02).
 MAX_PACKAGES = 512
 MAX_SOURCE_DIRS = 4096
-# The hosts whose toolchain does not build the committed bytes byte for byte,
-# by a part of the host triple, and whether such a host requires an exception
-# for its data section. A Windows host never builds the committed data section
-# (separators, string-pool order, Location pointers), so it needs a live exception
-# and an equal build refutes the entry. A macOS host builds identical code and data
-# up to function order, so it is held order-free without an exception.
-DIFFERING_HOSTS = {"-windows-": True, "-apple-darwin": False}
+# The hosts whose toolchain can build the committed functions in another order,
+# by a part of the host triple. Such a host is held to equal code and data up
+# to function order (runs 38963557974: Windows, 38863474754: macOS).
+ORDER_FREE_HOSTS = ("-windows-", "-apple-darwin")
 
 
 def finished(
@@ -286,23 +276,9 @@ def digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()[:16]
 
 
-def never_equal(host: str) -> bool | None:
-    """Whether `host` never builds the committed bytes; None for a host that is held to them."""
-    for part, never in DIFFERING_HOSTS.items():
-        if part in host:
-            return never
-    return None
-
-
-def excuse(root: Path, host: str) -> dict[str, str] | None:
-    """The live exception of a host that does not build the committed bytes, or None."""
-    if never_equal(host) is not True:
-        return None
-    today = datetime.datetime.now(datetime.UTC).date()
-    try:
-        return exceptions_check.live_exception(root, exceptions_check.COMPARED, COMMITTED, today)
-    except exceptions_check.CheckError as error:
-        raise CheckError(str(error)) from error
+def order_free(host: str) -> bool:
+    """Whether `host` is held up to function order rather than to the bytes."""
+    return any(part in host for part in ORDER_FREE_HOSTS)
 
 
 def build_faults(built: bytes, forbidden: list[bytes]) -> list[str]:
@@ -329,63 +305,35 @@ def committed_fault(built: bytes, committed: bytes | None) -> str:
     return ""
 
 
-def evaluate_verdict(
-    built: bytes,
-    verdict: str,
-    excused: dict[str, str] | None,
-    never: bool,
-) -> tuple[list[str], str]:
-    """Evaluate comparator verdict on a differing host."""
+def evaluate_verdict(verdict: str) -> tuple[list[str], str]:
+    """Evaluate the comparator verdict on an order-free host."""
     code_equal, data_equal, line = parse_verdict(verdict)
     if not code_equal:
         return [f"{COMMITTED}: code differs from this host's build ({line})"], ""
-    if not never:
-        # macOS host: held order-free for both code and data without exception
-        if not data_equal:
-            return [f"{COMMITTED}: data section differs from this host's build ({line})"], ""
-        return [], f"equal up to function order ({COMMITTED})"
-    # Windows host: code held order-free; data section excused while live entry exists
     if not data_equal:
-        if excused is None:
-            return [
-                f"{COMMITTED}: data section differs from this host's build without a live exception ({line})"
-            ], ""
-        notice = (
-            f"the byte comparison of {COMMITTED} with this host's build ({len(built)} bytes, sha256 "
-            f"{digest(built)}) is skipped until {excused['expires']}: {excused['reason']}"
-        )
-        return [], notice
-    # code equal + data equal on Windows
-    nothing = f"{exceptions_check.LIST}: the entry for {COMMITTED} excuses nothing; this host builds the module"
-    return [nothing], ""
+        return [f"{COMMITTED}: data section differs from this host's build ({line})"], ""
+    return [], f"equal up to function order ({COMMITTED})"
 
 
 def differences(
     built: bytes,
     committed: bytes | None,
     forbidden: list[bytes],
-    excused: dict[str, str] | None,
-    never: bool | None,
+    free: bool,
     verdict: str | None = None,
 ) -> tuple[list[str], str]:
-    """Every reason the committed module is not the build of this tree, and the notice of a skipped comparison."""
+    """Every reason the committed module is not the build of this tree, and the notice of an order-free pass."""
     found = build_faults(built, forbidden)
     if committed is None:
         missing = f"{COMMITTED} is missing; write it with `tools/wasm_module.py update`"
         return [*found, missing], ""
-    if built == committed:
-        if never is True:
-            nothing = f"{exceptions_check.LIST}: the entry for {COMMITTED} excuses nothing; this host builds the module"
-            return [*found, nothing], ""
+    if built == committed or found:
         return found, ""
-    if found:
-        return found, ""
-    if never is None:
-        return [*found, committed_fault(built, committed)], ""
+    if not free:
+        return [committed_fault(built, committed)], ""
     if verdict is None:
-        raise CheckError("comparator verdict required when built != committed on a differing host")
-    eval_found, notice = evaluate_verdict(built, verdict, excused, never)
-    return [*found, *eval_found], notice
+        raise CheckError("comparator verdict required when built != committed on an order-free host")
+    return evaluate_verdict(verdict)
 
 
 def committed_module(root: Path) -> bytes | None:
@@ -397,38 +345,31 @@ def committed_module(root: Path) -> bytes | None:
         raise CheckError(f"cannot read {COMMITTED}: {error}") from error
 
 
-# What `never_equal` must answer for a host triple: the rule of the hosts.
+# What `order_free` must answer for a host triple: the rule of the hosts.
 HOST_RULE = {
-    "x86_64-unknown-linux-gnu": None,
-    "aarch64-unknown-linux-gnu": None,
+    "x86_64-unknown-linux-gnu": False,
+    "aarch64-unknown-linux-gnu": False,
     "x86_64-pc-windows-msvc": True,
-    "aarch64-apple-darwin": False,
-    "x86_64-apple-darwin": False,
+    "aarch64-pc-windows-msvc": True,
+    "aarch64-apple-darwin": True,
+    "x86_64-apple-darwin": True,
 }
 
 
-def skip_failures(built: bytes, flipped: bytes, forbidden: list[bytes], excused: dict[str, str]) -> list[str]:
-    """The skips there are, and the hosts they are for; anything else is a failure of the selftest."""
+def pass_failures(built: bytes, flipped: bytes, forbidden: list[bytes]) -> list[str]:
+    """The passes there are, and the hosts they are for; anything else is a failure of the selftest."""
     failures = []
-    # Windows host with data difference: skipped, and the notice carries the entry's reason.
-    found, notice = differences(
-        built, flipped, forbidden, excused, True, verdict="verdict: code equal, data differ (251 bytes)"
-    )
-    if found or excused["reason"] not in notice:
-        failures.append(f"a Windows host with data difference is refused, or skips without reason: {found} {notice!r}")
-    # macOS host that builds code equal + data equal: passes with notice.
-    found, notice = differences(
-        built, flipped, forbidden, None, False, verdict="verdict: code equal, data equal"
-    )
+    # An order-free host whose code and data are equal up to order: passes with the notice.
+    found, notice = differences(built, flipped, forbidden, True, verdict="verdict: code equal, data equal")
     if found or "equal up to function order" not in notice:
-        failures.append(f"a macOS host with code+data equal is refused or lacks notice: {found} {notice!r}")
-    # A macOS host that builds byte-for-byte equal module: passes, no skip notice.
-    found, notice = differences(built, built, forbidden, None, False)
+        failures.append(f"an order-free host with code and data equal is refused or lacks the notice: {found} {notice!r}")
+    # An order-free host that builds the committed bytes: passes, no notice.
+    found, notice = differences(built, built, forbidden, True)
     if found or notice:
-        failures.append(f"a macOS host that builds identical bytes is refused or announces a skip: {found} {notice!r}")
+        failures.append(f"an order-free host that builds identical bytes is refused or notifies: {found} {notice!r}")
     for host, expected in HOST_RULE.items():
-        if never_equal(host) is not expected:
-            failures.append(f"the host rule answers {never_equal(host)} for {host}, not {expected}")
+        if order_free(host) is not expected:
+            failures.append(f"the host rule answers {order_free(host)} for {host}, not {expected}")
     return failures
 
 
@@ -516,61 +457,41 @@ def selftest(root: Path, built: bytes, forbidden: list[bytes]) -> tuple[list[str
     """Each plant must be refused, and for the reason it was planted for."""
     middle = len(built) // 2
     flipped = built[:middle] + bytes([built[middle] ^ 1]) + built[middle + 1 :]
-    excused = {"reason": "planted reason", "expires": "9999-12-31"}
     path, elf = built + forbidden[-1], b"\x7fELF" + built
+    code = "verdict: code differ, data equal"
+    data = "verdict: code equal, data differ (245 bytes)"
     plants = {
-        "one bit of the committed module flipped": (built, flipped, None, None, None, "is not the build"),
-        "committed module cut short": (built, built[:-1], None, None, None, "is not the build"),
-        "committed module empty": (built, b"", None, None, None, "is not the build"),
-        "committed module missing": (built, None, None, None, None, "is missing"),
-        "build holds the checkout path": (path, path, None, None, None, "machine path"),
-        "build holds the cargo home": (built + forbidden[1], built + forbidden[1], None, None, None, "machine path"),
-        "build is no module": (elf, elf, None, None, None, "no WebAssembly module"),
-        "Windows host that builds the module byte-for-byte": (built, built, excused, True, None, "excuses nothing"),
-        "Windows host, committed module missing": (built, None, excused, True, None, "is missing"),
-        "Windows host, build holds the checkout path": (path, flipped, excused, True, None, "machine path"),
-        "Windows host, build is no module": (elf, flipped, excused, True, None, "no WebAssembly module"),
-        "Windows host, code differ": (built, flipped, excused, True, "verdict: code differ, data equal", "code differs"),
-        "Windows host, data differ without entry": (
+        "one bit of the committed module flipped": (built, flipped, False, None, "is not the build"),
+        "committed module cut short": (built, built[:-1], False, None, "is not the build"),
+        "committed module empty": (built, b"", False, None, "is not the build"),
+        "committed module missing": (built, None, False, None, "is missing"),
+        "build holds the checkout path": (path, path, False, None, "machine path"),
+        "build holds the cargo home": (built + forbidden[1], built + forbidden[1], False, None, "machine path"),
+        "build is no module": (elf, elf, False, None, "no WebAssembly module"),
+        "order-free host, committed module missing": (built, None, True, None, "is missing"),
+        "order-free host, build holds the checkout path": (path, flipped, True, None, "machine path"),
+        "order-free host, build is no module": (elf, flipped, True, None, "no WebAssembly module"),
+        "order-free host, code differ": (built, flipped, True, code, "code differs"),
+        "order-free host, data differ": (built, flipped, True, data, "data section differs"),
+        "order-free host, code and data differ": (
             built,
             flipped,
-            None,
             True,
-            "verdict: code equal, data differ (251 bytes)",
-            "without a live exception",
-        ),
-        "Windows host, code and data equal": (
-            built,
-            flipped,
-            excused,
-            True,
-            "verdict: code equal, data equal",
-            "excuses nothing",
-        ),
-        "macOS host, committed module missing": (built, None, None, False, None, "is missing"),
-        "macOS host, build holds the checkout path": (path, flipped, None, False, None, "machine path"),
-        "macOS host, build is no module": (elf, flipped, None, False, None, "no WebAssembly module"),
-        "macOS host, code differ": (built, flipped, None, False, "verdict: code differ, data equal", "code differs"),
-        "macOS host, data differ": (
-            built,
-            flipped,
-            None,
-            False,
-            "verdict: code equal, data differ (1 byte)",
-            "data section differs",
+            "verdict: code differ, data differ (1 byte)",
+            "code differs",
         ),
     }
     failures = []
-    for name, (planted_build, planted_committed, planted_excuse, never, verdict, expected) in plants.items():
-        found, _ = differences(planted_build, planted_committed, forbidden, planted_excuse, never, verdict=verdict)
+    for name, (planted_build, planted_committed, free, verdict, expected) in plants.items():
+        found, _ = differences(planted_build, planted_committed, forbidden, free, verdict=verdict)
         if not found:
             failures.append(f"plant passed: {name}")
         elif not any(expected in line for line in found):
             failures.append(f"plant refused for another reason: {name}: {found}")
-    failures += skip_failures(built, flipped, forbidden, excused)
+    failures += pass_failures(built, flipped, forbidden)
     failures += real_comparator_failures(root)
     failures += section_span_failures(root)
-    return failures, len(plants) + 3 + len(HOST_RULE) + 1 + 3
+    return failures, len(plants) + 2 + len(HOST_RULE) + 1 + 3
 
 
 def report(command: str, found: list[str], notice: str, detail: str) -> int:
@@ -579,14 +500,9 @@ def report(command: str, found: list[str], notice: str, detail: str) -> int:
     if found:
         return 1
     if notice:
-        if "equal up to function order" in notice:
-            print(f"NOTICE: {notice}")
-            if os.environ.get("GITHUB_ACTIONS") == "true":
-                print(f"::notice title=Module order-free comparison::{notice}")
-        else:
-            print(f"SKIPPED: {notice}")
-            if os.environ.get("GITHUB_ACTIONS") == "true":
-                print(f"::notice title=Module byte comparison skipped::{notice}")
+        print(f"NOTICE: {notice}")
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            print(f"::notice title=Module order-free comparison::{notice}")
     print(f"PASS: module {command} ({detail})")
     return 0
 
@@ -600,20 +516,20 @@ def main() -> int:
     root = args.root.resolve()
     try:
         built, forbidden, host = build(root, args.cargo_log)
-        excused, never = excuse(root, host), never_equal(host)
+        free = order_free(host)
         if args.command == "update":
-            if never is not None:
+            if free:
                 raise CheckError(f"a {host} host does not build the committed bytes; update on a Linux x86_64 host")
             (root / COMMITTED).parent.mkdir(parents=True, exist_ok=True)
             (root / COMMITTED).write_bytes(built)
         committed = committed_module(root)
         verdict = None
-        if never is not None and committed is not None and built != committed:
+        if free and committed is not None and built != committed:
             env, _, _ = build_env(root)
             built_file = built_path(root, env)
             committed_path = root / COMMITTED
             verdict = run_comparator(root, committed_path, built_file, env, BUILD_DEADLINE_SECONDS)
-        found, notice = differences(built, committed, forbidden, excused, never, verdict=verdict)
+        found, notice = differences(built, committed, forbidden, free, verdict=verdict)
         detail = f"{len(built)} bytes, sha256 {digest(built)}, host {host}"
         if args.command == "selftest":
             failures, count = selftest(root, built, forbidden)
