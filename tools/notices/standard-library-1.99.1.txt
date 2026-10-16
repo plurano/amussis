@@ -1,6 +1,6 @@
 ================================================================================
-The Rust standard library 1.99.0: core, alloc, std and the compiler builtins
-https://github.com/rust-lang/rust/tree/1.99.0/library
+The Rust standard library 1.99.1: core, alloc, std and the compiler builtins
+https://github.com/rust-lang/rust/tree/1.99.1/library
 Licence offered: Apache-2.0 OR MIT; taken: MIT
 --------------------------------------------------------------------------------
 Copyright (c) The Rust Project Contributors
@@ -29,8 +29,8 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ================================================================================
-The Unicode tables of the Rust standard library 1.99.0 (library/core/src/unicode)
-https://github.com/rust-lang/rust/tree/1.99.0/library/core/src/unicode
+The Unicode tables of the Rust standard library 1.99.1 (library/core/src/unicode)
+https://github.com/rust-lang/rust/tree/1.99.1/library/core/src/unicode
 Licence: Unicode-3.0
 --------------------------------------------------------------------------------
 UNICODE LICENSE V3
@@ -73,7 +73,7 @@ not be used in advertising or otherwise to promote the sale, use or other
 dealings in these Data Files or Software without prior written
 authorization of the copyright holder.
 ================================================================================
-dlmalloc 0.2.14: the allocator of the Rust standard library 1.99.0 on wasm32-unknown-unknown
+dlmalloc 0.2.14: the allocator of the Rust standard library 1.99.1 on wasm32-unknown-unknown
 https://crates.io/crates/dlmalloc/0.2.14
 Licence offered: MIT/Apache-2.0; taken: MIT
 --------------------------------------------------------------------------------

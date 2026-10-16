@@ -2,17 +2,17 @@
   "note": "Shared toolchain and lint settings are taken from the source below; tools/settings_sync.py holds this workspace to the record. Change a setting in the source first, then run: python3 tools/settings_sync.py update --source <checkout>.",
   "source": {
     "repository": "https://github.com/cordanaLLM/Aegis-OS",
-    "commit": "1d6bebcb56310a149f1a2b97a2a566576cac5a0e"
+    "commit": "ed50f0469963da23151b51e922f4355e8314dab2"
   },
   "files": {
-    "rust-toolchain.toml": "sha256:9bf4a6e774ce63177f44febbcfaa875e6c19db68f42505c2a66ccd71ac5a9d9d",
+    "rust-toolchain.toml": "sha256:21aa080d55c88992922bbf8a0afd71c4903943f427d326a099c3fb165c0cee30",
     "clippy.toml": "sha256:7de98ec20641598fa1b20d874909f229f2028a80d5e0b36c018c17c5bd002c1a",
     "rustfmt.toml": "sha256:7950250dad48734fd1ee559a544a51fe5676b5eca6fe6b63092ff0a606412892"
   },
   "manifest_settings": {
     "resolver": "3",
     "edition": "2024",
-    "rust-version": "1.99.0",
+    "rust-version": "1.99.1",
     "lints": {
       "rust": {
         "unsafe_code": "forbid",
