@@ -20,7 +20,7 @@ into a scratch clone, plants one defect there and runs the check on the clone:
                 proxy, so CI runs it outside the offline gate.
     semver      cargo-semver-checks refuses a public method of amussis-decision
                 made crate-private, compared with the release tag --baseline
-                names.
+                names, under release type minor whatever the tree's version.
 
 The clone holds the committed tree only: uncommitted edits are not planted on.
 The audit of a clone runs with CI=true, the engine's switch for a checkout
@@ -161,7 +161,13 @@ def semver(root: Path, baseline: str, semver_checks: str) -> list[str]:
         if text.count(SEMVER_METHOD) != 1:
             raise PlantError(f"{SEMVER_SOURCE} no longer declares {SEMVER_METHOD.strip()!r}; plant another method")
         path.write_text(text.replace(SEMVER_METHOD, SEMVER_METHOD.replace("pub ", "pub(crate) ")), encoding="utf-8")
-        argv = [*shlex.split(semver_checks), "--package", "amussis-decision", "--baseline-rev", baseline]
+        # The release type is fixed at minor: derived from the version, a tree
+        # whose version already announces a major change (0.1 to 0.2) allows
+        # the plant, and the plant would pass on every release branch.
+        argv = [
+            *shlex.split(semver_checks),
+            "--package", "amussis-decision", "--baseline-rev", baseline, "--release-type", "minor",
+        ]
         status, output = run(argv, repo)
         return refused("public method made crate-private", status, output, *SEMVER_FINDINGS)
 
