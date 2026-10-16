@@ -15,7 +15,7 @@ members = [
 # the source repository; tools/settings_sync.py holds them to the record in
 # settings-source.json.
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.99.1"
 license = "EUPL-1.2"
@@ -23,7 +23,7 @@ repository = "https://github.com/plurano/amussis"
 authors = ["Lusoris <lusoris@pm.me>"]
 
 [workspace.dependencies]
-amussis-decision = { path = "crates/amussis-decision", version = "=0.1.0" }
+amussis-decision = { path = "crates/amussis-decision", version = "=0.2.0" }
 base16ct = { version = "1.0.0", default-features = false }
 cargo_metadata = { version = "=0.23.1", default-features = false }
 serde = { version = "1.0.229", default-features = false, features = ["derive"] }
