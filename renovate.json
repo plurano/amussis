@@ -67,6 +67,19 @@
         "tools/semgrep/requirements.txt"
       ],
       "enabled": false
+    },
+    {
+      "description": "Python 3.14 is the newest Python version semgrep 1.181.0 lists and the lock in tools/semgrep/requirements.txt is compiled for one Python version; raise allowedVersions when semgrep lists a newer Python, together with a relock",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchFileNames": [
+        ".github/workflows/ci.yml"
+      ],
+      "matchDepNames": [
+        "python"
+      ],
+      "allowedVersions": "<=3.14"
     }
   ],
   "customManagers": [
