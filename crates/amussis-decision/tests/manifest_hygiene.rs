@@ -13,7 +13,7 @@ mod dependency_closure;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use serde_json::Value;
+use cargo_metadata::Metadata;
 
 /// This crate's package name, the start of its dependency closure.
 const PACKAGE: &str = "amussis-decision";
@@ -84,11 +84,39 @@ fn a_planted_md5_crate_fails_the_sweep() -> Result<(), String> {
 /// through its unterminated `name = "md5` token; that coverage is given up.
 #[test]
 fn a_prefixed_md5_name_is_not_a_hit() -> Result<(), String> {
-    let prefixed = dependency_closure::synthetic(PACKAGE, &["md5-asm", "md-5-extra"]);
+    let prefixed = dependency_closure::synthetic(PACKAGE, &["md5-asm", "md-5-extra"])?;
     let names = dependency_closure::closure(&prefixed, PACKAGE)?;
     assert_eq!(
         dependency_closure::hits(&names, &FORBIDDEN),
         [] as [&str; 0]
+    );
+    Ok(())
+}
+
+/// Negative: malformed metadata fails closed instead of yielding an empty
+/// closure that would pass the sweep: text cut short, a document without
+/// `packages`, and a resolve edge without its `pkg`.
+#[test]
+fn malformed_metadata_is_refused() -> Result<(), String> {
+    let valid = serde_json::to_string(&dependency_closure::synthetic(PACKAGE, &["sha2"])?)
+        .map_err(|error| error.to_string())?;
+    let truncated = valid.get(..valid.len() / 2).unwrap_or_default();
+    let without_packages = valid.replacen("\"packages\"", "\"pakages\"", 1);
+    let without_pkg = valid.replacen("\"pkg\"", "\"pgk\"", 1);
+    for (case, text) in [
+        ("truncated", truncated),
+        ("without packages", without_packages.as_str()),
+        ("without pkg", without_pkg.as_str()),
+    ] {
+        let error = dependency_closure::parse(text)
+            .err()
+            .ok_or(format!("{case}: malformed metadata was accepted"))?;
+        assert!(error.contains("not valid metadata"), "{case}: {error}");
+    }
+    let names = dependency_closure::closure(&dependency_closure::parse(&valid)?, PACKAGE)?;
+    assert!(
+        names.contains("sha2"),
+        "the well-formed document must parse"
     );
     Ok(())
 }
@@ -193,25 +221,20 @@ fn quoted_value(text: &str, key: &str) -> Option<RustVersion> {
 
 /// The highest `rust_version` any package outside the workspace declares,
 /// with the packages that declare it.
-fn highest_declared(metadata: &Value) -> Result<(RustVersion, Vec<String>), String> {
+fn highest_declared(metadata: &Metadata) -> Result<(RustVersion, Vec<String>), String> {
     let members: BTreeSet<&str> = metadata
-        .get("workspace_members")
-        .and_then(Value::as_array)
-        .ok_or("no members")?
+        .workspace_members
         .iter()
-        .filter_map(Value::as_str)
+        .map(|id| id.repr.as_str())
         .collect();
     let declared: Vec<(RustVersion, String)> = metadata
-        .get("packages")
-        .and_then(Value::as_array)
-        .ok_or("no packages")?
+        .packages
         .iter()
-        .filter(|package| {
-            !members.contains(package.get("id").and_then(Value::as_str).unwrap_or(""))
-        })
+        .filter(|package| !members.contains(package.id.repr.as_str()))
         .filter_map(|package| {
-            let version = rust_version(package.get("rust_version")?.as_str()?)?;
-            Some((version, package.get("name")?.as_str()?.to_owned()))
+            let version = package.rust_version.as_ref()?;
+            let tuple = (version.major, version.minor, version.patch);
+            Some((tuple, package.name.to_string()))
         })
         .collect();
     let highest = declared

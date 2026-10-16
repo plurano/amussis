@@ -15,9 +15,10 @@
 //! crate's name, following every `resolve.nodes[].deps[].pkg` edge whatever its
 //! `dep_kinds` (normal, dev and build alike), marking a node visited when it is
 //! pushed so the walk is bounded by the node count, and matching package names
-//! exactly. It fails closed on a spawn error, a non-zero exit, a missed
-//! deadline (HISS-02), unparsable output, a null resolve, and zero or several
-//! start nodes; an offline failure names `cargo fetch --locked` as the cure.
+//! exactly. The walk reads `cargo_metadata`'s typed `Metadata`. It fails closed
+//! on a spawn error, a non-zero exit, a missed deadline (HISS-02), unparsable
+//! output, a null resolve, and zero or several start nodes; an offline failure
+//! names `cargo fetch --locked` as the cure.
 //!
 //! This own-closure rule does not forbid a crate workspace-wide, so each
 //! sweep's guarantee holds for its own crate.
@@ -32,7 +33,7 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
-use serde_json::Value;
+use cargo_metadata::{Metadata, MetadataCommand, Node, NodeDep, Package, PackageId};
 
 /// How long `cargo metadata` may run.
 pub const METADATA_DEADLINE: Duration = Duration::from_secs(120);
@@ -116,7 +117,7 @@ impl Invocation {
     ///
     /// Fails closed on a spawn error, a non-zero exit (naming
     /// `cargo fetch --locked`), a missed deadline and unparsable output.
-    pub fn run(&self) -> Result<Value, String> {
+    pub fn run(&self) -> Result<Metadata, String> {
         let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
         let run = RUNS.fetch_add(1, Ordering::Relaxed);
         let stem = format!("{}-{}-{run}", env!("CARGO_PKG_NAME"), std::process::id());
@@ -144,9 +145,19 @@ impl Invocation {
             ));
         }
         let text = std::fs::read_to_string(&out).map_err(|error| error.to_string())?;
-        serde_json::from_str(&text)
-            .map_err(|error| format!("cargo metadata output is not JSON: {error}"))
+        parse(&text)
     }
+}
+
+/// Parses `cargo metadata` output into the typed document.
+///
+/// # Errors
+///
+/// Fails closed on text that is not JSON or lacks a field the format
+/// requires, such as `packages` or a resolve edge's `pkg`.
+pub fn parse(text: &str) -> Result<Metadata, String> {
+    MetadataCommand::parse(text)
+        .map_err(|error| format!("cargo metadata output is not valid metadata: {error}"))
 }
 
 /// The workspace's metadata, read once per test binary.
@@ -154,39 +165,32 @@ impl Invocation {
 /// # Errors
 ///
 /// Returns why [`Invocation::run`] failed.
-pub fn metadata() -> Result<Value, String> {
-    static METADATA: OnceLock<Result<Value, String>> = OnceLock::new();
+pub fn metadata() -> Result<Metadata, String> {
+    static METADATA: OnceLock<Result<Metadata, String>> = OnceLock::new();
     METADATA
         .get_or_init(|| Invocation::recorded()?.run())
         .clone()
 }
 
 /// Maps every package id to its name.
-fn names_by_id(metadata: &Value) -> Result<BTreeMap<&str, &str>, String> {
-    let packages = metadata
-        .get("packages")
-        .and_then(Value::as_array)
-        .ok_or("the metadata lists no packages")?;
-    Ok(packages
+fn names_by_id(metadata: &Metadata) -> BTreeMap<&PackageId, &str> {
+    metadata
+        .packages
         .iter()
-        .filter_map(|entry| Some((entry.get("id")?.as_str()?, entry.get("name")?.as_str()?)))
-        .collect())
+        .map(|package| (&package.id, package.name.as_str()))
+        .collect()
 }
 
 /// The id of the one workspace member named `package`.
 fn start_node<'a>(
-    metadata: &'a Value,
-    names: &BTreeMap<&str, &str>,
+    metadata: &'a Metadata,
+    names: &BTreeMap<&PackageId, &str>,
     package: &str,
-) -> Result<&'a str, String> {
-    let members = metadata
-        .get("workspace_members")
-        .and_then(Value::as_array)
-        .ok_or("the metadata lists no workspace members")?;
-    let starts: Vec<&str> = members
+) -> Result<&'a PackageId, String> {
+    let starts: Vec<&PackageId> = metadata
+        .workspace_members
         .iter()
-        .filter_map(Value::as_str)
-        .filter(|id| names.get(id) == Some(&package))
+        .filter(|id| names.get(id).copied() == Some(package))
         .collect();
     let [start] = starts.as_slice() else {
         return Err(format!(
@@ -198,26 +202,14 @@ fn start_node<'a>(
 }
 
 /// Every resolve node's outgoing `pkg` edges, whatever their `dep_kinds`.
-fn edges(metadata: &Value) -> Result<(usize, BTreeMap<&str, Vec<&str>>), String> {
-    let nodes = metadata
-        .get("resolve")
-        .and_then(|resolve| resolve.get("nodes"))
-        .and_then(Value::as_array)
-        .ok_or("the resolve is null")?;
-    let edges = nodes
+fn edges(metadata: &Metadata) -> Result<(usize, BTreeMap<&PackageId, Vec<&PackageId>>), String> {
+    let resolve = metadata.resolve.as_ref().ok_or("the resolve is null")?;
+    let edges = resolve
+        .nodes
         .iter()
-        .filter_map(|node| {
-            let id = node.get("id")?.as_str()?;
-            let deps = node.get("deps")?.as_array()?;
-            Some((
-                id,
-                deps.iter()
-                    .filter_map(|dep| dep.get("pkg")?.as_str())
-                    .collect(),
-            ))
-        })
+        .map(|node| (&node.id, node.deps.iter().map(|dep| &dep.pkg).collect()))
         .collect();
-    Ok((nodes.len(), edges))
+    Ok((resolve.nodes.len(), edges))
 }
 
 /// The package names in the closure of the one workspace member named
@@ -227,15 +219,15 @@ fn edges(metadata: &Value) -> Result<(usize, BTreeMap<&str, Vec<&str>>), String>
 ///
 /// Fails closed on a document with no packages or members, a null resolve,
 /// and zero or several start nodes.
-pub fn closure(metadata: &Value, package: &str) -> Result<BTreeSet<String>, String> {
-    let names = names_by_id(metadata)?;
+pub fn closure(metadata: &Metadata, package: &str) -> Result<BTreeSet<String>, String> {
+    let names = names_by_id(metadata);
     let start = start_node(metadata, &names, package)?;
     let (node_count, edges) = edges(metadata)?;
-    let mut visited: BTreeSet<&str> = BTreeSet::from([start]);
+    let mut visited: BTreeSet<&PackageId> = BTreeSet::from([start]);
     let mut stack = vec![start];
     for _ in 0..=node_count {
         let Some(id) = stack.pop() else { break };
-        for dep in edges.get(id).map(Vec::as_slice).unwrap_or_default() {
+        for &dep in edges.get(id).map(Vec::as_slice).unwrap_or_default() {
             if visited.insert(dep) {
                 stack.push(dep);
             }
@@ -243,8 +235,8 @@ pub fn closure(metadata: &Value, package: &str) -> Result<BTreeSet<String>, Stri
     }
     Ok(visited
         .iter()
-        .filter_map(|id| names.get(id))
-        .map(|name| (*name).to_owned())
+        .filter_map(|&id| names.get(id).copied())
+        .map(str::to_owned)
         .collect())
 }
 
@@ -268,35 +260,44 @@ pub fn hits(names: &BTreeSet<String>, forbidden: &[&'static str]) -> Vec<&'stati
         .collect()
 }
 
-/// Sets `key` on a JSON object; anything else is left as it is.
-pub fn set(value: &mut Value, key: &str, new: Value) {
-    if let Some(object) = value.as_object_mut() {
-        object.insert(key.to_owned(), new);
-    }
+/// A minimal package JSON object for synthetic and planted packages.
+fn package_json(name: &str, id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "name": name, "version": "0.1.0", "id": id,
+        "dependencies": [], "targets": [], "features": {},
+        "manifest_path": "/synthetic/Cargo.toml",
+    })
 }
 
 /// A small synthetic metadata document: `package`, a workspace member,
 /// depending directly on each of `deps`.
-#[must_use]
-pub fn synthetic(package: &str, deps: &[&str]) -> Value {
-    let mut packages = vec![serde_json::json!({ "id": "member", "name": package })];
-    packages.extend(
-        deps.iter()
-            .map(|name| serde_json::json!({ "id": name, "name": name })),
-    );
+///
+/// # Errors
+///
+/// Returns the reason when the synthetic metadata cannot be parsed.
+pub fn synthetic(package: &str, deps: &[&str]) -> Result<Metadata, String> {
+    let mut packages = vec![package_json(package, "member")];
+    packages.extend(deps.iter().map(|name| package_json(name, name)));
+    let member_deps: Vec<_> = deps
+        .iter()
+        .map(|name| serde_json::json!({ "name": name, "pkg": name }))
+        .collect();
     let mut nodes = vec![serde_json::json!({
-        "id": "member",
-        "deps": deps.iter().map(|name| serde_json::json!({ "pkg": name })).collect::<Vec<_>>(),
+        "id": "member", "dependencies": deps, "deps": member_deps,
     })];
     nodes.extend(
         deps.iter()
-            .map(|name| serde_json::json!({ "id": name, "deps": [] })),
+            .map(|name| serde_json::json!({ "id": name, "dependencies": [], "deps": [] })),
     );
-    serde_json::json!({
+    let json = serde_json::json!({
         "packages": packages,
         "workspace_members": ["member"],
         "resolve": { "nodes": nodes },
-    })
+        "workspace_root": "/synthetic",
+        "target_directory": "/synthetic/target",
+        "version": 1,
+    });
+    parse(&json.to_string())
 }
 
 /// Plants `name` as a direct dependency of the workspace member `package`,
@@ -306,34 +307,33 @@ pub fn synthetic(package: &str, deps: &[&str]) -> Value {
 ///
 /// # Errors
 ///
-/// Returns why the member could not be found.
+/// Returns why the member could not be found or the resolve is null.
 pub fn plant(
-    metadata: &mut Value,
+    metadata: &mut Metadata,
     package: &str,
     name: &str,
     kind: Option<&str>,
 ) -> Result<(), String> {
-    let names = names_by_id(metadata)?;
-    let start = start_node(metadata, &names, package)?.to_owned();
+    let names = names_by_id(metadata);
+    let start = start_node(metadata, &names, package)?.clone();
     let id = format!("planted+{name}");
-    if let Some(packages) = metadata.get_mut("packages").and_then(Value::as_array_mut) {
-        packages.push(serde_json::json!({ "id": id, "name": name }));
-    }
-    let nodes = metadata
-        .pointer_mut("/resolve/nodes")
-        .and_then(Value::as_array_mut)
-        .ok_or("the resolve is null")?;
-    for node in nodes.iter_mut() {
-        if node.get("id").and_then(Value::as_str) == Some(start.as_str())
-            && let Some(deps) = node.get_mut("deps").and_then(Value::as_array_mut)
-        {
-            deps.push(serde_json::json!({
-                "name": name,
-                "pkg": id,
-                "dep_kinds": [{ "kind": kind, "target": null }],
-            }));
+    let pkg: Package =
+        serde_json::from_value(package_json(name, &id)).map_err(|error| error.to_string())?;
+    metadata.packages.push(pkg);
+    let resolve = metadata.resolve.as_mut().ok_or("the resolve is null")?;
+    let dep: NodeDep = serde_json::from_value(serde_json::json!({
+        "name": name, "pkg": id, "dep_kinds": [{ "kind": kind, "target": null }],
+    }))
+    .map_err(|error| error.to_string())?;
+    for node in &mut resolve.nodes {
+        if node.id == start {
+            node.deps.push(dep.clone());
         }
     }
-    nodes.push(serde_json::json!({ "id": id, "deps": [] }));
+    let node: Node = serde_json::from_value(serde_json::json!({
+        "id": id, "dependencies": [], "deps": [],
+    }))
+    .map_err(|error| error.to_string())?;
+    resolve.nodes.push(node);
     Ok(())
 }
