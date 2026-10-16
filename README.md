@@ -41,12 +41,13 @@ Vesta) stay the operating system's names for its components.
 
 ## Status
 
-Public since 2026-10-11. The first release is
-[`v0.1.0`](https://github.com/plurano/amussis/releases/tag/v0.1.0): a decision
-engine (risk levels, second-person approval, tamper-evident log, kill switch)
-that moves here from the operating-system repository. Its files are on the
-forge only; from the next release on, publishing a release also publishes both
-crates to crates.io and tags the Go module; see [Releases](#releases).
+Public since 2026-10-11. The first release,
+[`v0.1.0`](https://github.com/plurano/amussis/releases/tag/v0.1.0), brought a
+decision engine (risk levels, second-person approval, tamper-evident log, kill
+switch) here from the operating-system repository; its files are on the forge
+only. From [`v0.2.0`](https://github.com/plurano/amussis/releases/tag/v0.2.0)
+on, publishing a release also publishes both crates to crates.io and tags the
+Go module; see [Releases](#releases).
 
 ## Layout
 
@@ -478,7 +479,7 @@ and `v0.1.0` was set after that run had ended green
 ([run 38149459081](https://github.com/plurano/amussis/actions/runs/38149459081)).
 This section says what the workflow files do.
 
-A version tag, `v` and the version in `Cargo.toml` (`v0.1.0`), starts
+A version tag, `v` and the version in `Cargo.toml` (`v0.2.0`), starts
 `.github/workflows/release.yml`. It builds the release files and stores them
 in a draft release on the forge. When a maintainer publishes that draft (not
 a pre-release), `.github/workflows/publish.yml` publishes `amussis-decision`
@@ -510,10 +511,10 @@ To check a release after downloading its files:
 ```sh
 sha256sum --check --strict checksums.txt
 cosign verify-blob \
-  --certificate-identity https://github.com/plurano/amussis/.github/workflows/release-build.yml@refs/tags/v0.1.0 \
+  --certificate-identity https://github.com/plurano/amussis/.github/workflows/release-build.yml@refs/tags/v0.2.0 \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   --bundle checksums.txt.sigstore.json checksums.txt
-gh attestation verify amussis-decision-0.1.0.crate --repo plurano/amussis \
+gh attestation verify amussis-decision-0.2.0.crate --repo plurano/amussis \
   --signer-workflow plurano/amussis/.github/workflows/release-build.yml
 ```
 

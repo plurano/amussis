@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "amussis-decision"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "base16ct",
  "cargo_metadata",
@@ -16,14 +16,14 @@ dependencies = [
 
 [[package]]
 name = "amussis-decision-wasm"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "amussis-decision",
 ]
 
 [[package]]
 name = "amussis-module-compare"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "wasmparser",
 ]
