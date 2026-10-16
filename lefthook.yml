@@ -1,5 +1,6 @@
-# Lefthook Configuration (Rust & HISS Governance)
-# Go and Rust jobs follow the detected languages; both when none was detected.
+# Lefthook Configuration (Go, Rust & HISS Governance)
+# Go jobs are always present so later tracked modules need no re-adoption;
+# Rust follows the detected languages.
 # Governance commands fail closed: a failing or missing praetorctl blocks the
 # commit or push. The pre-commit audit runs --offline; the pre-push audit
 # reads the forge's live Actions state when a token and a github.com origin
@@ -26,6 +27,13 @@ agent-checkpoint-stop:
 pre-commit:
   parallel: true
   commands:
+    gofmt:
+      glob: "*.go"
+      run: gofmt -w {staged_files}
+      stage_fixed: true
+    govet:
+      glob: "*.go"
+      run: sh .config/lefthook/engine.sh go vet
     rustfmt:
       glob: "*.rs"
       run: >-
@@ -62,6 +70,12 @@ post-commit:
 pre-push:
   parallel: false
   commands:
+    security:
+      run: >-
+        if command -v govulncheck >/dev/null 2>&1; then sh
+        .config/lefthook/engine.sh security govuln; else echo govulncheck is not
+        installed, install it with go install
+        golang.org/x/vuln/cmd/govulncheck@latest >&2; exit 1; fi
     flavor-audit:
       run: sh .config/lefthook/engine.sh flavor audit .
     audit:
