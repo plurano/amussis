@@ -247,12 +247,12 @@ jobs:
           install -m 0755 "trivy-unpacked/trivy${exe}" "bin/trivy${exe}"
           trivy --version
 
-      # semgrep's hashed wheels are locked for Python 3.12. The interpreter
+      # semgrep's hashed wheels are locked for Python 3.14. The interpreter
       # only builds semgrep's venv; the gate keeps the runner's python3.
       - id: semgrep-python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12"
+          python-version: "3.14"
           update-environment: false
 
       - name: Install semgrep
