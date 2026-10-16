@@ -29,6 +29,14 @@ env:
   CARGO_DENY_SHA256_LINUX: "9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f"
   CARGO_DENY_SHA256_MACOS: "fe67d82a10d8597a3549364cb733a3f9cc1bfff9031b7ae46384a9f2a72090c3"
   CARGO_DENY_SHA256_WINDOWS: "975a22143262fd27476d19ee00c7af67978426e40e1dee94eed6bbade1cf87dc"
+  # cargo-semver-checks holds the public Rust API to the last release tag:
+  # a breaking change fails until the workspace version says it is one. Each
+  # digest is the one its release publishes for that platform's archive of
+  # this version.
+  CARGO_SEMVER_CHECKS_VERSION: "0.51.0"
+  CARGO_SEMVER_CHECKS_SHA256_LINUX: "396c8508d973c83de52660943a057e971b586f7511c3ba695762373452b43d5b"
+  CARGO_SEMVER_CHECKS_SHA256_MACOS: "3cec5da41eee9a3336d75ad43d1f30a5c9680818f4ba209024786f452cabab5b"
+  CARGO_SEMVER_CHECKS_SHA256_WINDOWS: "9bd49e09c7487c323a9f4479c5d2b0b50d29a45662ba28344b7a0f5423eb0444"
   # gitleaks scans the history for credentials (HISS-12). Each digest is the
   # one its release publishes for that platform's archive of this version.
   GITLEAKS_VERSION: "8.30.1"
@@ -175,6 +183,32 @@ jobs:
           install -m 0755 "${archive}/cargo-deny${exe}" "bin/cargo-deny${exe}"
           cargo deny --version
 
+      # The same rule for cargo-semver-checks; its archive holds the binary at
+      # the top level.
+      - name: Install the pinned cargo-semver-checks
+        run: |
+          exe=""
+          case "${RUNNER_OS}-${RUNNER_ARCH}" in
+            Linux-X64) target=x86_64-unknown-linux-musl; want="$CARGO_SEMVER_CHECKS_SHA256_LINUX" ;;
+            macOS-ARM64) target=aarch64-apple-darwin; want="$CARGO_SEMVER_CHECKS_SHA256_MACOS" ;;
+            Windows-X64) target=x86_64-pc-windows-msvc; want="$CARGO_SEMVER_CHECKS_SHA256_WINDOWS"; exe=.exe ;;
+            *) echo "::error::no cargo-semver-checks archive is pinned for ${RUNNER_OS}-${RUNNER_ARCH}"; exit 1 ;;
+          esac
+          archive="cargo-semver-checks-${target}.tar.gz"
+          base="https://github.com/obi1kenobi/cargo-semver-checks/releases/download"
+          cd "$RUNNER_TEMP"
+          curl --fail --silent --show-error --location --max-time 120 \
+            --output "${archive}" "${base}/v${CARGO_SEMVER_CHECKS_VERSION}/${archive}"
+          got="$(python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "${archive}")"
+          if [ "$got" != "$want" ]; then
+            echo "::error::${archive} has sha256 ${got}, not the pinned ${want}"
+            exit 1
+          fi
+          mkdir semver-checks-unpacked
+          tar -xzf "${archive}" -C semver-checks-unpacked "cargo-semver-checks${exe}"
+          install -m 0755 "semver-checks-unpacked/cargo-semver-checks${exe}" "bin/cargo-semver-checks${exe}"
+          cargo semver-checks --version
+
       # The same rule for gitleaks: the archive is held to its pinned digest
       # before anything of it is unpacked. The Windows archive is a zip, which
       # Python unpacks on every host.
@@ -288,7 +322,7 @@ jobs:
       - name: Name the tools the gate will run
         run: |
           uname -a
-          command -v make sh python3 go cargo rustup pipx praetorctl cargo-deny gitleaks golangci-lint semgrep trivy node npm
+          command -v make sh python3 go cargo rustup pipx praetorctl cargo-deny cargo-semver-checks gitleaks golangci-lint semgrep trivy node npm
           make --version | head -1
           python3 --version
           semgrep --version
