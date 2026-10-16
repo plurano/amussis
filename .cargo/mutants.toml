@@ -1,0 +1,20 @@
+# SPDX-FileCopyrightText: 2026 Lusoris <lusoris@pm.me>
+# SPDX-License-Identifier: EUPL-1.2
+#
+# cargo-mutants configuration. Each exclusion is a mutant no test can kill
+# because it does not change behaviour; the reason sits beside it. Remove an
+# entry when the code it names changes.
+exclude_re = [
+    # Both callers pass max == N, so the two bounds are the same test.
+    'replace \|\| with && in validate',
+    # Identity and TargetResource refuse empty input at construction.
+    'replace Identity::is_empty -> bool with false',
+    'replace TargetResource::is_empty -> bool with false',
+    # The strictness key is unique per level: > and >= differ only when the
+    # two levels are equal, and then both branches return the same level.
+    'replace > with >= in RiskLevel::stricter',
+    # Sha256 is the only HashAlgorithm and its tag is 1; with one variant
+    # the check is always true.
+    'replace HashAlgorithm::tag -> u8 with 1',
+    'replace uses_sha256 -> bool with true',
+]
