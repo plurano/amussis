@@ -55,6 +55,12 @@ jobs:
           RUSTFLAGS: "-D warnings"
         run: cargo package --locked -p amussis-decision
 
+      # The module check and the notices generator read the crates of every
+      # platform offline (cargo metadata --offline); the host build above
+      # downloads only the crates of the host.
+      - name: Fetch the crates of every platform
+        run: cargo fetch --locked
+
       # The Go binding embeds the committed module; this rebuilds it from the
       # tagged source and refuses a module that differs by one byte.
       - name: Hold the committed module to its source
@@ -63,11 +69,9 @@ jobs:
       # The module holds code of the crates it links and of the standard
       # library; their notices ship beside it. This generates them from the
       # lock file of the tagged commit and refuses committed notices that
-      # differ. The fetch unpacks the crates the generator reads.
+      # differ.
       - name: Hold the committed notices to the lock file
-        run: |
-          cargo fetch --locked
-          python3 -B tools/third_party_notices.py check
+        run: python3 -B tools/third_party_notices.py check
 
       # The crate file carries the version of the manifest in its name. A tag
       # that names another version finds no such file, and the release stops
