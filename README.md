@@ -331,10 +331,13 @@ The module is the build of a Linux x86_64 host, and only such a host is held
 to its exact bytes. A Windows or macOS host can build the same functions in
 another order, so when its bytes differ the check runs
 `tools/module-compare` (package `amussis-module-compare`), which compares the
-two modules up to function order. A difference in code fails on every host.
-On macOS the data section must be equal too. On Windows a differing data
-section is skipped while the exception for it is live (see
-[Exceptions](#exceptions)). `update` is refused on both hosts.
+two modules up to function order. A difference in code or data fails on every
+host, with no exception. `update` is refused on both hosts.
+
+The build rewrites every source directory of the module's library closure to
+its forward-slash name with `--remap-path-prefix`. `rustc` replaces only a
+prefix, so without that the rest of an embedded source path keeps a Windows
+host's backslashes and the data section differs (issue #2, run 38863474754).
 
 ## Identities in the audit chain
 
@@ -413,14 +416,9 @@ without one, and an entry is refused once no such name is left. No job here
 calls another workflow today, so the list holds no such entry; the selftest
 plants a calling job to keep the rule proven.
 
-The third entry kind excuses one part of the module comparison on a Windows
-host: the data section. On Windows, `rustc` embeds five source paths with that
-host's separators, which no flag of the stable toolchain rewrites, and the data
-section also differs in string-pool order and in the pointers of panic
-locations. Functions also come out in another order on Windows and on macOS:
-the order follows the `-C metadata` values cargo passes to the compiler, which
-differ from host to host and which no stable setting fixes. The entry in
-`exceptions.toml` names the issue, which holds the measurements.
+Functions come out in another order on Windows and on macOS: the order
+follows the `-C metadata` values cargo passes to the compiler, which differ
+from host to host and which no stable setting fixes (issue #2).
 
 `tools/module-compare` removes the order from the comparison. It labels every
 function by its type, locals and instructions, with call targets replaced by
@@ -431,22 +429,12 @@ data section is reported as its own class. The tool refuses a module it cannot
 fully read, such as one with a duplicate data or start section or element
 items in expression form, instead of passing it.
 
-On a host whose build differs from the committed bytes, `tools/wasm_module.py
-check` fails on any code difference. On macOS it also fails on a data
-difference and passes an order-only difference with a notice; macOS needs no
-exception. On Windows it skips a data difference only while the entry is live,
-says so in its output, and refuses the entry once the build matches the
-committed module up to function order. It still refuses a build that is no
-module or holds a machine path, and a missing module. Past the entry's date the
-Windows job fails like the Linux job would. Every other host is held to the
-bytes.
-
-The cause of the other order was found with the *Module diagnosis* workflow
-(`.github/workflows/module-diagnosis.yml`). It is started by hand, builds the
-module on the three hosts with `tools/wasm_module.py check --cargo-log FILE`
-and keeps cargo's record of every compiler call as an artifact of the run, so
-the hosts can be compared argument by argument. It stays for the fix, gates
-nothing and is removed when the issue is closed.
+On a Windows or macOS host whose build differs from the committed bytes,
+`tools/wasm_module.py check` fails on any code or data difference and passes an
+order-only difference with a notice. It still refuses a build that is no module
+or holds a machine path, and a missing module. Every other host is held to the
+bytes. An entry of the retired rule `module-byte-comparison` is refused by
+`tools/exceptions_check.py` like any unknown rule.
 
 ## Shared settings
 

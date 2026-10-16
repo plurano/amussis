@@ -13,9 +13,3 @@ rule = "unsafe_code"
 path = "crates/amussis-decision-wasm/src/abi.rs"
 reason = "a WebAssembly module declares its imports in an unsafe extern block and names its exports with #[unsafe(no_mangle)]; Rust has no safe spelling for either, and the file holds no unsafe block and dereferences no raw pointer"
 expires = "2027-01-09"
-
-[[exception]]
-rule = "module-byte-comparison"
-path = "bindings/go/decision/amussis_decision.wasm"
-reason = "a Windows host cannot build the data section bytes of the committed module: rustc remaps only the prefix of a source path, and the remainder keeps the host separator (crates\\amussis-decision\\src\\registry.rs and the serde source paths in panic Location strings); trim-paths on nightly 1.101 leaves those bytes unchanged (issue #2, runs 38863474754 and 38863478265); the code section is held on all hosts by order-free comparison (amussis-module-compare) and a macOS host is held with no exception; this entry excuses only the Windows data section comparison under category D (120 days, capped by this list at 90) while testing the Go binding on the committed module; revisit when rustc or cargo normalises path separators in remapped paths"
-expires = "2027-01-09"

@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: EUPL-1.2
 """Hold every exception of this workspace to one named, dated entry.
 
-Three rules are read. The first is `unsafe_code`:
+Two rules are read. The first is `unsafe_code`:
 
 The workspace forbids unsafe code. A WebAssembly export crate cannot live under
 a forbid, so it carries its own lint tables with `unsafe_code = "deny"` and one
@@ -33,14 +33,9 @@ No job of this workspace calls another workflow today, so the list holds no
 entry for this rule. The selftest gives every planted tree one calling job,
 its required name and its entry, so the rule stays proven until a job needs it.
 
-The third is `module-byte-comparison`. A Windows host cannot build the data
-section bytes of the committed WebAssembly module (separators, string-pool order,
-Location pointers), so tools/wasm_module.py skips the data section comparison on
-Windows while a live entry names the module; code is held order-free on all hosts,
-and a macOS host is held with no exception; this tool holds the entry to that
-one file and hands it to the module check (`live_exception`). Whether the entry
-still excuses anything is decided where it applies: on a Windows host whose
-build equals the module, the module check refuses the entry.
+A rule that is no longer read, such as `module-byte-comparison` (retired when
+every host came to build the module's data section, issue #2), is refused like
+any unknown rule, so its entry cannot return.
 
 An exception past its day excuses nothing: the file it names fails as if the
 entry were missing.
@@ -69,12 +64,10 @@ LIST = "exceptions.toml"
 MANIFEST = "Cargo.toml"
 RULE = "unsafe_code"
 REPORTED = "required-check-is-reported"
-COMPARED = "module-byte-comparison"
-RULES = (RULE, REPORTED, COMPARED)
+RULES = (RULE, REPORTED)
 RULESET = ".github/rulesets/main.json"
-MODULE = "bindings/go/decision/amussis_decision.wasm"
 # The one file each of these rules excuses.
-ONLY_FILE = {REPORTED: RULESET, COMPARED: MODULE}
+ONLY_FILE = {REPORTED: RULESET}
 WORKFLOWS = ".github/workflows"
 MAX_WORKFLOWS = 64
 ENTRY_KEYS = {"rule", "path", "reason", "expires"}
@@ -155,18 +148,6 @@ def load_entries(root: Path, today: datetime.date) -> tuple[dict[tuple[str, str]
         else:
             by_key[(entry["rule"], entry["path"])] = entry
     return by_key, found
-
-
-def live_exception(root: Path, rule: str, path: str, today: datetime.date) -> dict[str, str] | None:
-    """The entry for one rule and file while it is live on `today`, or None.
-
-    An entry the list check refuses is not live, and neither is one past its day.
-    """
-    by_key, _ = load_entries(root, today)
-    entry = by_key.get((rule, path))
-    if entry is None or datetime.date.fromisoformat(entry["expires"]) < today:
-        return None
-    return entry
 
 
 def of_rule(by_key: dict[tuple[str, str], dict[str, str]], rule: str) -> dict[str, str]:
@@ -535,10 +516,13 @@ PLANTS = {
         0,
         "is computed",
     ),
-    "module exception names another file": (
-        replace_in(LIST, f'path = "{MODULE}"', f'path = "{ABI}"'),
+    "entry of the retired module rule": (
+        append_to(
+            LIST,
+            f'\n[[exception]]\nrule = "module-byte-comparison"\npath = "{ABI}"\nreason = "planted"\nexpires = "2000-01-01"\n',
+        ),
         0,
-        f"excuses only {MODULE}",
+        "rule 'module-byte-comparison' is not a rule this check reads",
     ),
     "rule set that requires no check": (
         replace_in(RULESET, '"type": "required_status_checks"', '"type": "required_checks"'),
@@ -570,27 +554,18 @@ def plant_caller(tree: Path, end: datetime.date) -> None:
     append_to(LIST, entry)(tree)
 
 
-def plant_module_entry(tree: Path, end: datetime.date) -> None:
-    """Give a copy the entry for the module, unless the list holds it."""
-    if f'rule = "{COMPARED}"' not in read_text(tree / LIST):
-        entry = f'\n[[exception]]\nrule = "{COMPARED}"\npath = "{MODULE}"\nreason = "planted"\nexpires = "{end}"\n'
-        append_to(LIST, entry)(tree)
-
-
 def copy_exceptions_tree(root: Path, tree: Path, end: datetime.date) -> None:
     (tree / RULESET).parent.mkdir(parents=True)
-    (tree / MODULE).parent.mkdir(parents=True)
-    for name in (MANIFEST, LIST, RULESET, MODULE):
+    for name in (MANIFEST, LIST, RULESET):
         shutil.copyfile(root / name, tree / name)
     for top in (WORKFLOWS, *source_roots(members(root)[1])):
         shutil.copytree(root / top, tree / top, ignore=shutil.ignore_patterns("target"))
     plant_caller(tree, end)
-    plant_module_entry(tree, end)
     same_end(tree, end)
 
 
 def planted(root: Path, end: datetime.date, edit) -> Path:
-    """A throwaway copy of the manifests, the list, the rule set, the module, the workflows and the member sources."""
+    """A throwaway copy of the manifests, the list, the rule set, the workflows and the member sources."""
     return toolkit_planted(
         root, "exceptions-check-", lambda r, c: copy_exceptions_tree(r, c, end), edit
     )
@@ -607,22 +582,6 @@ def refusals(root: Path, end: datetime.date, edit, day: datetime.date) -> list[s
         shutil.rmtree(tree, ignore_errors=True)
 
 
-def reader_failures(root: Path, end: datetime.date) -> list[str]:
-    """What `live_exception` gets wrong on a planted tree whose entries end on `end`."""
-    tree = planted(root, end, None)
-    after = end + datetime.timedelta(days=1)
-    try:
-        cases = {
-            "the module entry is not live on its last day": live_exception(tree, COMPARED, MODULE, end) is None,
-            "the module entry is live past its day": live_exception(tree, COMPARED, MODULE, after) is not None,
-            "the module entry is live for another file": live_exception(tree, COMPARED, ABI, end) is not None,
-            "the module entry is live for another rule": live_exception(tree, RULE, MODULE, end) is not None,
-        }
-    finally:
-        shutil.rmtree(tree, ignore_errors=True)
-    return [name for name, wrong in cases.items() if wrong]
-
-
 def selftest(root: Path, today: datetime.date) -> list[str]:
     """Each plant must be refused, and for the reason it was planted for."""
     failures = [f"the unplanted tree is refused: {line}" for line in check(root, today)]
@@ -635,7 +594,6 @@ def selftest(root: Path, today: datetime.date) -> list[str]:
     end = datetime.date.fromisoformat(ends[0])
     last_day = refusals(root, end, None, end)
     failures.extend(f"the exceptions do not hold on their last day: {line}" for line in last_day)
-    failures.extend(reader_failures(root, end))
     for name, (edit, days, expected) in PLANTS.items():
         day = end - datetime.timedelta(days=MAX_DAYS) + datetime.timedelta(days=days)
         found = refusals(root, end, edit, day if edit is None else end)
