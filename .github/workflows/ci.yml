@@ -52,6 +52,11 @@ env:
   # Git hooks read the same declaration (.config/lefthook/engine.sh), so a
   # commit is judged locally by the engine that judges it here.
   PRAETOR_REF: "8c99fd771eaaa889c81a8e0eb4965b5e26e18784"
+  # cargo-mutants tests the tests: it changes the code a pull request
+  # touches and expects a test to fail. The digest is the one its release
+  # publishes for the Linux archive of this version.
+  CARGO_MUTANTS_VERSION: "27.1.0"
+  CARGO_MUTANTS_SHA256_LINUX: "dfe6dc37d0342c891d2829b5a695aa57c2d0edecef7e7d0399a30cc6e206411e"
   CARGO_TERM_COLOR: never
 
 # One shell on every platform: the steps are written for bash, which the
@@ -347,3 +352,60 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 30
     steps: *gate
+
+  # Not a required check: it reports mutants the tests miss in the changed
+  # Rust code of a pull request. A missed mutant fails the job, which shows
+  # on the pull request without blocking the merge.
+  mutants:
+    name: Mutation testing (changed code)
+    if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Materialise the pinned Rust toolchain
+        run: |
+          rustup toolchain install --no-self-update --profile minimal
+          rustup show active-toolchain
+
+      - name: Install cargo-mutants
+        run: |
+          archive=cargo-mutants-x86_64-unknown-linux-gnu.tar.gz
+          curl --fail --silent --show-error --location --max-time 120 -o "$archive" \
+            "https://github.com/sourcefrog/cargo-mutants/releases/download/v${CARGO_MUTANTS_VERSION}/${archive}"
+          echo "${CARGO_MUTANTS_SHA256_LINUX}  ${archive}" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/bin"
+          tar -xzf "$archive" -C "$RUNNER_TEMP/bin" cargo-mutants
+          rm "$archive"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: Mutate the changed code
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          cargo mutants --version
+          git diff "$BASE_SHA...$HEAD_SHA" -- '*.rs' > "$RUNNER_TEMP/pr.diff"
+          if [ ! -s "$RUNNER_TEMP/pr.diff" ]; then
+            echo "No Rust change; nothing to mutate." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          cargo mutants --in-diff "$RUNNER_TEMP/pr.diff" --timeout 300 \
+            --all-features --cargo-arg=--locked -o "$RUNNER_TEMP"
+
+      - name: Summarise missed mutants
+        if: always()
+        run: |
+          out="$RUNNER_TEMP/mutants.out"
+          [ -d "$out" ] || exit 0
+          for kind in caught missed timeout unviable; do
+            printf '%s: %s\n' "$kind" "$(wc -l < "$out/$kind.txt")"
+          done >> "$GITHUB_STEP_SUMMARY"
+          if [ -s "$out/missed.txt" ]; then
+            { echo '```'; cat "$out/missed.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
