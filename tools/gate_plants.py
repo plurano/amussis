@@ -18,6 +18,9 @@ into a scratch clone, plants one defect there and runs the check on the clone:
                 method under -policy=reject and names it under -policy=auto.
                 It builds the pinned checker, which reaches the Go module
                 proxy, so CI runs it outside the offline gate.
+    semver      cargo-semver-checks refuses a public method of amussis-decision
+                made crate-private, compared with the release tag --baseline
+                names.
 
 The clone holds the committed tree only: uncommitted edits are not planted on.
 The audit of a clone runs with CI=true, the engine's switch for a checkout
@@ -30,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -49,6 +53,9 @@ API_SOURCE = "bindings/go/decision/decision.go"
 API_METHOD = "func (m Mode) String() string {"
 API_FINDING = "Mode.String: removed"
 GATE_SOURCE = "tools/apicompat/gate/main.go"
+SEMVER_SOURCE = "crates/amussis-decision/src/time.rs"
+SEMVER_METHOD = "    pub const fn seconds(self) -> u32 {"
+SEMVER_FINDINGS = ("inherent_method_missing", "Ttl::seconds")
 
 
 class PlantError(Exception):
@@ -146,17 +153,40 @@ def api_gate(root: Path) -> list[str]:
         return found
 
 
+def semver(root: Path, baseline: str, semver_checks: str) -> list[str]:
+    with tempfile.TemporaryDirectory(prefix="semver-plant-") as scratch:
+        repo = clone(root, Path(scratch))
+        path = repo / SEMVER_SOURCE
+        text = path.read_text(encoding="utf-8")
+        if text.count(SEMVER_METHOD) != 1:
+            raise PlantError(f"{SEMVER_SOURCE} no longer declares {SEMVER_METHOD.strip()!r}; plant another method")
+        path.write_text(text.replace(SEMVER_METHOD, SEMVER_METHOD.replace("pub ", "pub(crate) ")), encoding="utf-8")
+        argv = [*shlex.split(semver_checks), "--package", "amussis-decision", "--baseline-rev", baseline]
+        status, output = run(argv, repo)
+        return refused("public method made crate-private", status, output, *SEMVER_FINDINGS)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("command", choices=("engine", "api-gate"))
+    parser.add_argument("command", choices=("engine", "api-gate", "semver"))
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parent.parent)
     parser.add_argument("--praetorctl", default=os.environ.get("PRAETORCTL") or "praetorctl")
+    parser.add_argument("--baseline", help="semver: the release tag to compare with")
+    parser.add_argument("--semver-checks", default="cargo semver-checks")
     args = parser.parse_args()
     if shutil.which("git") is None:
         print("ERROR: git is not installed", file=sys.stderr)
         return 2
+    if args.command == "semver" and not args.baseline:
+        print("ERROR: semver needs --baseline", file=sys.stderr)
+        return 2
     try:
-        found = engine(args.root, args.praetorctl) if args.command == "engine" else api_gate(args.root)
+        if args.command == "engine":
+            found = engine(args.root, args.praetorctl)
+        elif args.command == "api-gate":
+            found = api_gate(args.root)
+        else:
+            found = semver(args.root, args.baseline, args.semver_checks)
     except PlantError as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 2

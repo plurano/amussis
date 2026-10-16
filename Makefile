@@ -5,6 +5,10 @@
 SHELL := /bin/sh
 REUSE ?= reuse
 CARGO_DENY ?= cargo deny
+CARGO_SEMVER_CHECKS ?= cargo semver-checks
+# The public API is compared with the last release: the nearest tag v* that is
+# not a release candidate.
+SEMVER_BASELINE ?= $(shell git describe --tags --abbrev=0 --match 'v[0-9]*' --exclude '*-*' 2>/dev/null)
 GITLEAKS ?= gitleaks
 SEMGREP ?= semgrep
 TRIVY ?= trivy
@@ -25,7 +29,7 @@ export npm_config_offline := true
 .PHONY: verify verify-settings verify-exceptions verify-origin verify-rust verify-package verify-wasm verify-regenerate verify-go
 .PHONY: verify-go-lint verify-readme
 .PHONY: verify-notices verify-licences verify-reuse verify-secrets verify-signoff fetch
-.PHONY: verify-semgrep verify-trivy
+.PHONY: verify-semgrep verify-trivy verify-semver
 .PHONY: verify-engine-plants verify-api-plant verify-hook-scripts
 
 # The one gate is `make verify-all`: CI runs exactly that target, so a local
@@ -39,10 +43,10 @@ verify-all: verify verify-engine-plants
 # This workspace's own checks; they need no engine.
 verify: verify-settings verify-exceptions verify-origin verify-rust verify-package verify-wasm verify-regenerate verify-go \
 		verify-go-lint verify-readme verify-notices verify-licences verify-reuse verify-secrets verify-signoff \
-		verify-semgrep verify-trivy
+		verify-semgrep verify-trivy verify-semver
 	@printf '%s\n' 'PASS: settings, exceptions, origin names, crate gate, packed crate, module, Go binding,' \
 		'Go linter, README Go blocks, third-party notices, dependency licences, licence headers, secrets,' \
-		'sign-off check, semgrep and trivy scanner checks.'
+		'sign-off check, semgrep and trivy scanner checks, Rust API against the last release.'
 
 # The shared toolchain and lint settings equal the record in
 # settings-source.json; the selftest plants one defect per setting first, so a
@@ -81,6 +85,11 @@ fetch:
 		&& (cd "$$scratch" && npm_config_offline=false npm ci --ignore-scripts --no-audit --no-fund); \
 		status=$$?; rm -rf "$$scratch"; exit $$status
 	python3 -B tools/scanners.py fetch-db
+	test -n "$(SEMVER_BASELINE)" \
+		|| { printf '%s\n' 'FAIL: no release tag v* is reachable from HEAD' >&2; exit 1; }
+	scratch="$$(mktemp -d)" && git archive --format=tar "$(SEMVER_BASELINE)" | tar -x -C "$$scratch" \
+		&& cargo fetch --locked --manifest-path "$$scratch/Cargo.toml"; \
+		status=$$?; rm -rf "$$scratch"; exit $$status
 
 # The documentation gate reads the npm cache that fetch fills.
 docs-lint: fetch
@@ -260,6 +269,18 @@ verify-semgrep:
 verify-trivy: fetch
 	python3 -B tools/scanners.py selftest trivy
 	python3 -B tools/scanners.py check trivy
+
+# The public Rust API of the published crates against the last release tag:
+# cargo-semver-checks fails on a change the workspace version does not allow,
+# so a breaking change waits for the version bump that announces it. fetch has
+# put the dependencies of both trees in the cache, so the run stays offline.
+# The planted case: a public method made private on a scratch clone has to be
+# refused by name.
+verify-semver: fetch
+	$(CARGO_SEMVER_CHECKS) --version
+	CARGO_NET_OFFLINE=true $(CARGO_SEMVER_CHECKS) --workspace --baseline-rev "$(SEMVER_BASELINE)"
+	CARGO_NET_OFFLINE=true python3 -B tools/gate_plants.py semver \
+		--baseline "$(SEMVER_BASELINE)" --semver-checks "$(CARGO_SEMVER_CHECKS)"
 
 # One planted defect per engine check of the recipe below, each on a scratch
 # clone of the committed tree: a vendor file that drifted from AGENTS.md, filler

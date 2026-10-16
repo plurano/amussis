@@ -96,19 +96,24 @@ which has to find a planted finding per rule; its hash-locked install
 when one pin breaks the bounds of another. It scans dependencies offline for
 vulnerabilities with [trivy](https://github.com/aquasecurity/trivy), which
 requires a database pinned by digest from `make fetch` and has to find planted Go
-and Rust advisories. Its second half is
+and Rust advisories. It compares the public API of the published crates with
+the last release tag using
+[cargo-semver-checks](https://github.com/obi1kenobi/cargo-semver-checks), which
+fails on a breaking change the workspace version does not announce and has to
+refuse a public method made private on a scratch clone. Its second half is
 the Praetor standards audit, which needs `praetorctl`; CI builds it from the
 commit pinned in the workflow.
 
 The gate needs the `wasm32-unknown-unknown` target of the pinned toolchain
 (`rustup target add wasm32-unknown-unknown`), Go at the version
 `bindings/go/go.mod` names, Node.js 22.12 or later with npm, and
-[cargo-deny](https://github.com/EmbarkStudios/cargo-deny), gitleaks, semgrep and
-trivy at the versions `.github/workflows/ci.yml` pins. It installs none of them,
+[cargo-deny](https://github.com/EmbarkStudios/cargo-deny), cargo-semver-checks,
+gitleaks, semgrep and trivy at the versions `.github/workflows/ci.yml` pins. It installs none of them,
 and fails when one is missing.
 
 `make fetch` is the only step that reaches a third-party host: `cargo fetch
---locked` reads the crates.io registry, `go mod download` the Go module proxy,
+--locked` reads the crates.io registry for this tree and for the last release
+tag, `go mod download` the Go module proxy,
 a locked `npm ci` the npm registry for the packages of the documentation
 gate, and `tools/scanners.py fetch-db` downloads the vulnerability database from
 `ghcr.io` for trivy. Everything after it runs with `--offline`, `GOPROXY=off`,
