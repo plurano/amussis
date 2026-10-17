@@ -14,10 +14,17 @@ facets:
   - api:public-contract
   - agent:sandboxed
   - docs:seo-portal
-# The engine has no library flavor yet (cordanaLLM/praetor#67); until it
-# does, the workspace is audited as rust-systems.
 flavors:
-  - name: rust-systems
+  - name: rust-library
+# cargo-mutants exclusions are equivalent mutants: each changes no behaviour,
+# with the reason beside it in .cargo/mutants.toml. Category D (120 days).
+exceptions:
+  - rule: mutants
+    path: .cargo/mutants.toml
+    category: D
+    entered: 2026-10-17
+    reason: "category D: six equivalent mutants no test can kill, each reasoned in the file"
+    expires: 2027-02-14
 # The editors and agent clients this repository is worked on with. Files of
 # any other editor or client are not generated and not tracked.
 editors:
@@ -33,6 +40,7 @@ overrides:
     # Owner-approved 2026-10-11: one maintainer and no review bot can approve.
     # Restore independent when a second maintainer or a review bot can.
     review_mode: single_maintainer
+    require_extra_approval_for_unattributed_changes: true
 register:
   sources:
     expected: 13

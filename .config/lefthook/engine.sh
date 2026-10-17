@@ -5,13 +5,14 @@
 #
 # The engine is the one the repository pins, not the newest binary on PATH. The pin is the
 # value of PRAETOR_REF declared in a workflow under .github/workflows ("PRAETOR_REF: <ref>" or
-# "PRAETOR_REF=<ref>"), or the uses ref of praetor-adopt / reusable workflows
+# "PRAETOR_REF=<ref>"), a PRAETOR_COMMIT declaration holding exactly 40 lowercase hexadecimal
+# characters, or the uses ref of praetor-adopt / reusable workflows
 # ("uses: cordanaLLM/praetor/.github/actions/praetor-adopt@<ref>" or
 # "uses: cordanaLLM/praetor/.github/workflows/<workflow>@<ref>"), the same declaration a hosted
 # Standards job installs the engine from with "go install <module>/cmd/standardsctl@${PRAETOR_REF}".
-# A pin is a commit id of 7 to 40 hexadecimal digits or a release tag such as v1.2.3; a branch
-# name moves, so it is no pin. A non-pin uses ref such as @main is treated as unpinned (running
-# the engine on PATH).
+# A PRAETOR_REF pin is a commit id of 7 to 40 hexadecimal digits or a release tag such as v1.2.3;
+# a branch name moves, so it is no pin. A non-pin uses ref such as @main is treated as unpinned
+# (running the engine on PATH). An invalid PRAETOR_COMMIT is noted and ignored.
 #
 # With a pin, the engine is installed once per pin into
 #   ${XDG_CACHE_HOME:-$HOME/.cache}/praetor/engine/<pin>
@@ -80,36 +81,47 @@ pin_fault() { #
   echo "it is neither a commit id of 7 to 40 hexadecimal digits nor a release tag such as v1.2.3" #
 } #
 #
-# declared_pins: one "file<TAB>value" line per PRAETOR_REF declaration under .github/workflows.
+# declared_pins: one "file<TAB>name<TAB>value" line per usable PRAETOR_REF or PRAETOR_COMMIT
+# declaration under .github/workflows; invalid PRAETOR_COMMIT values are noted and omitted.
 declared_pins() { #
   for file in .github/workflows/*.yml .github/workflows/*.yaml; do #
     [ -e "$file" ] || continue #
     [ -r "$file" ] || refuse "workflow file $file is not readable" #
-    tr -d '\r' <"$file" | sed -n 's/^[[:space:]]*PRAETOR_REF[[:space:]]*[:=][[:space:]]*//p' | sed -e 's/[[:space:]]*#.*$//' -e "s/^[\"']//" -e "s/[\"'][[:space:]]*\$//" -e 's/[[:space:]]*$//' | while read -r value; do printf '%s\t%s\n' "$file" "$value"; done #
+    tr -d '\r' <"$file" | sed -n -e 's/^[[:space:]]*\(PRAETOR_REF\)[[:space:]]*[:=][[:space:]]*/\1=/p' -e 's/^[[:space:]]*\(PRAETOR_COMMIT\)[[:space:]]*[:=][[:space:]]*/\1=/p' | sed -e 's/[[:space:]]*#.*$//' -e "s/=[\"']/=/" -e "s/[\"'][[:space:]]*\$//" -e 's/[[:space:]]*$//' | while IFS= read -r declaration; do #
+      name=${declaration%%=*} #
+      value=${declaration#*=} #
+      if [ "$name" = PRAETOR_COMMIT ]; then #
+        case "$value" in *[!0-9a-f]* | "") full=false ;; *) [ "${#value}" -eq 40 ] && full=true || full=false ;; esac #
+        if [ "$full" = false ]; then echo "praetor hooks: PRAETOR_COMMIT=$value in $file is not a full commit" >&2; continue; fi #
+      fi #
+      printf '%s\t%s\t%s\n' "$file" "$name" "$value" #
+    done #
   done #
 } #
 #
-# uses_pins: one "file<TAB>value" line per praetor-adopt or reusable-workflow uses ref under .github/workflows.
+# uses_pins: one "file<TAB>name<TAB>value" line per praetor-adopt or reusable-workflow uses ref
+# under .github/workflows.
 uses_pins() { #
   for file in .github/workflows/*.yml .github/workflows/*.yaml; do #
     [ -e "$file" ] || continue #
     [ -r "$file" ] || refuse "workflow file $file is not readable" #
     tr -d '\r' <"$file" | sed -n -e 's/^[[:space:]]*-[[:space:]]*uses:[[:space:]]*//p' -e 's/^[[:space:]]*uses:[[:space:]]*//p' | sed -e 's/[[:space:]]*#.*$//' -e "s/^[\"']//" -e "s/[\"'][[:space:]]*\$//" -e 's/[[:space:]]*$//' | sed -n -e 's/^[Cc][Oo][Rr][Dd][Aa][Nn][Aa][Ll][Ll][Mm]\/[Pp][Rr][Aa][Ee][Tt][Oo][Rr]\/\.github\/actions\/praetor-adopt@\(..*\)$/\1/p' -e 's/^[Cc][Oo][Rr][Dd][Aa][Nn][Aa][Ll][Ll][Mm]\/[Pp][Rr][Aa][Ee][Tt][Oo][Rr]\/\.github\/workflows\/[^@[:space:]]*@\(..*\)$/\1/p' | while read -r value; do #
-      if fault=$(pin_fault "$value"); then :; else printf '%s\t%s\n' "$file" "$value"; fi #
+      if fault=$(pin_fault "$value"); then :; else printf '%s\tPRAETOR_REF\t%s\n' "$file" "$value"; fi #
     done #
   done #
 } #
 #
-# run_pinned REF FILE ARGUMENT...: run the engine pinned to REF, declared in FILE, with the
-# arguments, installing it first when it is not cached.
+# run_pinned REF NAME FILE ARGUMENT...: run the engine pinned to REF, declared as NAME in FILE,
+# with the arguments, installing it first when it is not cached.
 run_pinned() { #
   pin=$1 #
-  source=$2 #
-  shift 2 #
+  name=$2 #
+  source=$3 #
+  shift 3 #
   cache=${XDG_CACHE_HOME:-${HOME:-}/.cache}/praetor/engine #
   directory=$cache/$pin #
   fix="GOBIN=$directory go install $module/$package@$pin" #
-  where="PRAETOR_REF=$pin (declared in $source), engine cache $directory" #
+  where="$name=$pin (declared in $source), engine cache $directory" #
   case "$cache" in /.cache/*) refuse "cannot place the engine cache for $where: neither XDG_CACHE_HOME nor HOME is set; set one and run: $fix" ;; esac #
   if [ ! -x "$directory/$binary" ] && [ ! -x "$directory/$binary.exe" ]; then #
     install_pinned "$directory" "$where" "$fix" #
@@ -171,14 +183,15 @@ place_pinned() { #
 pins=$(declared_pins) #
 [ -n "$pins" ] || pins=$(uses_pins) #
 if [ -n "$pins" ]; then #
-  values=$(printf '%s\n' "$pins" | cut -f2 | sort -u) #
-  [ "$(printf '%s\n' "$values" | wc -l)" -eq 1 ] || refuse "the repository declares several PRAETOR_REF values, so no engine is pinned: $(printf '%s\n' "$pins" | tr '\t\n' '= ')" #
+  values=$(printf '%s\n' "$pins" | cut -f3 | sort -u) #
+  [ "$(printf '%s\n' "$values" | wc -l)" -eq 1 ] || refuse "the repository declares several PRAETOR_REF values or PRAETOR_COMMIT values, so no engine is pinned: $(printf '%s\n' "$pins" | tr '\t\n' '= ')" #
   pin=$values #
   file=$(printf '%s\n' "$pins" | cut -f1 | head -n 1) #
+  name=$(printf '%s\n' "$pins" | cut -f2 | head -n 1) #
   if fault=$(pin_fault "$pin"); then #
-    refuse "PRAETOR_REF='$pin' in $file is no usable pin: $fault" #
+    refuse "$name='$pin' in $file is no usable pin: $fault" #
   fi #
-  run_pinned "$pin" "$file" "$@" #
+  run_pinned "$pin" "$name" "$file" "$@" #
 fi #
 #
 if path=$(command -v praetorctl 2>/dev/null || command -v standardsctl 2>/dev/null); then #
@@ -186,7 +199,7 @@ if path=$(command -v praetorctl 2>/dev/null || command -v standardsctl 2>/dev/nu
     printf '%s\n' "$path" #
     exit 0 #
   fi #
-  echo "praetor hooks: no PRAETOR_REF pin under .github/workflows; running the engine on PATH: $path" >&2 #
+  echo "praetor hooks: no PRAETOR_REF pin or full PRAETOR_COMMIT pin under .github/workflows; running the engine on PATH: $path" >&2 #
   exec "$path" "$@" #
 fi #
 refuse "HISS governance hook cannot run because neither praetorctl nor standardsctl is installed" #

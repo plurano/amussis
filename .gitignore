@@ -2,13 +2,12 @@
 __pycache__/
 *.pyc
 
-# The pre-push gate's local receipt.
-/.standards-receipt.json
-
 # BEGIN praetor private artifacts (praetorctl adopt)
 .workingdir/
 .workingdir2/
 /.standards/worktrees/
 /.agents/mcp_config.json
 /.standards/cache/
+/.claude/settings.local.json
+/.standards-receipt.json
 # END praetor private artifacts
