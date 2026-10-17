@@ -59,7 +59,7 @@ env:
   # Published Praetor commit that builds the praetorctl this gate pins. The
   # Git hooks read the same declaration (.config/lefthook/engine.sh), so a
   # commit is judged locally by the engine that judges it here.
-  PRAETOR_REF: "8c99fd771eaaa889c81a8e0eb4965b5e26e18784"
+  PRAETOR_REF: "21bf5366356b29878cd1bbdd43168bc9fa421707"
   # cargo-mutants tests the tests: it changes the code a pull request
   # touches and expects a test to fail. The digest is the one its release
   # publishes for the Linux archive of this version.
