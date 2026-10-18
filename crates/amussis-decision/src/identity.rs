@@ -36,15 +36,15 @@ const fn permitted(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_' | b':' | b'@' | b'/')
 }
 
-/// Validates `raw` against `max` and copies it into a fixed buffer of `N` bytes.
-fn validate<const N: usize>(raw: &str, max: usize) -> Result<([u8; N], usize), IdentityError> {
+/// Validates `raw` and copies it into a fixed buffer of `N` bytes.
+fn validate<const N: usize>(raw: &str) -> Result<([u8; N], usize), IdentityError> {
     let bytes = raw.as_bytes();
     if bytes.is_empty() {
         return Err(IdentityError::Empty);
     }
-    if bytes.len() > max || bytes.len() > N {
+    if bytes.len() > N {
         return Err(IdentityError::TooLong {
-            max,
+            max: N,
             actual: bytes.len(),
         });
     }
@@ -74,7 +74,7 @@ impl Identity {
     /// [`MAX_IDENTITY_LEN`] bytes, or contains a byte outside the permitted
     /// character set. The input is never truncated or sanitised.
     pub fn parse(raw: &str) -> Result<Self, IdentityError> {
-        let (bytes, len) = validate::<MAX_IDENTITY_LEN>(raw, MAX_IDENTITY_LEN)?;
+        let (bytes, len) = validate::<MAX_IDENTITY_LEN>(raw)?;
         let len = u8::try_from(len).map_err(|_| IdentityError::TooLong {
             max: MAX_IDENTITY_LEN,
             actual: len,
@@ -193,7 +193,7 @@ impl TargetResource {
     /// Returns [`IdentityError`] when `raw` is empty, longer than
     /// [`MAX_TARGET_LEN`] bytes, or outside the permitted character set.
     pub fn parse(raw: &str) -> Result<Self, IdentityError> {
-        let (bytes, len) = validate::<MAX_TARGET_LEN>(raw, MAX_TARGET_LEN)?;
+        let (bytes, len) = validate::<MAX_TARGET_LEN>(raw)?;
         let len = u16::try_from(len).map_err(|_| IdentityError::TooLong {
             max: MAX_TARGET_LEN,
             actual: len,
