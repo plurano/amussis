@@ -185,11 +185,8 @@ impl RiskLevel {
     /// the higher tier.
     #[must_use]
     pub fn stricter(self, other: Self) -> Self {
-        if other.strictness() > self.strictness() {
-            other
-        } else {
-            self
-        }
+        // On equal keys `max_by_key` returns its second argument: `self`.
+        core::cmp::max_by_key(other, self, |level| level.strictness())
     }
 
     /// The order [`Self::stricter`] compares by.

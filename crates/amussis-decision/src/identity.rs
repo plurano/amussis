@@ -97,7 +97,7 @@ impl Identity {
     /// Returns `false`; an identity is never empty by construction.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
-        self.len == 0
+        false
     }
 }
 
@@ -216,7 +216,7 @@ impl TargetResource {
     /// Returns `false`; a target resource is never empty by construction.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
-        self.len == 0
+        false
     }
 }
 
