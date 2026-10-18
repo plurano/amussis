@@ -23,7 +23,7 @@ exceptions:
     path: .cargo/mutants.toml
     category: D
     entered: 2026-10-17
-    reason: "category D: six equivalent mutants no test can kill, each reasoned in the file"
+    reason: "category D: five equivalent mutants no test can kill, each reasoned in the file"
     expires: 2027-02-14
 # The editors and agent clients this repository is worked on with. Files of
 # any other editor or client are not generated and not tracked.

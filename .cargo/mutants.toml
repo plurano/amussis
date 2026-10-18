@@ -5,8 +5,6 @@
 # because it does not change behaviour; the reason sits beside it. Remove an
 # entry when the code it names changes.
 exclude_re = [
-    # Both callers pass max == N, so the two bounds are the same test.
-    'replace \|\| with && in validate',
     # Identity and TargetResource refuse empty input at construction.
     'replace Identity::is_empty -> bool with false',
     'replace TargetResource::is_empty -> bool with false',
