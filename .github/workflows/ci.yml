@@ -433,6 +433,12 @@ jobs:
           rm "$archive"
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
 
+      # The manifest tests read `cargo metadata --offline`, which needs every
+      # package of the lock file in the cargo home, not only the ones a build
+      # of the workspace downloads.
+      - name: Fetch the locked dependency graph
+        run: cargo fetch --locked
+
       - name: Mutate the changed code
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
