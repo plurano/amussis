@@ -13,7 +13,7 @@ mod dependency_closure;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use cargo_metadata::Metadata;
+use cargo_metadata::{Metadata, Package};
 
 /// This crate's package name, the start of its dependency closure.
 const PACKAGE: &str = "amussis-decision";
@@ -117,6 +117,81 @@ fn malformed_metadata_is_refused() -> Result<(), String> {
     assert!(
         names.contains("sha2"),
         "the well-formed document must parse"
+    );
+    Ok(())
+}
+
+/// Negative: a start node that is not a workspace member, or a document with
+/// no workspace members, fails closed with zero start nodes.
+#[test]
+fn a_missing_start_node_is_refused() -> Result<(), String> {
+    let mut metadata = dependency_closure::synthetic(PACKAGE, &["sha2"])?;
+    let error = dependency_closure::closure(&metadata, "not-a-member")
+        .err()
+        .ok_or("non-member start node was accepted")?;
+    assert!(
+        error.contains("0 workspace members"),
+        "non-member start node error must name zero members: {error}"
+    );
+    metadata.workspace_members.clear();
+    let error = dependency_closure::closure(&metadata, PACKAGE)
+        .err()
+        .ok_or("cleared workspace members was accepted")?;
+    assert!(
+        error.contains("0 workspace members"),
+        "cleared workspace members error must name zero members: {error}"
+    );
+    Ok(())
+}
+
+/// Negative: metadata without a resolve fails closed for both closure
+/// calculation and dependency planting.
+#[test]
+fn a_null_resolve_is_refused() -> Result<(), String> {
+    let mut metadata = dependency_closure::synthetic(PACKAGE, &["sha2"])?;
+    metadata.resolve = None;
+    let closure_error = dependency_closure::closure(&metadata, PACKAGE)
+        .err()
+        .ok_or("null resolve was accepted by closure")?;
+    assert!(
+        closure_error.contains("the resolve is null"),
+        "closure error must name null resolve: {closure_error}"
+    );
+    let plant_error = dependency_closure::plant(&mut metadata, PACKAGE, "md5", None)
+        .err()
+        .ok_or("null resolve was accepted by plant")?;
+    assert!(
+        plant_error.contains("the resolve is null"),
+        "plant error must name null resolve: {plant_error}"
+    );
+    Ok(())
+}
+
+/// Negative: two workspace members sharing one package name fail closed
+/// because the closure walk cannot identify a unique start node.
+#[test]
+fn two_members_of_one_name_are_refused() -> Result<(), String> {
+    let mut metadata = dependency_closure::synthetic(PACKAGE, &["sha2"])?;
+    let member = metadata
+        .packages
+        .iter()
+        .find(|pkg| pkg.name == PACKAGE)
+        .ok_or("workspace member package missing")?;
+    let mut duplicate_value = serde_json::to_value(member).map_err(|error| error.to_string())?;
+    duplicate_value
+        .as_object_mut()
+        .ok_or("workspace member package is not a JSON object")?
+        .insert("id".to_string(), serde_json::json!("duplicate-member"));
+    let duplicate: Package =
+        serde_json::from_value(duplicate_value).map_err(|error| error.to_string())?;
+    metadata.workspace_members.push(duplicate.id.clone());
+    metadata.packages.push(duplicate);
+    let error = dependency_closure::closure(&metadata, PACKAGE)
+        .err()
+        .ok_or("duplicate workspace member name was accepted")?;
+    assert!(
+        error.contains("2 workspace members"),
+        "duplicate member error must name two members: {error}"
     );
     Ok(())
 }
