@@ -5,12 +5,6 @@
 # because it does not change behaviour; the reason sits beside it. Remove an
 # entry when the code it names changes.
 exclude_re = [
-    # Identity and TargetResource refuse empty input at construction.
-    'replace Identity::is_empty -> bool with false',
-    'replace TargetResource::is_empty -> bool with false',
-    # The strictness key is unique per level: > and >= differ only when the
-    # two levels are equal, and then both branches return the same level.
-    'replace > with >= in RiskLevel::stricter',
     # Sha256 is the only HashAlgorithm and its tag is 1; with one variant
     # the check is always true.
     'replace HashAlgorithm::tag -> u8 with 1',
