@@ -3,7 +3,7 @@ version: 1
 repository:
   owner: plurano
   name: amussis
-  visibility: private
+  visibility: public
   description: "Shared Rust crates of the Plurano framework family, kept in one workspace."
   homepage: ""
   topics: []
