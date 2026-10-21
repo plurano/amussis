@@ -69,9 +69,13 @@ fn role_wrappers_positive_negative_and_boundary() -> Fallible<()> {
 /// Target resources carry their own, larger bound.
 #[test]
 fn target_resource_positive_negative_and_boundary() -> Fallible<()> {
-    assert_eq!(TargetResource::parse("/etc/aegis")?.len(), 10);
+    let target = TargetResource::parse("/etc/aegis")?;
+    assert_eq!(target.len(), 10);
+    assert_eq!(target.to_string(), "/etc/aegis");
     let at_bound = "y".repeat(MAX_TARGET_LEN);
-    assert_eq!(TargetResource::parse(&at_bound)?.len(), MAX_TARGET_LEN);
+    let bounded = TargetResource::parse(&at_bound)?;
+    assert_eq!(bounded.len(), MAX_TARGET_LEN);
+    assert_eq!(bounded.to_string(), at_bound);
     assert_eq!(
         TargetResource::parse(&"y".repeat(MAX_TARGET_LEN.saturating_add(1))),
         Err(IdentityError::TooLong {
