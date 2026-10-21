@@ -101,12 +101,19 @@ impl Identity {
     }
 }
 
-impl fmt::Display for Identity {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let text = core::str::from_utf8(self.as_bytes()).map_err(|_| fmt::Error)?;
-        f.write_str(text)
-    }
+/// Implements [`fmt::Display`] so validated UTF-8 bytes format directly.
+macro_rules! utf8_display {
+    ($target:ident) => {
+        impl fmt::Display for $target {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                let text = core::str::from_utf8(self.as_bytes()).map_err(|_| fmt::Error)?;
+                f.write_str(text)
+            }
+        }
+    };
 }
+
+utf8_display!(Identity);
 
 /// Declares a role-tagged wrapper so two roles can never be confused.
 macro_rules! role_id {
@@ -220,9 +227,4 @@ impl TargetResource {
     }
 }
 
-impl fmt::Display for TargetResource {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let text = core::str::from_utf8(self.as_bytes()).map_err(|_| fmt::Error)?;
-        f.write_str(text)
-    }
-}
+utf8_display!(TargetResource);
