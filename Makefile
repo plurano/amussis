@@ -29,7 +29,7 @@ export npm_config_offline := true
 .PHONY: verify verify-settings verify-exceptions verify-origin verify-rust verify-package verify-wasm verify-regenerate verify-go
 .PHONY: verify-go-lint verify-readme
 .PHONY: verify-notices verify-licences verify-reuse verify-secrets verify-signoff fetch
-.PHONY: verify-semgrep verify-trivy verify-semver
+.PHONY: verify-semgrep verify-trivy verify-tools verify-semver
 .PHONY: verify-engine-plants verify-api-plant verify-hook-scripts
 
 # The one gate is `make verify-all`: CI runs exactly that target, so a local
@@ -43,10 +43,10 @@ verify-all: verify verify-engine-plants
 # This workspace's own checks; they need no engine.
 verify: verify-settings verify-exceptions verify-origin verify-rust verify-package verify-wasm verify-regenerate verify-go \
 		verify-go-lint verify-readme verify-notices verify-licences verify-reuse verify-secrets verify-signoff \
-		verify-semgrep verify-trivy verify-semver
+		verify-tools verify-semgrep verify-trivy verify-semver
 	@printf '%s\n' 'PASS: settings, exceptions, origin names, crate gate, packed crate, module, Go binding,' \
 		'Go linter, README Go blocks, third-party notices, dependency licences, licence headers, secrets,' \
-		'sign-off check, semgrep and trivy scanner checks, Rust API against the last release.'
+		'sign-off check, scanner tool tests, semgrep and trivy scanner checks, Rust API against the last release.'
 
 # The shared toolchain and lint settings equal the record in
 # settings-source.json; the selftest plants one defect per setting first, so a
@@ -255,6 +255,10 @@ verify-secrets:
 verify-signoff:
 	python3 -B tools/signoff_check.py selftest
 
+# Scanner tool unit tests verify cache handling and download safety.
+verify-tools:
+	python3 -B -m unittest discover -s tools -p 'test_*.py'
+
 # Semgrep checks the repository against its own HISS invariant rules. The
 # selftest plants one finding per rule in a scratch directory first, so a rule
 # that stopped refusing anything fails before the tree scan is trusted.
@@ -263,9 +267,11 @@ verify-semgrep:
 	python3 -B tools/scanners.py check semgrep
 
 # Trivy scans dependencies offline for known vulnerabilities against the
-# database pinned by digest. The selftest plants vulnerable Go and Rust
-# manifests in a scratch directory first, so a scanner that stopped reporting
-# advisories fails before the tree scan is trusted.
+# database pinned by digest, kept in one cache that every checkout and gate
+# copy shares: <XDG_CACHE_HOME or ~/.cache>/plurano/trivy-db/<digest>. The
+# selftest plants vulnerable Go and Rust manifests in a scratch directory
+# first, so a scanner that stopped reporting advisories fails before the tree
+# scan is trusted.
 verify-trivy: fetch
 	python3 -B tools/scanners.py selftest trivy
 	python3 -B tools/scanners.py check trivy
