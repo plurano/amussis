@@ -13,6 +13,8 @@
     check trivy         scan repository dependencies offline with trivy against the
                         cached vulnerability database
 
+The trivy vulnerability database is cached under ~/.cache/plurano/trivy-db/<digest>
+(or $XDG_CACHE_HOME/plurano/trivy-db/<digest>) and shared across checkouts.
 Pins live in one place: TRIVY_DB_DIGEST as a constant in this file so that
 standalone invocations, Makefile targets, and Renovate custom managers reference
 the single source of truth.
@@ -27,6 +29,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -99,27 +102,64 @@ def make_trivy_env(cache_dir: Path) -> dict[str, str]:
     return env
 
 
-def fetch_db(cache_dir: Path, trivy_bin: str) -> int:
-    """Download the pinned Trivy DB unless stamp file names the pinned digest."""
-    cache_dir.mkdir(parents=True, exist_ok=True)
+def default_cache() -> Path:
+    """Return the shared cache directory for the pinned trivy database."""
+    base = os.environ.get("XDG_CACHE_HOME")
+    cache_home = Path(base) if base else Path.home() / ".cache"
+    return cache_home / "plurano" / "trivy-db" / TRIVY_DB_DIGEST.removeprefix("sha256:")
+
+
+def stamp_of(cache_dir: Path) -> str | None:
+    """Read the database stamp from cache_dir, returning None if absent."""
     stamp_file = cache_dir / "db.stamp"
-    if stamp_file.is_file() and stamp_file.read_text(encoding="utf-8").strip() == TRIVY_DB_DIGEST:
+    try:
+        return stamp_file.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+
+
+def fetch_db(cache_dir: Path, trivy_bin: str) -> int:
+    """Download the pinned Trivy DB into cache_dir unless already present."""
+    if stamp_of(cache_dir) == TRIVY_DB_DIGEST:
         print(f"trivy database already at pinned digest {TRIVY_DB_DIGEST}")
         return 0
     print_tool_version(trivy_bin)
-    target_ref = f"{TRIVY_DB_REPOSITORY}@{TRIVY_DB_DIGEST}"
-    argv = [
-        trivy_bin, "fs",
-        "--cache-dir", str(cache_dir),
-        "--db-repository", target_ref,
-        "--download-db-only",
-    ]
-    done = run_cmd(argv, timeout=FETCH_DEADLINE_SECONDS, env=make_trivy_env(cache_dir))
-    if done.returncode != 0:
-        raise CheckError(f"{' '.join(argv)} exited {done.returncode}: {done.stderr.strip()}")
-    stamp_file.write_text(f"{TRIVY_DB_DIGEST}\n", encoding="utf-8")
-    print(f"PASS: trivy database updated to {TRIVY_DB_DIGEST}")
-    return 0
+    try:
+        cache_dir.parent.mkdir(parents=True, exist_ok=True)
+        tmp = Path(tempfile.mkdtemp(dir=cache_dir.parent, prefix=".fetch-"))
+    except OSError as error:
+        raise CheckError(f"cannot initialize cache directory {cache_dir.parent}: {error}") from error
+
+    renamed = False
+    try:
+        target_ref = f"{TRIVY_DB_REPOSITORY}@{TRIVY_DB_DIGEST}"
+        argv = [
+            trivy_bin, "fs",
+            "--cache-dir", str(tmp),
+            "--db-repository", target_ref,
+            "--download-db-only",
+        ]
+        done = run_cmd(argv, timeout=FETCH_DEADLINE_SECONDS, env=make_trivy_env(tmp))
+        if done.returncode != 0:
+            raise CheckError(f"{' '.join(argv)} exited {done.returncode}: {done.stderr.strip()}")
+        (tmp / "db.stamp").write_text(f"{TRIVY_DB_DIGEST}\n", encoding="utf-8")
+        if cache_dir.is_symlink() or cache_dir.is_file():
+            cache_dir.unlink()
+        elif cache_dir.is_dir() and stamp_of(cache_dir) != TRIVY_DB_DIGEST:
+            shutil.rmtree(cache_dir)
+        try:
+            os.rename(tmp, cache_dir)
+            renamed = True
+        except OSError as error:
+            if stamp_of(cache_dir) == TRIVY_DB_DIGEST:
+                print(f"PASS: trivy database updated to {TRIVY_DB_DIGEST}")
+                return 0
+            raise CheckError(f"failed to install trivy database cache: {error}") from error
+        print(f"PASS: trivy database updated to {TRIVY_DB_DIGEST}")
+        return 0
+    finally:
+        if not renamed:
+            shutil.rmtree(tmp, ignore_errors=True)
 
 
 def read_hiss_rule_ids(config_path: Path) -> set[str]:
@@ -294,8 +334,7 @@ def check_semgrep(config_path: Path, semgrep_bin: str) -> int:
 
 def check_trivy(cache_dir: Path, trivy_bin: str) -> int:
     """Verify Trivy cache stamp and perform offline tree vulnerability scan."""
-    stamp_file = cache_dir / "db.stamp"
-    if not stamp_file.is_file() or stamp_file.read_text(encoding="utf-8").strip() != TRIVY_DB_DIGEST:
+    if stamp_of(cache_dir) != TRIVY_DB_DIGEST:
         raise CheckError(
             f"trivy cache stamp invalid or missing; run make fetch to update database to {TRIVY_DB_DIGEST}"
         )
@@ -328,7 +367,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("action", choices=("fetch-db", "selftest", "check"))
     parser.add_argument("target", nargs="?", choices=("semgrep", "trivy"))
-    parser.add_argument("--cache-dir", type=Path, default=Path("target/trivy-cache"))
+    parser.add_argument("--cache-dir", type=Path, default=default_cache())
     parser.add_argument("--config", type=Path, default=Path(".config/semgrep/hiss.yml"))
     args = parser.parse_args()
 
