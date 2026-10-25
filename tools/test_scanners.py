@@ -62,8 +62,24 @@ sys.exit(0)
     return script_path
 
 
+REAL_RUN_CMD = scanners.run_cmd
+
+
+def run_through_python(argv: list[str], *args: object, **kwargs: object) -> object:
+    """Run the fake trivy through this interpreter: Windows cannot run a shebang script."""
+    if Path(argv[0]).name == "fake_trivy":
+        argv = [sys.executable, *argv]
+    return REAL_RUN_CMD(argv, *args, **kwargs)
+
+
 class TestScanners(unittest.TestCase):
     """Test suite covering trivy database cache behaviour."""
+
+    def setUp(self) -> None:
+        """Route every scanner subprocess through the interpreter wrapper."""
+        runner = patch.object(scanners, "run_cmd", run_through_python)
+        runner.start()
+        self.addCleanup(runner.stop)
 
     def test_default_cache_xdg(self) -> None:
         """Case a: default_cache under XDG_CACHE_HOME."""
