@@ -43,6 +43,13 @@
     },
     {
       "parameters": {
+        "review_draft_pull_requests": true,
+        "review_on_push": true
+      },
+      "type": "copilot_code_review"
+    },
+    {
+      "parameters": {
         "required_status_checks": [
           {
             "context": "Verification gate"
@@ -60,7 +67,7 @@
             "context": "Documentation Governance"
           },
           {
-            "context": "REUSE lint"
+            "context": "Licence / REUSE lint"
           }
         ],
         "strict_required_status_checks_policy": true

@@ -76,6 +76,26 @@ pre-push:
         .config/lefthook/engine.sh security govuln; else echo govulncheck is not
         installed, install it with go install
         golang.org/x/vuln/cmd/govulncheck@latest >&2; exit 1; fi
+    secrets:
+      run: >-
+        if command -v gitleaks >/dev/null 2>&1; then sh
+        .config/lefthook/engine.sh security secrets; else echo gitleaks is not
+        installed, install it with mise use --global gitleaks@8.30.1 or the
+        gitleaks v8.30.1 release archive binary - a Go-built gitleaks lacks the
+        version stamp and shadows the pinned binary when earlier on PATH e.g.
+        ~/go/bin >&2; exit 1; fi
+    docstrings:
+      use_stdin: true
+      run: sh .config/lefthook/engine.sh docstrings check --pre-push
+    merge-check:
+      use_stdin: true
+      run: >-
+        count=0; ran=0; while read -r _ loid _ roid; do count=$((count + 1)); if
+        [ $count -gt 64 ]; then echo merge-check: pushed refs exceed limit 64
+        >&2; exit 1; fi; if [ x$(echo $loid | tr -d 0) != x ] && [ x$(echo $roid
+        | tr -d 0) != x ]; then ran=1; sh .config/lefthook/engine.sh merge-check
+        --range=$roid..$loid || exit $?; fi; done; if [ $ran = 0 ]; then echo no
+        pushed commit range on stdin, skipping merge-check >&2; fi
     flavor-audit:
       run: sh .config/lefthook/engine.sh flavor audit .
     audit:
