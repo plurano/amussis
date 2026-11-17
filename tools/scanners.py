@@ -67,6 +67,7 @@ PLANTED_SEMGREP_RULES = {
     "hiss-02-python-subprocess-without-timeout",
     "hiss-02-python-urlopen-without-timeout",
     "hiss-07-rust-unwrap",
+    "hiss-21-python-textiowrapper-newline",
 }
 
 
@@ -206,12 +207,13 @@ def write_semgrep_plants(scratch: Path) -> None:
         encoding="utf-8",
     )
     (scratch / "planted.py").write_text(
-        "import subprocess\nimport urllib.request\n\n"
+        "import io\nimport subprocess\nimport urllib.request\n\n"
         "def planted():\n"
         "    eval(\"1 + 1\")\n"
         "    subprocess.run(\"ls\", shell=True, timeout=10)\n"
         "    subprocess.run([\"ls\"])\n"
-        "    urllib.request.urlopen(\"http://127.0.0.1:1\")\n",
+        "    urllib.request.urlopen(\"http://127.0.0.1:1\")\n"
+        "    io.TextIOWrapper(io.BytesIO(), encoding=\"cp1252\")\n",
         encoding="utf-8",
     )
     (scratch / "planted.rs").write_text(

@@ -185,7 +185,8 @@ class TestScanners(unittest.TestCase):
     def test_output_survives_code_page_pipe(self) -> None:
         """Trivy's box drawing reaches a cp1252 pipe (Windows CI) without UnicodeEncodeError."""
         raw = io.BytesIO()
-        pipe = io.TextIOWrapper(raw, encoding="cp1252")
+        # newline="\n" keeps Windows from writing "\r\n"; the encoding is what this test is about.
+        pipe = io.TextIOWrapper(raw, encoding="cp1252", newline="\n")
         with patch.object(scanners.sys, "stdout", pipe), patch.object(scanners.sys, "stderr", pipe):
             scanners.utf8_output()
             print("\u2502 Target \u2502 Type \u2502")
