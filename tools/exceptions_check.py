@@ -17,21 +17,24 @@ the day the exception ends. This tool holds the three places to each other:
     at most 90 days from today.
 
 The second is `required-check-is-reported`. The declared rule set
-(.github/rulesets/main.json) is written by the Praetor engine, and for a job
-that calls another workflow it requires the calling job's own name. The forge
-reports such a job as `<calling job> / <called job>`, so no run ever reports
-the required name (cordanaLLM/praetor#1212):
+(.github/rulesets/main.json) is written by the Praetor engine, which now requires
+the forge's reported name, `<calling job> / <called job>`, for a job that calls
+another workflow. The called workflow can live outside this workspace, so its
+job names cannot be checked offline:
 
     a required check that a job with steps reports under its own name holds;
+    a required check with a calling job's name before the first ` / ` holds
+    when the called part is non-empty after stripping whitespace;
     a required check that is the bare name of a calling job needs a live
-    exception for the rule-set file;
+    exception for the rule-set file, for older rule sets;
     a required check that no job of any workflow carries is refused, with or
     without an exception;
     an exception left after the last such name went excuses nothing.
 
-No job of this workspace calls another workflow today, so the list holds no
-entry for this rule. The selftest gives every planted tree one calling job,
-its required name and its entry, so the rule stays proven until a job needs it.
+reuse.yml calls the horistes licence workflow, whose reported name is required
+without an exception. The selftest also gives every planted tree one calling
+job, its bare required name and its entry, keeping the older rule-set path
+covered alongside reported names.
 
 A rule that is no longer read, such as `module-byte-comparison` (retired when
 every host came to build the module's data section, issue #2), is refused like
@@ -215,7 +218,7 @@ def jobs_of(name: str, text: str) -> list[dict[str, str]]:
 
 
 def job_names(root: Path) -> tuple[set[str], dict[str, str]]:
-    """The names jobs report themselves, and the bare names of calling jobs by workflow."""
+    """Exact steps-job names, and calling-job prefixes by workflow; called jobs are unknown."""
     files = sorted((root / WORKFLOWS).glob("*.y*ml"))
     if not files or len(files) > MAX_WORKFLOWS:
         raise CheckError(f"{len(files)} workflows found; expected 1 to {MAX_WORKFLOWS}")
@@ -247,6 +250,12 @@ def required_checks(root: Path) -> list[str]:
     return names
 
 
+def is_reported(name: str, reported: set[str], calling: dict[str, str]) -> bool:
+    """An exact steps-job name or a caller followed by a non-empty called name."""
+    caller, _, called = name.partition(" / ")
+    return name in reported or (caller in calling and bool(called.strip()))
+
+
 def reported_findings(root: Path, by_path: dict[str, str], today: datetime.date) -> list[str]:
     """Every required check no run reports, read on the day `today`."""
     reported, calling = job_names(root)
@@ -254,7 +263,7 @@ def reported_findings(root: Path, by_path: dict[str, str], today: datetime.date)
     expired = f"; its exception ended on {by_path[RULESET]}" if RULESET in by_path else ""
     found, excused = [], 0
     for name in required_checks(root):
-        if name in reported:
+        if is_reported(name, reported, calling):
             continue
         if name not in calling:
             found.append(f"{RULESET}: requires check {name!r}, a name no job of any workflow carries")
@@ -383,6 +392,22 @@ jobs:
 GATE = f"{WORKFLOWS}/ci.yml"
 EXPIRES = re.compile(r'expires = "(\d{4}-\d{2}-\d{2})"')
 
+
+def require_called_name(name: str):
+    """Require a composite name in place of the bare caller, without its exception."""
+
+    def edit(tree: Path) -> None:
+        replace_in(RULESET, f'"context": "{CALLING_JOB}"', f'"context": "{name}"')(tree)
+        drop_entry(RULESET)(tree)
+
+    return edit
+
+
+REPORTED_NAMES = {
+    "calling job's reported name without an entry": require_called_name(f"{CALLING_JOB} / Check"),
+    "called name with another separator": require_called_name(f"{CALLING_JOB} / Check / Detail"),
+}
+
 # name -> (edit, days added to today, text the refusal must contain)
 PLANTS = {
     "allowance in a second file": (
@@ -475,6 +500,31 @@ PLANTS = {
         drop_entry(RULESET),
         0,
         f"{RULESET}: requires check {CALLING_JOB!r}, which no run reports",
+    ),
+    "steps job used as a calling prefix": (
+        require_called_name("Verification gate / Check"),
+        0,
+        "requires check 'Verification gate / Check', a name no job of any workflow carries",
+    ),
+    "unknown calling prefix": (
+        require_called_name("Unknown caller / Check"),
+        0,
+        "requires check 'Unknown caller / Check', a name no job of any workflow carries",
+    ),
+    "calling name with an empty called part": (
+        require_called_name(f"{CALLING_JOB} / "),
+        0,
+        f"requires check '{CALLING_JOB} / ', a name no job of any workflow carries",
+    ),
+    "calling name with a whitespace called part": (
+        require_called_name(f"{CALLING_JOB} /   "),
+        0,
+        f"requires check '{CALLING_JOB} /   ', a name no job of any workflow carries",
+    ),
+    "rule-set exception left after the reported name is required": (
+        replace_in(RULESET, f'"context": "{CALLING_JOB}"', f'"context": "{CALLING_JOB} / Check"'),
+        0,
+        f"the entry for {RULESET} excuses nothing",
     ),
     "rule-set exception one day past its end": (
         None,
@@ -582,6 +632,15 @@ def refusals(root: Path, end: datetime.date, edit, day: datetime.date) -> list[s
         shutil.rmtree(tree, ignore_errors=True)
 
 
+def reported_name_failures(root: Path, end: datetime.date) -> list[str]:
+    """Reported composite names must hold without a rule-set exception."""
+    return [
+        f"reported name refused: {name}: {line}"
+        for name, edit in REPORTED_NAMES.items()
+        for line in refusals(root, end, edit, end)
+    ]
+
+
 def selftest(root: Path, today: datetime.date) -> list[str]:
     """Each plant must be refused, and for the reason it was planted for."""
     failures = [f"the unplanted tree is refused: {line}" for line in check(root, today)]
@@ -601,6 +660,7 @@ def selftest(root: Path, today: datetime.date) -> list[str]:
             failures.append(f"plant passed: {name}")
         elif not any(expected in line for line in found):
             failures.append(f"plant refused for another reason: {name}: {found}")
+    failures.extend(reported_name_failures(root, end))
     return failures
 
 
@@ -619,7 +679,10 @@ def main() -> int:
         print(f"FAIL: {line}", file=sys.stderr)
     if found:
         return 1
-    detail = f"{len(PLANTS)} plants refused" if args.command == "selftest" else f"as of {today}"
+    detail = (
+        f"{len(PLANTS)} plants refused, {len(REPORTED_NAMES)} reported names held"
+        if args.command == "selftest" else f"as of {today}"
+    )
     print(f"PASS: exceptions {args.command} ({detail})")
     return 0
 
