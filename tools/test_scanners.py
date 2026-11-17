@@ -5,13 +5,17 @@
 
 from __future__ import annotations
 
+import datetime
 import importlib.util
+import io
+import json
 import os
 import stat
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 TOOLS_DIR = Path(__file__).resolve().parent
@@ -177,6 +181,126 @@ class TestScanners(unittest.TestCase):
             self.assertTrue((cache_dir / "data.bin").exists())
             leftovers = list(cache_dir.parent.glob(".fetch-*"))
             self.assertEqual(leftovers, [])
+
+    def test_output_survives_code_page_pipe(self) -> None:
+        """Trivy's box drawing reaches a cp1252 pipe (Windows CI) without UnicodeEncodeError."""
+        raw = io.BytesIO()
+        # newline="\n" keeps Windows from writing "\r\n"; the encoding is what this test is about.
+        pipe = io.TextIOWrapper(raw, encoding="cp1252", newline="\n")
+        with patch.object(scanners.sys, "stdout", pipe), patch.object(scanners.sys, "stderr", pipe):
+            scanners.utf8_output()
+            print("\u2502 Target \u2502 Type \u2502")
+            pipe.flush()
+        self.assertEqual(raw.getvalue().decode("utf-8"), "\u2502 Target \u2502 Type \u2502\n")
+
+    def test_main_writes_utf8(self) -> None:
+        """main switches output to UTF-8 before a scanner prints."""
+        with patch.object(scanners, "utf8_output") as utf8, \
+                patch.object(scanners, "check_trivy", return_value=0), \
+                patch.object(scanners.sys, "argv", ["scanners.py", "check", "trivy"]):
+            self.assertEqual(scanners.main(), 0)
+        utf8.assert_called_once_with()
+
+    def test_run_cmd_reads_utf8(self) -> None:
+        """Scanner output is read as UTF-8, not the host code page (Trivy tables on Windows)."""
+        with patch.object(scanners.subprocess, "run") as run:
+            scanners.run_cmd(["fake_tool"])
+        self.assertEqual(run.call_args.kwargs.get("encoding"), "utf-8")
+        self.assertEqual(run.call_args.kwargs.get("errors"), "replace")
+
+    def scan_with_exceptions(self, entries: list[dict]) -> tuple[str, str]:
+        """Capture the ignore file while the scanner subprocess would read it."""
+        with tempfile.TemporaryDirectory() as temp_dir_str:
+            root = Path(temp_dir_str)
+            cache = root / "cache"
+            cache.mkdir()
+            (cache / "db.stamp").write_text(scanners.TRIVY_DB_DIGEST, encoding="utf-8")
+            (root / "requirements.txt").write_text("", encoding="utf-8")
+            tables = [
+                "[[exception]]\n" + "\n".join(f"{key} = {json.dumps(value)}" for key, value in entry.items())
+                for entry in entries
+            ]
+            (root / "exceptions.toml").write_text("\n".join(tables), encoding="utf-8")
+            captured = []
+
+            def capture(argv: list[str], **kwargs: object) -> SimpleNamespace:
+                if "--version" not in argv:
+                    self.assertIn("--ignorefile", argv)
+                    name = argv[argv.index("--ignorefile") + 1]
+                    captured.append((name, Path(name).read_text(encoding="utf-8") if name else ""))
+                return SimpleNamespace(returncode=0, stdout="fake trivy", stderr="")
+
+            with (
+                patch.object(Path, "cwd", return_value=root),
+                patch.object(scanners, "run_cmd", side_effect=capture),
+                patch.object(scanners, "make_trivy_env", return_value={}),
+            ):
+                self.assertEqual(scanners.check_trivy(cache, "fake_trivy"), 0)
+            self.assertEqual(len(captured), 1)
+            name, text = captured[0]
+            if name:
+                self.assertFalse(Path(name).exists())
+            return name, text
+
+    def vulnerability_entry(self, days: int) -> dict:
+        """One exception relative to today's UTC date."""
+        today = datetime.datetime.now(datetime.UTC).date()
+        return {
+            "rule": "vulnerability", "path": "requirements.txt",
+            "advisories": ["CVE-2026-116684", "GHSA-ab12-cd34-ef56"],
+            "reason": 'Pinned CLI dependency; "offline" only.',
+            "expires": str(today + datetime.timedelta(days=days)),
+        }
+
+    def test_trivy_live_exception(self) -> None:
+        """Live entries emit scoped advisories, quoted statements and expiry dates."""
+        entry = self.vulnerability_entry(1)
+        name, text = self.scan_with_exceptions([entry])
+        self.assertTrue(name.endswith(".yaml"))
+        self.assertTrue(text.startswith("vulnerabilities:\n"))
+        self.assertIn('id: "CVE-2026-116684"', text)
+        self.assertIn('id: "GHSA-ab12-cd34-ef56"', text)
+        self.assertIn('paths: ["requirements.txt"]', text)
+        self.assertIn(f'expired_at: {entry["expires"]}\n', text)
+        self.assertIn(f'statement: {json.dumps(entry["reason"])}', text)
+
+    def test_trivy_expired_exception(self) -> None:
+        """Expired advisories cannot suppress a scan finding."""
+        self.assertEqual(self.scan_with_exceptions([self.vulnerability_entry(-1)]), ("", ""))
+
+    def test_trivy_mixed_expiry(self) -> None:
+        """An expired entry stays excluded when another path has a live entry."""
+        expired = self.vulnerability_entry(-1)
+        expired["advisories"] = ["CVE-2020-14040"]
+        live = self.vulnerability_entry(1)
+        live["path"] = "cache/db.stamp"
+        _, text = self.scan_with_exceptions([expired, live])
+        self.assertNotIn("CVE-2020-14040", text)
+        self.assertIn('paths: ["cache/db.stamp"]', text)
+
+    def test_trivy_no_exceptions(self) -> None:
+        """An explicit empty ignorefile disables implicit .trivyignore loading."""
+        self.assertEqual(self.scan_with_exceptions([]), ("", ""))
+
+    def test_trivy_exception_last_day(self) -> None:
+        """An exception remains live on its last UTC date."""
+        name, text = self.scan_with_exceptions([self.vulnerability_entry(0)])
+        self.assertTrue(name)
+        self.assertIn('id: "CVE-2026-116684"', text)
+
+    def test_trivy_invalid_exception(self) -> None:
+        """The standalone scanner refuses invalid entries before invoking a scan."""
+        entry = self.vulnerability_entry(1)
+        entry["advisories"] = ["CVE-2026-*"]
+        with self.assertRaisesRegex(scanners.CheckError, "advisory ID"):
+            self.scan_with_exceptions([entry])
+
+    def test_trivy_glob_path_refused(self) -> None:
+        """An exception path cannot widen suppression with a glob pattern."""
+        entry = self.vulnerability_entry(1)
+        entry["path"] = "*.txt"
+        with self.assertRaisesRegex(scanners.CheckError, "vulnerability path"):
+            self.scan_with_exceptions([entry])
 
 
 if __name__ == "__main__":
