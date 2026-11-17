@@ -34,6 +34,7 @@ def config_problems(config: dict, codes: list[str], tracked: set[str]) -> list[s
 
 class RuffConfigTests(unittest.TestCase):
     def setUp(self):
+        """Load the Ruff configuration, expected codes and tracked Python files."""
         self.config = tomllib.loads((ROOT / "ruff.toml").read_text(encoding="utf-8"))
         self.codes = [line for line in (ROOT / "tools/ruff/codacy-patterns.txt").read_text(encoding="utf-8").splitlines()
                       if line and not line.startswith("#")]
@@ -41,20 +42,24 @@ class RuffConfigTests(unittest.TestCase):
         self.tracked = set(result.split("\0"))
 
     def test_committed_config(self):
+        """The committed Ruff configuration has no problems."""
         self.assertEqual(config_problems(self.config, self.codes, self.tracked), [])
 
     def test_missing_duplicate_and_extra_codes(self):
+        """Missing, duplicate and extra selected codes are rejected."""
         for selected in (self.config["lint"]["select"][:-1], self.config["lint"]["select"] + ["I001"],
                          self.config["lint"]["select"] + ["S999"]):
             self.assertTrue(config_problems({"target-version": "py314", "lint": {"select": selected}},
                                             self.codes, self.tracked))
 
     def test_wrong_target_and_untracked_ignore(self):
+        """A wrong target and an ignore for an untracked file are reported."""
         self.config["target-version"] = "py313"
         self.config["lint"]["per-file-ignores"]["missing.py"] = ["S603"]
         self.assertEqual(len(config_problems(self.config, self.codes, self.tracked)), 2)
 
     def test_entry_validation_and_expiry(self):
+        """Ruff exception entries are validated and expire after their deadline."""
         today = datetime.date(2026, 11, 17)
         entry = {"rule": "ruff", "path": ".config/lefthook/scripts/common.py", "codes": ["S603", "S607"],
                  "reason": "test", "expires": "2026-11-27"}
@@ -72,6 +77,7 @@ class RuffConfigTests(unittest.TestCase):
             self.assertEqual(len(exceptions_check.ruff_findings(root, by_key, today)), 3)
 
     def test_scanner_requires_exact_plants(self):
+        """The Ruff self-test requires the expected planted findings."""
         with tempfile.TemporaryDirectory() as name:
             path = Path(name)
             scanners.write_ruff_plants(path)
@@ -86,6 +92,7 @@ class RuffConfigTests(unittest.TestCase):
             self.assertEqual(scanners.selftest_ruff(ROOT / "ruff.toml", "ruff"), 1)
 
     def test_scanner_main_ruff_dispatch(self):
+        """Ruff actions dispatch correctly and reject an invalid target."""
         with patch.object(scanners, "check_ruff", return_value=11) as check, \
              patch.object(scanners, "selftest_ruff", return_value=12) as selftest:
             with patch("sys.argv", ["scanners.py", "check", "ruff"]):
@@ -101,6 +108,7 @@ class RuffConfigTests(unittest.TestCase):
             self.assertEqual(error.exception.code, 2)
 
     def test_scanner_check_propagates_findings(self):
+        """Ruff scanner findings propagate to the check result."""
         with patch.object(scanners, "print_tool_version"), patch.object(scanners, "run_cmd") as run:
             run.side_effect = [types.SimpleNamespace(returncode=0, stdout="a.py\0", stderr=""),
                                types.SimpleNamespace(returncode=1, stdout="finding", stderr="")]

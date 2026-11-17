@@ -708,6 +708,7 @@ def plant_caller(tree: Path, end: datetime.date) -> None:
 
 
 def copy_exceptions_tree(root: Path, tree: Path, end: datetime.date) -> None:
+    """Copy exception inputs into a fixture tree and plant a caller."""
     (tree / RULESET).parent.mkdir(parents=True)
     for name in (MANIFEST, LIST, RULESET, "ruff.toml"):
         shutil.copyfile(root / name, tree / name)

@@ -63,6 +63,7 @@ def findings(declared: dict[str, str], goversion: str) -> list[str]:
 
 
 def running_go() -> str:
+    """Return the local Go toolchain version or raise CheckError."""
     env = dict(os.environ, GOTOOLCHAIN="local")
     try:
         done = subprocess.run(["go", "env", "GOVERSION"],  # noqa: S607 - fixed go executable on PATH

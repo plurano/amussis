@@ -108,6 +108,7 @@ def differences(root: Path, record: dict, label: str) -> list[str]:
 
 
 def git(repo: Path, *args: str) -> str:
+    """Run Git in the resolved repository and return its standard output."""
     path = repo.resolve()
     return run_command(["git", "-C", str(path), *args], path, GIT_DEADLINE_SECONDS).stdout
 

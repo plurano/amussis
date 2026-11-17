@@ -66,10 +66,12 @@ def check_declared(root: Path, commands: dict[str, list[str]] = GENERATED) -> li
 
 
 def run_git(args: list[str], root: Path, timeout: int = GIT_TIMEOUT_SECONDS) -> str:
+    """Run Git in the repository and return its standard output."""
     return run_command(["git", *args], root, timeout).stdout
 
 
 def git_status_bytes(root: Path, timeout: int = GIT_TIMEOUT_SECONDS) -> bytes:
+    """Return the repository status as NUL-delimited bytes or raise CheckError."""
     try:
         proc = subprocess.run(
             ["git", "status", "--porcelain=v1", "-z"],  # noqa: S607 - fixed git executable on PATH
@@ -134,6 +136,7 @@ def evaluate_changes(
 
 
 def run_update_command(cmd: list[str], root: Path, timeout: int) -> None:
+    """Run an update command in the repository with a deadline."""
     run_command(cmd, root, timeout)
 
 
