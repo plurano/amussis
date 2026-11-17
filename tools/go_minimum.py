@@ -65,8 +65,8 @@ def findings(declared: dict[str, str], goversion: str) -> list[str]:
 def running_go() -> str:
     env = dict(os.environ, GOTOOLCHAIN="local")
     try:
-        done = subprocess.run(["go", "env", "GOVERSION"], env=env, capture_output=True,
-                              text=True, timeout=DEADLINE_SECONDS)
+        done = subprocess.run(["go", "env", "GOVERSION"],  # noqa: S607 - fixed go executable on PATH
+                              env=env, capture_output=True, text=True, timeout=DEADLINE_SECONDS)
     except (OSError, subprocess.TimeoutExpired) as error:
         raise CheckError(f"go env GOVERSION: {error}") from error
     if done.returncode != 0:

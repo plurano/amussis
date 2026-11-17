@@ -78,7 +78,7 @@ def run_cmd(
 ) -> subprocess.CompletedProcess[str]:
     """Execute a subprocess command with bounded execution time; output is read as UTF-8 on every host."""
     try:
-        return subprocess.run(
+        return subprocess.run(  # noqa: S603 - argv list without a shell; callers pass the scanner the Makefile names and repository paths
             argv,
             capture_output=True,
             text=True,
@@ -254,6 +254,57 @@ def selftest_semgrep(config_path: Path, semgrep_bin: str) -> int:
             return 1
         print(f"PASS: semgrep selftest ({len(reported)} planted findings reported, exit 1 as required)")
         return 0
+
+
+def write_ruff_plants(scratch: Path) -> None:
+    """Plant import order and security findings plus a clean file."""
+    (scratch / "imports.py").write_text("import thirdparty\nimport tomllib\n", encoding="utf-8")
+    (scratch / "security.py").write_text("assert 1 == 1\n", encoding="utf-8")
+    (scratch / "clean.py").write_text("value = 1\n", encoding="utf-8")
+
+
+def selftest_ruff(config: Path, ruff_bin: str) -> int:
+    """Require exactly the two planted diagnostics, with no clean-file finding."""
+    print_tool_version(ruff_bin)
+    with tempfile.TemporaryDirectory(prefix="ruff-selftest-") as name:
+        scratch = Path(name)
+        config_copy = scratch / "ruff.toml"
+        shutil.copyfile(config, config_copy)
+        write_ruff_plants(scratch)
+        done = run_cmd([ruff_bin, "check", "--no-cache", "--config", str(config_copy),
+                        "--output-format", "json", str(scratch)], timeout=SCAN_DEADLINE_SECONDS)
+        if done.returncode != 1:
+            print(f"FAIL: ruff selftest exited {done.returncode}, expected 1", file=sys.stderr)
+            return 1
+        try:
+            results = json.loads(done.stdout)
+            actual = sorted((Path(row["filename"]).name, row["code"]) for row in results)
+        except (ValueError, TypeError, KeyError) as error:
+            raise CheckError(f"invalid Ruff output: {error}") from error
+        if actual != [("imports.py", "I001"), ("security.py", "S101")]:
+            print(f"FAIL: ruff selftest found {actual}", file=sys.stderr)
+            return 1
+    print("PASS: ruff selftest (I001 and S101 only)")
+    return 0
+
+
+def check_ruff(config: Path, ruff_bin: str) -> int:
+    """Check tracked Python files with the shared Ruff configuration."""
+    print_tool_version(ruff_bin)
+    files = run_cmd(["git", "ls-files", "-z", "*.py"])
+    if files.returncode:
+        raise CheckError(f"git ls-files failed: {files.stderr}")
+    names = files.stdout.split("\0")
+    names = [name for name in names if name]
+    if not names:
+        raise CheckError("git ls-files returned no Python files")
+    done = run_cmd([ruff_bin, "check", "--no-cache", "--config", str(config),
+                    "--output-format", "concise", *names], timeout=SCAN_DEADLINE_SECONDS)
+    if done.stdout:
+        print(done.stdout, end="")
+    if done.returncode not in (0, 1):
+        raise CheckError(f"ruff check exited {done.returncode}: {done.stderr}")
+    return done.returncode
 
 
 def write_trivy_plants(scratch: Path) -> None:
@@ -446,18 +497,19 @@ def main() -> int:
     utf8_output()
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("action", choices=("fetch-db", "selftest", "check"))
-    parser.add_argument("target", nargs="?", choices=("semgrep", "trivy"))
+    parser.add_argument("target", nargs="?", choices=("semgrep", "trivy", "ruff"))
     parser.add_argument("--cache-dir", type=Path, default=default_cache())
     parser.add_argument("--config", type=Path, default=Path(".config/semgrep/hiss.yml"))
     args = parser.parse_args()
 
     if args.action in ("selftest", "check") and not args.target:
-        parser.error(f"{args.action} requires a target (semgrep or trivy)")
+        parser.error(f"{args.action} requires a target (semgrep, trivy or ruff)")
     if args.action == "fetch-db" and args.target:
         parser.error("fetch-db takes no target")
 
     semgrep_bin = os.environ.get("SEMGREP", "semgrep")
     trivy_bin = os.environ.get("TRIVY", "trivy")
+    ruff_bin = os.environ.get("RUFF", "ruff")
 
     try:
         if args.action == "fetch-db":
@@ -470,6 +522,10 @@ def main() -> int:
             return check_semgrep(args.config, semgrep_bin)
         if args.action == "check" and args.target == "trivy":
             return check_trivy(args.cache_dir, trivy_bin)
+        if args.action == "selftest" and args.target == "ruff":
+            return selftest_ruff(Path("ruff.toml"), ruff_bin)
+        if args.action == "check" and args.target == "ruff":
+            return check_ruff(Path("ruff.toml"), ruff_bin)
     except CheckError as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 2

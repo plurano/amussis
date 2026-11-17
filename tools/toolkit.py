@@ -97,7 +97,7 @@ def run_command(
 ) -> subprocess.CompletedProcess[str]:
     """Execute a command with timeout, raising CheckError on failure or non-zero exit."""
     try:
-        done = subprocess.run(
+        done = subprocess.run(  # noqa: S603 - argv list without a shell; every caller is a gate tool in this directory
             args,
             cwd=cwd,
             env=env,
@@ -109,5 +109,5 @@ def run_command(
     except (OSError, subprocess.TimeoutExpired) as error:
         raise CheckError(f"{' '.join(args)} could not run: {error}") from error
     if done.returncode != 0:
-        raise CheckError(f"{' '.join(args)} exited {done.returncode}:\n{done.stderr.strip()}")
+        raise CheckError(f"{' '.join(args)} exited {done.returncode}:\n{done.stderr.strip() or done.stdout.strip()}")
     return done

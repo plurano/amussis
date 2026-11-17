@@ -27,13 +27,13 @@ import argparse
 import hashlib
 import json
 import shutil
-import subprocess
 import sys
 import tempfile
 import tomllib
 from pathlib import Path
 
-from toolkit import CheckError, planted as toolkit_planted, replace_in
+from toolkit import CheckError, replace_in, run_command
+from toolkit import planted as toolkit_planted
 
 RECORD = "settings-source.json"
 MANIFEST = "Cargo.toml"
@@ -108,19 +108,8 @@ def differences(root: Path, record: dict, label: str) -> list[str]:
 
 
 def git(repo: Path, *args: str) -> str:
-    try:
-        done = subprocess.run(
-            ["git", "-C", str(repo), *args],
-            capture_output=True,
-            text=True,
-            timeout=GIT_DEADLINE_SECONDS,
-            check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired) as error:
-        raise CheckError(f"git could not read {repo}: {error}") from error
-    if done.returncode != 0:
-        raise CheckError(f"git {' '.join(args)} in {repo} exited {done.returncode}: {done.stderr.strip()}")
-    return done.stdout
+    path = repo.resolve()
+    return run_command(["git", "-C", str(path), *args], path, GIT_DEADLINE_SECONDS).stdout
 
 
 def source_commit(source: Path) -> str:

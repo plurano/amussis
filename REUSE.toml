@@ -22,6 +22,8 @@ path = [
     "renovate.json",
     "tools/semgrep/requirements.in",
     "tools/semgrep/requirements.txt",
+    "tools/ruff/requirements.in",
+    "tools/ruff/requirements.txt",
     ".node-version",
 ]
 precedence = "aggregate"

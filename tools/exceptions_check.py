@@ -75,7 +75,8 @@ MANIFEST = "Cargo.toml"
 RULE = "unsafe_code"
 REPORTED = "required-check-is-reported"
 VULNERABILITY = "vulnerability"
-RULES = (RULE, REPORTED, VULNERABILITY)
+RUFF = "ruff"
+RULES = (RULE, REPORTED, VULNERABILITY, RUFF)
 RULESET = ".github/rulesets/main.json"
 # The one file each of these rules excuses.
 ONLY_FILE = {REPORTED: RULESET}
@@ -130,6 +131,8 @@ def entry_problem(root: Path, entry: object, today: datetime.date) -> str:
     if not isinstance(entry, dict):
         return "must be an exception table"
     keys = ENTRY_KEYS | {"advisories"} if entry.get("rule") == VULNERABILITY else ENTRY_KEYS
+    if entry.get("rule") == RUFF:
+        keys = ENTRY_KEYS | {"codes"}
     if set(entry) != keys:
         return f"must hold exactly the keys {sorted(keys)}"
     if any(not isinstance(entry[key], str) for key in ENTRY_KEYS):
@@ -145,6 +148,14 @@ def entry_problem(root: Path, entry: object, today: datetime.date) -> str:
         problem = advisory_problem(entry["advisories"])
         if problem:
             return problem
+    if entry["rule"] == RUFF:
+        codes = entry["codes"]
+        if not isinstance(codes, list) or not codes:
+            return "codes must be a non-empty list"
+        if any(not isinstance(code, str) or not re.fullmatch(r"[A-Z]+[0-9]+", code) for code in codes):
+            return "every code must be a Ruff rule code"
+        if len(set(codes)) != len(codes):
+            return "codes must be unique"
     if not (root / path).is_file():
         return f"path {entry['path']!r} names no file"
     only = ONLY_FILE.get(entry["rule"], entry["path"])
@@ -312,11 +323,30 @@ def reported_findings(root: Path, by_path: dict[str, str], today: datetime.date)
     return found
 
 
+def ruff_findings(root: Path, by_key: dict, today: datetime.date) -> list[str]:
+    """Match each configured path and code to a live exception, in both directions."""
+    config = load_toml(root / "ruff.toml")
+    ignores = config.get("lint", {}).get("per-file-ignores", {})
+    if not isinstance(ignores, dict):
+        raise CheckError("ruff.toml per-file-ignores must be a table")
+    configured = set()
+    for path, codes in ignores.items():
+        if not isinstance(codes, list) or any(not isinstance(code, str) for code in codes):
+            raise CheckError(f"ruff.toml: invalid ignores for {path}")
+        configured.update((path, code) for code in codes)
+    live = {(path, code) for (rule, path), entry in by_key.items()
+            if rule == RUFF and datetime.date.fromisoformat(entry["expires"]) >= today
+            for code in entry["codes"]}
+    return ([f"ruff.toml: {path} {code} without a live exception" for path, code in sorted(configured - live)]
+            + [f"{LIST}: {path} {code} excuses nothing" for path, code in sorted(live - configured)])
+
+
 def check(root: Path, today: datetime.date) -> list[str]:
     """Every broken rule in the tree under `root`, read on the day `today`."""
     by_key, found = load_entries(root, today)
     found.extend(unsafe_findings(root, of_rule(by_key, RULE), today))
     found.extend(reported_findings(root, of_rule(by_key, REPORTED), today))
+    found.extend(ruff_findings(root, by_key, today))
     return found
 
 
@@ -522,6 +552,11 @@ PLANTS = {
         0,
         "is not a rule this check reads",
     ),
+    "ruff ignore without entry": (replace_in(LIST, '"S603", "S607"', '"S603"'), 0, "S607 without a live exception"),
+    "ruff entry without ignore": (replace_in("ruff.toml", '"S603", "S607"', '"S603"'), 0, "S607 excuses nothing"),
+    "ruff empty codes": (replace_in(LIST, 'codes = ["S603", "S607"]', 'codes = []'), 0, "codes must be a non-empty list"),
+    "ruff bad code": (replace_in(LIST, 'codes = ["S603", "S607"]', 'codes = ["S*"]'), 0, "Ruff rule code"),
+    "ruff unknown key": (replace_in(LIST, 'codes = ["S603", "S607"]', 'codes = ["S603", "S607"]\nextra = true'), 0, "exactly the keys"),
     "exception with a further key": (append_to(LIST, 'glob = "crates/**"\n'), 0, "exactly the keys"),
     "exception names no file": (replace_in(LIST, "src/abi.rs", "src/gone.rs"), 0, "names no file"),
     "exception names a file outside": (
@@ -674,13 +709,13 @@ def plant_caller(tree: Path, end: datetime.date) -> None:
 
 def copy_exceptions_tree(root: Path, tree: Path, end: datetime.date) -> None:
     (tree / RULESET).parent.mkdir(parents=True)
-    for name in (MANIFEST, LIST, RULESET):
+    for name in (MANIFEST, LIST, RULESET, "ruff.toml"):
         shutil.copyfile(root / name, tree / name)
     for top in (WORKFLOWS, *source_roots(members(root)[1])):
         shutil.copytree(root / top, tree / top, ignore=shutil.ignore_patterns("target"))
     by_key, _ = load_entries(root, end)
     for (rule, name) in by_key:
-        if rule == VULNERABILITY and not (tree / name).is_file():
+        if rule in (VULNERABILITY, RUFF) and not (tree / name).is_file():
             (tree / name).parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(root / name, tree / name)
     plant_caller(tree, end)

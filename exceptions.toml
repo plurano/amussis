@@ -21,3 +21,10 @@ path = "tools/semgrep/requirements.txt"
 advisories = ["CVE-2026-116684", "CVE-2026-116685", "CVE-2026-116686", "CVE-2026-59951", "CVE-2026-114603", "CVE-2026-126360"]
 reason = "semgrep 1.182.1 and 1.185.0 pin mcp==1.29.0 and opentelemetry-api~=1.37.0, preventing a lockable fix; the gate runs only offline semgrep scan, with no MCP server, inbound HTTP or traceparent parsing, so the vulnerable code is not in the execution path; MEL C, 10 days"
 expires = "2026-11-27"
+
+[[exception]]
+rule = "ruff"
+path = ".config/lefthook/scripts/common.py"
+codes = ["S603", "S607"]
+reason = "engine-rendered hook runner held byte-equal to the pinned engine source; it starts argv lists without a shell from fixed executable names; the finding goes to the engine; MEL C, 10 days"
+expires = "2026-11-27"
