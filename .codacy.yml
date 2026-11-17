@@ -1,0 +1,24 @@
+---
+# SPDX-FileCopyrightText: 2026 Lusoris <lusoris@pm.me>
+# SPDX-License-Identifier: EUPL-1.2
+#
+# Codacy reads this file from the default branch; it replaces the ignored-file
+# settings of the Codacy UI. Reference:
+# https://docs.codacy.com/repositories-configure/codacy-configuration-file/
+# Patterns use Java glob syntax.
+exclude_paths:
+  # The Praetor engine renders these four files and verify-hook-scripts holds
+  # them byte-equal to it, so they cannot change here. Of Codacy's findings on
+  # them in pull request 97, the Bandit, Opengrep file-read, SSRF and regex ones
+  # are false positives; the Lizard file-length and parameter-count ones are
+  # true and owned by the engine as finding
+  # amussis-engine-pr97-review-findings-20261117. Entered 2026-11-17, MEL C,
+  # ends 2026-11-27; drop each line once the engine ships the file reworked.
+  - ".config/lefthook/scripts/common.py"
+  - ".config/agent/hooks/block_evasion.py"
+  - "tools/apicompat/gate/main.go"
+  - "tools/figures/astro.mjs"
+  # Vendored upstream interfig source. Codacy's default pattern
+  # .*third[_-]?[Pp]arty/.* already ignores it; listIgnoredFiles named these
+  # files on 2026-11-17, so the line keeps them ignored once this file applies.
+  - "tools/figures/third_party/**"
