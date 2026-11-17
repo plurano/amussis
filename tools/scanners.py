@@ -26,6 +26,7 @@ Exit status: 0 clean or selftest passed, 1 findings detected or selftest failed,
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import os
 import re
@@ -35,6 +36,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+from exceptions_check import VULNERABILITY, load_entries
 from toolkit import CheckError
 
 MAX_RULES = 100
@@ -72,12 +74,14 @@ def run_cmd(
     timeout: int = DEADLINE_SECONDS,
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    """Execute a subprocess command with bounded execution time."""
+    """Execute a subprocess command with bounded execution time; output is read as UTF-8 on every host."""
     try:
         return subprocess.run(
             argv,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
             check=False,
             env=env,
@@ -270,10 +274,30 @@ def write_trivy_plants(scratch: Path) -> None:
     )
 
 
+def trivy_selftest_scan(argv: list[str], cache_dir: Path) -> set[str]:
+    """Scan the planted tree, require exit 3 and return the reported advisory ids."""
+    done = run_cmd(argv, timeout=SCAN_DEADLINE_SECONDS, env=make_trivy_env(cache_dir))
+    if done.returncode != 3:
+        raise CheckError(
+            f"trivy selftest: planted vulnerabilities gave exit {done.returncode}, want 3\n{done.stderr}"
+        )
+    try:
+        data = json.loads(done.stdout)
+    except json.JSONDecodeError as error:
+        raise CheckError(f"trivy output is not valid JSON: {error}") from error
+    return {
+        v["VulnerabilityID"]
+        for r in data.get("Results", [])
+        for v in r.get("Vulnerabilities", [])
+        if "VulnerabilityID" in v
+    }
+
+
 def selftest_trivy(cache_dir: Path, trivy_bin: str) -> int:
-    """Run trivy offline against planted manifests and assert exit 3 and CVEs."""
+    """Run trivy offline against planted manifests: exit 3, every planted CVE, path-scoped ignore file."""
     print_tool_version(trivy_bin)
-    with tempfile.TemporaryDirectory(prefix="trivy-selftest-") as scratch_str:
+    with tempfile.TemporaryDirectory(prefix="trivy-selftest-") as scratch_str, \
+            tempfile.TemporaryDirectory(prefix="trivy-selftest-ignore-") as ignore_str:
         scratch = Path(scratch_str)
         write_trivy_plants(scratch)
         argv = [
@@ -282,30 +306,32 @@ def selftest_trivy(cache_dir: Path, trivy_bin: str) -> int:
             "--skip-db-update", "--skip-java-db-update",
             "--offline-scan", "--scanners", "vuln",
             "--exit-code", "3", "--format", "json",
-            "--quiet", str(scratch),
+            "--quiet",
         ]
-        done = run_cmd(argv, timeout=SCAN_DEADLINE_SECONDS, env=make_trivy_env(cache_dir))
-        if done.returncode != 3:
-            raise CheckError(
-                f"trivy selftest: planted vulnerabilities gave exit {done.returncode}, want 3\n{done.stderr}"
-            )
-        try:
-            data = json.loads(done.stdout)
-        except json.JSONDecodeError as error:
-            raise CheckError(f"trivy output is not valid JSON: {error}") from error
-
-        reported_cves = {
-            v["VulnerabilityID"]
-            for r in data.get("Results", [])
-            for v in r.get("Vulnerabilities", [])
-            if "VulnerabilityID" in v
-        }
-        missing = EXPECTED_TRIVY_CVES - reported_cves
+        missing = EXPECTED_TRIVY_CVES - trivy_selftest_scan(argv + [str(scratch)], cache_dir)
         if missing:
             print(f"FAIL: trivy selftest missing expected CVE(s): {', '.join(sorted(missing))}", file=sys.stderr)
             return 1
+        # The generated ignore file must reach Trivy: it excuses an advisory on its own
+        # manifest and nowhere else, so a format Trivy refuses or misreads fails here.
+        tomorrow = datetime.datetime.now(datetime.UTC).date() + datetime.timedelta(days=1)
+        ignore = Path(ignore_str) / "ignore.yaml"
+        ignore.write_text(render_trivy_ignore([
+            ("CVE-2021-25900", "Cargo.lock", "selftest: excused on its manifest", tomorrow),
+            ("CVE-2020-14040", "Cargo.lock", "selftest: wrong manifest, must stay reported", tomorrow),
+        ]), encoding="utf-8")
+        reported = trivy_selftest_scan(argv + ["--ignorefile", str(ignore), str(scratch)], cache_dir)
+        if reported & EXPECTED_TRIVY_CVES != {"CVE-2020-14040"}:
+            print(
+                f"FAIL: trivy selftest ignore file: want only CVE-2020-14040 left, got {sorted(reported)}",
+                file=sys.stderr,
+            )
+            return 1
         reported_str = ", ".join(sorted(EXPECTED_TRIVY_CVES))
-        print(f"PASS: trivy selftest ({len(EXPECTED_TRIVY_CVES)} planted advisories reported: {reported_str}, exit 3 as required)")
+        print(
+            f"PASS: trivy selftest ({len(EXPECTED_TRIVY_CVES)} planted advisories reported: {reported_str}, "
+            "exit 3 as required; generated ignore file excused CVE-2021-25900 on Cargo.lock only)"
+        )
         return 0
 
 
@@ -332,6 +358,43 @@ def check_semgrep(config_path: Path, semgrep_bin: str) -> int:
     raise CheckError(f"semgrep scan failed with exit {done.returncode}: {done.stderr.strip()}")
 
 
+def render_trivy_ignore(rows: list[tuple[str, str, str, datetime.date]]) -> str:
+    """Render (advisory, path, statement, end date) rows in Trivy 0.76's .trivyignore.yaml format."""
+    lines = ["vulnerabilities:"]
+    for advisory, path, statement, expires in rows:
+        lines.extend([
+            f"  - id: {json.dumps(advisory)}",
+            f"    paths: [{json.dumps(path)}]",
+            f"    statement: {json.dumps(statement)}",
+            # Trivy reads expired_at as a YAML timestamp and refuses a quoted string.
+            f"    expired_at: {expires.isoformat()}",
+        ])
+    return "\n".join(lines) + "\n"
+
+
+def trivy_ignorefile(root: Path, scratch: Path, today: datetime.date) -> str:
+    """Write path-scoped live exceptions in Trivy 0.76's .trivyignore.yaml format."""
+    by_key, problems = load_entries(root, today)
+    if problems:
+        raise CheckError("cannot build Trivy ignore file: " + "; ".join(problems))
+    rows = []
+    for (rule, path), entry in by_key.items():
+        if rule != VULNERABILITY:
+            continue
+        expires = datetime.date.fromisoformat(entry["expires"])
+        if expires < today:
+            continue
+        rows.extend((advisory, path, entry["reason"], expires) for advisory in entry["advisories"])
+    if not rows:
+        return ""
+    path = scratch / "ignore.yaml"
+    try:
+        path.write_text(render_trivy_ignore(rows), encoding="utf-8")
+    except OSError as error:
+        raise CheckError(f"cannot write Trivy ignore file {path}: {error}") from error
+    return str(path)
+
+
 def check_trivy(cache_dir: Path, trivy_bin: str) -> int:
     """Verify Trivy cache stamp and perform offline tree vulnerability scan."""
     if stamp_of(cache_dir) != TRIVY_DB_DIGEST:
@@ -347,9 +410,15 @@ def check_trivy(cache_dir: Path, trivy_bin: str) -> int:
         "--exit-code", "3",
         "--skip-dirs", ".workingdir,target",
         "--quiet",
-        ".",
     ]
-    done = run_cmd(argv, timeout=SCAN_DEADLINE_SECONDS, env=make_trivy_env(cache_dir))
+    today = datetime.datetime.now(datetime.UTC).date()
+    try:
+        with tempfile.TemporaryDirectory(prefix="trivy-ignore-") as scratch:
+            ignorefile = trivy_ignorefile(Path.cwd(), Path(scratch), today)
+            argv.extend(["--ignorefile", ignorefile, "."])
+            done = run_cmd(argv, timeout=SCAN_DEADLINE_SECONDS, env=make_trivy_env(cache_dir))
+    except OSError as error:
+        raise CheckError(f"cannot prepare Trivy ignore directory: {error}") from error
     if done.returncode == 0:
         if done.stdout:
             print(done.stdout.strip())

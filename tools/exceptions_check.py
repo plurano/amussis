@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: EUPL-1.2
 """Hold every exception of this workspace to one named, dated entry.
 
-Two rules are read. The first is `unsafe_code`:
+Three rules are read. The first is `unsafe_code`:
 
 The workspace forbids unsafe code. A WebAssembly export crate cannot live under
 a forbid, so it carries its own lint tables with `unsafe_code = "deny"` and one
@@ -33,6 +33,12 @@ No job of this workspace calls another workflow today, so the list holds no
 entry for this rule. The selftest gives every planted tree one calling job,
 its required name and its entry, so the rule stays proven until a job needs it.
 
+The third is `vulnerability`. Each entry names one existing scanned file and
+a non-empty list of unique CVE, GHSA or PYSEC advisory IDs. The reason and
+90-day expiry cap apply as for the other rules. tools/scanners.py uses only
+live entries to generate a Trivy YAML ignore file scoped to those paths.
+The `advisories` key is refused on every other rule.
+
 A rule that is no longer read, such as `module-byte-comparison` (retired when
 every host came to build the module's data section, issue #2), is refused like
 any unknown rule, so its entry cannot return.
@@ -58,19 +64,23 @@ import sys
 import tomllib
 from pathlib import Path
 
-from toolkit import CheckError, append_to, planted as toolkit_planted, replace_in
+from toolkit import CheckError, append_to, replace_in
+from toolkit import planted as toolkit_planted
 
 LIST = "exceptions.toml"
 MANIFEST = "Cargo.toml"
 RULE = "unsafe_code"
 REPORTED = "required-check-is-reported"
-RULES = (RULE, REPORTED)
+VULNERABILITY = "vulnerability"
+RULES = (RULE, REPORTED, VULNERABILITY)
 RULESET = ".github/rulesets/main.json"
 # The one file each of these rules excuses.
 ONLY_FILE = {REPORTED: RULESET}
 WORKFLOWS = ".github/workflows"
 MAX_WORKFLOWS = 64
 ENTRY_KEYS = {"rule", "path", "reason", "expires"}
+ADVISORY = re.compile(r"(?:CVE-\d{4}-\d{4,}|GHSA-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4}|PYSEC-\d{4}-\d+)")
+SCANNED_PATH = re.compile(r"[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*")
 MAX_DAYS = 90
 MAX_REASON_BYTES = 1024
 MAX_ENTRIES = 64
@@ -101,17 +111,37 @@ def load_toml(path: Path) -> dict:
         raise CheckError(f"{path} is not valid TOML: {error}") from error
 
 
+def advisory_problem(advisories: object) -> str:
+    """Require a non-empty list of unique advisory IDs from the allowed formats."""
+    if not isinstance(advisories, list) or not advisories:
+        return "advisories must be a non-empty list"
+    if any(not isinstance(value, str) or not ADVISORY.fullmatch(value) for value in advisories):
+        return "every advisory ID must match the CVE, GHSA or PYSEC format"
+    if len(set(advisories)) != len(advisories):
+        return "advisories must be unique"
+    return ""
+
+
 def entry_problem(root: Path, entry: object, today: datetime.date) -> str:
     """Why one entry cannot be applied as written, or the empty string."""
-    if not isinstance(entry, dict) or set(entry) != ENTRY_KEYS:
-        return f"must hold exactly the keys {sorted(ENTRY_KEYS)}"
-    if any(not isinstance(value, str) for value in entry.values()):
-        return "every value must be a string"
+    if not isinstance(entry, dict):
+        return "must be an exception table"
+    keys = ENTRY_KEYS | {"advisories"} if entry.get("rule") == VULNERABILITY else ENTRY_KEYS
+    if set(entry) != keys:
+        return f"must hold exactly the keys {sorted(keys)}"
+    if any(not isinstance(entry[key], str) for key in ENTRY_KEYS):
+        return "rule, path, reason and expires must be strings"
     if entry["rule"] not in RULES:
         return f"rule {entry['rule']!r} is not a rule this check reads (known: {list(RULES)})"
     path = Path(entry["path"])
     if path.is_absolute() or ".." in path.parts or path.as_posix() != entry["path"]:
         return f"path {entry['path']!r} must be one clean path below the repository root"
+    if entry["rule"] == VULNERABILITY:
+        if not SCANNED_PATH.fullmatch(entry["path"]):
+            return "vulnerability path must contain only letters, digits, dots, underscores, hyphens and slashes"
+        problem = advisory_problem(entry["advisories"])
+        if problem:
+            return problem
     if not (root / path).is_file():
         return f"path {entry['path']!r} names no file"
     only = ONLY_FILE.get(entry["rule"], entry["path"])
@@ -130,7 +160,7 @@ def entry_problem(root: Path, entry: object, today: datetime.date) -> str:
     return ""
 
 
-def load_entries(root: Path, today: datetime.date) -> tuple[dict[tuple[str, str], dict[str, str]], list[str]]:
+def load_entries(root: Path, today: datetime.date) -> tuple[dict[tuple[str, str], dict], list[str]]:
     """The live and the expired entries by rule and path, and what is wrong with the list."""
     document = load_toml(root / LIST)
     entries = document.get("exception", [])
@@ -150,7 +180,7 @@ def load_entries(root: Path, today: datetime.date) -> tuple[dict[tuple[str, str]
     return by_key, found
 
 
-def of_rule(by_key: dict[tuple[str, str], dict[str, str]], rule: str) -> dict[str, str]:
+def of_rule(by_key: dict[tuple[str, str], dict], rule: str) -> dict[str, str]:
     """The last day of each entry of one rule, by path."""
     return {path: entry["expires"] for (named, path), entry in by_key.items() if named == rule}
 
@@ -560,6 +590,11 @@ def copy_exceptions_tree(root: Path, tree: Path, end: datetime.date) -> None:
         shutil.copyfile(root / name, tree / name)
     for top in (WORKFLOWS, *source_roots(members(root)[1])):
         shutil.copytree(root / top, tree / top, ignore=shutil.ignore_patterns("target"))
+    by_key, _ = load_entries(root, end)
+    for (rule, name) in by_key:
+        if rule == VULNERABILITY and not (tree / name).is_file():
+            (tree / name).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(root / name, tree / name)
     plant_caller(tree, end)
     same_end(tree, end)
 
@@ -582,13 +617,47 @@ def refusals(root: Path, end: datetime.date, edit, day: datetime.date) -> list[s
         shutil.rmtree(tree, ignore_errors=True)
 
 
+def vulnerability_selftest(root: Path, today: datetime.date) -> list[str]:
+    """Require advisory validation refusals and acceptance at the 90-day boundary."""
+    entry = {
+        "rule": "vulnerability",
+        "path": "tools/semgrep/requirements.txt",
+        "advisories": ["CVE-2026-116684", "GHSA-ab12-cd34-ef56", "PYSEC-2026-123"],
+        "reason": "planted boundary case",
+        "expires": str(today + datetime.timedelta(days=MAX_DAYS)),
+    }
+    cases = {
+        "90-day boundary": ({}, ""),
+        "missing advisories": ({"advisories": None}, "exactly the keys"),
+        "empty advisories": ({"advisories": []}, "non-empty list"),
+        "scalar advisories": ({"advisories": "CVE-2026-116684"}, "non-empty list"),
+        "bad advisory": ({"advisories": ["CVE-2026-*"]}, "advisory ID"),
+        "non-string advisory": ({"advisories": [42]}, "advisory ID"),
+        "duplicate advisories": ({"advisories": ["CVE-2026-116684"] * 2}, "unique"),
+        "unknown path": ({"path": "tools/semgrep/missing.txt"}, "names no file"),
+        "empty reason": ({"reason": " "}, "reason must be"),
+        "91-day expiry": ({"expires": str(today + datetime.timedelta(days=MAX_DAYS + 1))}, "days after today"),
+        "advisories on another rule": ({"rule": RULE, "path": ABI}, "exactly the keys"),
+    }
+    failures = []
+    for name, (changes, expected) in cases.items():
+        planted_entry = entry | changes
+        if planted_entry["advisories"] is None:
+            del planted_entry["advisories"]
+        found = entry_problem(root, planted_entry, today)
+        if (not expected and found) or (expected and expected not in found):
+            failures.append(f"vulnerability {name}: expected {expected!r}, got {found!r}")
+    return failures
+
+
 def selftest(root: Path, today: datetime.date) -> list[str]:
     """Each plant must be refused, and for the reason it was planted for."""
-    failures = [f"the unplanted tree is refused: {line}" for line in check(root, today)]
+    failures = vulnerability_selftest(root, today)
+    failures.extend(f"the unplanted tree is refused: {line}" for line in check(root, today))
     ends = sorted(set(EXPIRES.findall(read_text(root / LIST))))
-    if len(ends) != 1:
-        return [*failures, f"the selftest is written for one end date in {LIST}; it holds {len(ends)}"]
-    # Every planted tree carries that end on all entries, the committed ones
+    if not ends:
+        return [*failures, f"the selftest needs an end date in {LIST}"]
+    # Every planted tree carries the earliest end on all entries, the committed ones
     # and the planted ones: a date plant is read relative to that day, an edit
     # plant on it.
     end = datetime.date.fromisoformat(ends[0])
@@ -619,7 +688,7 @@ def main() -> int:
         print(f"FAIL: {line}", file=sys.stderr)
     if found:
         return 1
-    detail = f"{len(PLANTS)} plants refused" if args.command == "selftest" else f"as of {today}"
+    detail = f"{len(PLANTS)} tree plants refused; vulnerability cases held" if args.command == "selftest" else f"as of {today}"
     print(f"PASS: exceptions {args.command} ({detail})")
     return 0
 

@@ -105,6 +105,8 @@ refuse a public method made private on a scratch clone. Its second half is
 the Praetor standards audit, which needs `praetorctl`; CI builds it from the
 commit pinned in the workflow.
 
+Trivy findings are excused only by a dated `vulnerability` entry in `exceptions.toml`, valid for at most 90 days.
+
 The gate needs the `wasm32-unknown-unknown` target of the pinned toolchain
 (`rustup target add wasm32-unknown-unknown`), Go at the version
 `bindings/go/go.mod` names, Node.js 22.12 or later with npm, and
