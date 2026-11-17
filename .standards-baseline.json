@@ -1,8 +1,18 @@
 {
   "version": 1,
-  "generated_at": "2026-10-11T00:56:26Z",
+  "generated_at": "2026-11-17T14:20:30Z",
   "repository": "plurano/amussis",
   "commit_sha": "6514aa4b5b6d6e7fbcba625e3d71216f60bcd65d",
-  "total_infractions": 0,
-  "infractions": []
+  "total_infractions": 1,
+  "increase_rationale": "adoption baseline",
+  "infractions": [
+    {
+      "rule_id": "RELEASE-TEST-LEVEL",
+      "file_path": ".standards.yaml",
+      "line_number": 1,
+      "message": "missing release test level integration for profile library-client: no tracked file matches paths [**/*_integration_test.go **/integration/** **/tests/integration/** **/test/integration/** **/*.integration.ts **/*.integration.js **/test_*_integration.py]",
+      "anchor": "level:library-client:integration",
+      "fingerprint": ".standards.yaml:RELEASE-TEST-LEVEL:level:library-client:integration#1"
+    }
+  ]
 }

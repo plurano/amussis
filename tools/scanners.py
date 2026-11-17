@@ -494,6 +494,7 @@ def utf8_output() -> None:
 
 
 def main() -> int:
+    """Parse arguments, dispatch the scanner action and return its exit code."""
     utf8_output()
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("action", choices=("fetch-db", "selftest", "check"))

@@ -24,6 +24,7 @@ path = [
     "tools/semgrep/requirements.txt",
     "tools/ruff/requirements.in",
     "tools/ruff/requirements.txt",
+    ".node-version",
 ]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Lusoris <lusoris@pm.me>"
@@ -78,6 +79,7 @@ path = [
     ".paperclip/**",
     ".vscode/**",
     "docs/adr/**",
+    ".coderabbit.yaml",
     ".editorconfig",
     ".gitattributes",
     ".gosec.json",

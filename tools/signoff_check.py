@@ -34,6 +34,7 @@ SIGN_OFF = "Signed-off-by: Plant <plant@example.invalid>"
 
 
 def git(repo: Path, *args: str) -> str:
+    """Run Git in the repository and return its output or raise CheckError."""
     argv = ["git", "-C", str(repo), *args]
     try:
         done = subprocess.run(argv, capture_output=True, text=True, timeout=DEADLINE_SECONDS)  # noqa: S603 - argv list without a shell; revisions come from CI event SHAs or the operator command line

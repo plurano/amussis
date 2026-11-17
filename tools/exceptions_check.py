@@ -17,21 +17,24 @@ the day the exception ends. This tool holds the three places to each other:
     at most 90 days from today.
 
 The second is `required-check-is-reported`. The declared rule set
-(.github/rulesets/main.json) is written by the Praetor engine, and for a job
-that calls another workflow it requires the calling job's own name. The forge
-reports such a job as `<calling job> / <called job>`, so no run ever reports
-the required name (cordanaLLM/praetor#1212):
+(.github/rulesets/main.json) is written by the Praetor engine, which now requires
+the forge's reported name, `<calling job> / <called job>`, for a job that calls
+another workflow. The called workflow can live outside this workspace, so its
+job names cannot be checked offline:
 
     a required check that a job with steps reports under its own name holds;
+    a required check with a calling job's name before the first ` / ` holds
+    when the called part is non-empty after stripping whitespace;
     a required check that is the bare name of a calling job needs a live
-    exception for the rule-set file;
+    exception for the rule-set file, for older rule sets;
     a required check that no job of any workflow carries is refused, with or
     without an exception;
     an exception left after the last such name went excuses nothing.
 
-No job of this workspace calls another workflow today, so the list holds no
-entry for this rule. The selftest gives every planted tree one calling job,
-its required name and its entry, so the rule stays proven until a job needs it.
+reuse.yml calls the horistes licence workflow, whose reported name is required
+without an exception. The selftest also gives every planted tree one calling
+job, its bare required name and its entry, keeping the older rule-set path
+covered alongside reported names.
 
 The third is `vulnerability`. Each entry names one existing scanned file and
 a non-empty list of unique CVE, GHSA or PYSEC advisory IDs. The reason and
@@ -64,8 +67,8 @@ import sys
 import tomllib
 from pathlib import Path
 
+import toolkit
 from toolkit import CheckError, append_to, replace_in
-from toolkit import planted as toolkit_planted
 
 LIST = "exceptions.toml"
 MANIFEST = "Cargo.toml"
@@ -256,7 +259,7 @@ def jobs_of(name: str, text: str) -> list[dict[str, str]]:
 
 
 def job_names(root: Path) -> tuple[set[str], dict[str, str]]:
-    """The names jobs report themselves, and the bare names of calling jobs by workflow."""
+    """Exact steps-job names, and calling-job prefixes by workflow; called jobs are unknown."""
     files = sorted((root / WORKFLOWS).glob("*.y*ml"))
     if not files or len(files) > MAX_WORKFLOWS:
         raise CheckError(f"{len(files)} workflows found; expected 1 to {MAX_WORKFLOWS}")
@@ -288,25 +291,34 @@ def required_checks(root: Path) -> list[str]:
     return names
 
 
+def is_reported(name: str, reported: set[str], calling: dict[str, str]) -> bool:
+    """An exact steps-job name or a caller followed by a non-empty called name."""
+    caller, _, called = name.partition(" / ")
+    return name in reported or (caller in calling and bool(called.strip()))
+
+
 def reported_findings(root: Path, by_path: dict[str, str], today: datetime.date) -> list[str]:
     """Every required check no run reports, read on the day `today`."""
     reported, calling = job_names(root)
-    live = RULESET in by_path and datetime.date.fromisoformat(by_path[RULESET]) >= today
-    expired = f"; its exception ended on {by_path[RULESET]}" if RULESET in by_path else ""
-    found, excused = [], 0
+    listed = RULESET in by_path
+    live = listed and datetime.date.fromisoformat(by_path[RULESET]) >= today
+    expired = f"; its exception ended on {by_path[RULESET]}" if listed else ""
+    found, needed = [], 0
     for name in required_checks(root):
-        if name in reported:
+        if is_reported(name, reported, calling):
             continue
         if name not in calling:
             found.append(f"{RULESET}: requires check {name!r}, a name no job of any workflow carries")
-        elif live:
-            excused += 1
-        else:
+            continue
+        needed += 1
+        if not live:
             found.append(
                 f"{RULESET}: requires check {name!r}, which no run reports (the job in "
                 f"{calling[name]} calls another workflow), without a live exception{expired}"
             )
-    if live and not excused:
+    # Whether a check still needs the entry does not depend on its day: an
+    # entry nothing needs fails before and after it ends.
+    if listed and not needed:
         found.append(f"{LIST}: the entry for {RULESET} excuses nothing; every required check is reported")
     return found
 
@@ -382,17 +394,47 @@ def drop_entries(tree: Path) -> None:
     (tree / LIST).write_text(text.replace(one_entry(tree), ""), encoding="utf-8")
 
 
+def entry_blocks(tree: Path, path: str) -> tuple[list[str], int]:
+    """The list split at its entries (the head first), and the index of the one entry naming `path`."""
+    blocks = read_text(tree / LIST).split("[[exception]]")
+    hits = [index for index, block in enumerate(blocks) if index and f'path = "{path}"' in block]
+    if len(hits) != 1:
+        raise CheckError(f"selftest plant: {LIST} holds no single entry for {path}")
+    return blocks, hits[0]
+
+
 def drop_entry(path: str):
     """Take the one entry that names `path` out of the list."""
 
     def edit(tree: Path) -> None:
-        head, *blocks = read_text(tree / LIST).split("[[exception]]")
-        kept = [block for block in blocks if f'path = "{path}"' not in block]
-        if len(kept) + 1 != len(blocks):
-            raise CheckError(f"selftest plant: {LIST} holds no single entry for {path}")
-        (tree / LIST).write_text("[[exception]]".join([head, *kept]), encoding="utf-8")
+        """Write the list back without that entry."""
+        blocks, index = entry_blocks(tree, path)
+        del blocks[index]
+        (tree / LIST).write_text("[[exception]]".join(blocks), encoding="utf-8")
 
     return edit
+
+
+def end_entry(path: str):
+    """Move the last day of the one entry that names `path` to the day before it."""
+
+    def edit(tree: Path) -> None:
+        """Write the list back with that entry ending one day earlier."""
+        blocks, index = entry_blocks(tree, path)
+        match = EXPIRES.search(blocks[index])
+        if not match:
+            raise CheckError(f"selftest plant: the entry for {path} names no last day")
+        day = datetime.date.fromisoformat(match[1]) - datetime.timedelta(days=1)
+        blocks[index] = EXPIRES.sub(f'expires = "{day}"', blocks[index])
+        (tree / LIST).write_text("[[exception]]".join(blocks), encoding="utf-8")
+
+    return edit
+
+
+def every_call_runs_after_end(tree: Path) -> None:
+    """Leave the rule-set entry needed by no check, one day after its end."""
+    every_call_runs(tree)
+    end_entry(RULESET)(tree)
 
 
 def same_end(tree: Path, end: datetime.date) -> None:
@@ -442,6 +484,22 @@ jobs:
 """
 GATE = f"{WORKFLOWS}/ci.yml"
 EXPIRES = re.compile(r'expires = "(\d{4}-\d{2}-\d{2})"')
+
+
+def require_called_name(name: str):
+    """Require a composite name in place of the bare caller, without its exception."""
+
+    def edit(tree: Path) -> None:
+        replace_in(RULESET, f'"context": "{CALLING_JOB}"', f'"context": "{name}"')(tree)
+        drop_entry(RULESET)(tree)
+
+    return edit
+
+
+REPORTED_NAMES = {
+    "calling job's reported name without an entry": require_called_name(f"{CALLING_JOB} / Check"),
+    "called name with another separator": require_called_name(f"{CALLING_JOB} / Check / Detail"),
+}
 
 # name -> (edit, days added to today, text the refusal must contain)
 PLANTS = {
@@ -541,6 +599,31 @@ PLANTS = {
         0,
         f"{RULESET}: requires check {CALLING_JOB!r}, which no run reports",
     ),
+    "steps job used as a calling prefix": (
+        require_called_name("Verification gate / Check"),
+        0,
+        "requires check 'Verification gate / Check', a name no job of any workflow carries",
+    ),
+    "unknown calling prefix": (
+        require_called_name("Unknown caller / Check"),
+        0,
+        "requires check 'Unknown caller / Check', a name no job of any workflow carries",
+    ),
+    "calling name with an empty called part": (
+        require_called_name(f"{CALLING_JOB} / "),
+        0,
+        f"requires check '{CALLING_JOB} / ', a name no job of any workflow carries",
+    ),
+    "calling name with a whitespace called part": (
+        require_called_name(f"{CALLING_JOB} /   "),
+        0,
+        f"requires check '{CALLING_JOB} /   ', a name no job of any workflow carries",
+    ),
+    "rule-set exception left after the reported name is required": (
+        replace_in(RULESET, f'"context": "{CALLING_JOB}"', f'"context": "{CALLING_JOB} / Check"'),
+        0,
+        f"the entry for {RULESET} excuses nothing",
+    ),
     "rule-set exception one day past its end": (
         None,
         MAX_DAYS + 1,
@@ -568,6 +651,11 @@ PLANTS = {
     ),
     "rule-set exception left after the last calling job went": (
         every_call_runs,
+        0,
+        f"the entry for {RULESET} excuses nothing",
+    ),
+    "rule-set exception left after the last calling job went, past its end": (
+        every_call_runs_after_end,
         0,
         f"the entry for {RULESET} excuses nothing",
     ),
@@ -620,6 +708,7 @@ def plant_caller(tree: Path, end: datetime.date) -> None:
 
 
 def copy_exceptions_tree(root: Path, tree: Path, end: datetime.date) -> None:
+    """Copy exception inputs into a fixture tree and plant a caller."""
     (tree / RULESET).parent.mkdir(parents=True)
     for name in (MANIFEST, LIST, RULESET, "ruff.toml"):
         shutil.copyfile(root / name, tree / name)
@@ -636,7 +725,7 @@ def copy_exceptions_tree(root: Path, tree: Path, end: datetime.date) -> None:
 
 def planted(root: Path, end: datetime.date, edit) -> Path:
     """A throwaway copy of the manifests, the list, the rule set, the workflows and the member sources."""
-    return toolkit_planted(
+    return toolkit.planted(
         root, "exceptions-check-", lambda r, c: copy_exceptions_tree(r, c, end), edit
     )
 
@@ -650,6 +739,15 @@ def refusals(root: Path, end: datetime.date, edit, day: datetime.date) -> list[s
         return [f"the check could not run: {error}"]
     finally:
         shutil.rmtree(tree, ignore_errors=True)
+
+
+def reported_name_failures(root: Path, end: datetime.date) -> list[str]:
+    """Reported composite names must hold without a rule-set exception."""
+    return [
+        f"reported name refused: {name}: {line}"
+        for name, edit in REPORTED_NAMES.items()
+        for line in refusals(root, end, edit, end)
+    ]
 
 
 def vulnerability_selftest(root: Path, today: datetime.date) -> list[str]:
@@ -705,6 +803,7 @@ def selftest(root: Path, today: datetime.date) -> list[str]:
             failures.append(f"plant passed: {name}")
         elif not any(expected in line for line in found):
             failures.append(f"plant refused for another reason: {name}: {found}")
+    failures.extend(reported_name_failures(root, end))
     return failures
 
 
@@ -723,7 +822,10 @@ def main() -> int:
         print(f"FAIL: {line}", file=sys.stderr)
     if found:
         return 1
-    detail = f"{len(PLANTS)} tree plants refused; vulnerability cases held" if args.command == "selftest" else f"as of {today}"
+    detail = (
+        f"{len(PLANTS)} tree plants refused, {len(REPORTED_NAMES)} reported names held; vulnerability cases held"
+        if args.command == "selftest" else f"as of {today}"
+    )
     print(f"PASS: exceptions {args.command} ({detail})")
     return 0
 

@@ -57,3 +57,6 @@ register:
         kind: message
         format: json
         selector: invariants.*
+release:
+  e2e:
+    since: 89c07bd6239dea7bf26f8ab41f0a0bcf47dc8e12
