@@ -289,22 +289,25 @@ def is_reported(name: str, reported: set[str], calling: dict[str, str]) -> bool:
 def reported_findings(root: Path, by_path: dict[str, str], today: datetime.date) -> list[str]:
     """Every required check no run reports, read on the day `today`."""
     reported, calling = job_names(root)
-    live = RULESET in by_path and datetime.date.fromisoformat(by_path[RULESET]) >= today
-    expired = f"; its exception ended on {by_path[RULESET]}" if RULESET in by_path else ""
-    found, excused = [], 0
+    listed = RULESET in by_path
+    live = listed and datetime.date.fromisoformat(by_path[RULESET]) >= today
+    expired = f"; its exception ended on {by_path[RULESET]}" if listed else ""
+    found, needed = [], 0
     for name in required_checks(root):
         if is_reported(name, reported, calling):
             continue
         if name not in calling:
             found.append(f"{RULESET}: requires check {name!r}, a name no job of any workflow carries")
-        elif live:
-            excused += 1
-        else:
+            continue
+        needed += 1
+        if not live:
             found.append(
                 f"{RULESET}: requires check {name!r}, which no run reports (the job in "
                 f"{calling[name]} calls another workflow), without a live exception{expired}"
             )
-    if live and not excused:
+    # Whether a check still needs the entry does not depend on its day: an
+    # entry nothing needs fails before and after it ends.
+    if listed and not needed:
         found.append(f"{LIST}: the entry for {RULESET} excuses nothing; every required check is reported")
     return found
 
@@ -361,17 +364,47 @@ def drop_entries(tree: Path) -> None:
     (tree / LIST).write_text(text.replace(one_entry(tree), ""), encoding="utf-8")
 
 
+def entry_blocks(tree: Path, path: str) -> tuple[list[str], int]:
+    """The list split at its entries (the head first), and the index of the one entry naming `path`."""
+    blocks = read_text(tree / LIST).split("[[exception]]")
+    hits = [index for index, block in enumerate(blocks) if index and f'path = "{path}"' in block]
+    if len(hits) != 1:
+        raise CheckError(f"selftest plant: {LIST} holds no single entry for {path}")
+    return blocks, hits[0]
+
+
 def drop_entry(path: str):
     """Take the one entry that names `path` out of the list."""
 
     def edit(tree: Path) -> None:
-        head, *blocks = read_text(tree / LIST).split("[[exception]]")
-        kept = [block for block in blocks if f'path = "{path}"' not in block]
-        if len(kept) + 1 != len(blocks):
-            raise CheckError(f"selftest plant: {LIST} holds no single entry for {path}")
-        (tree / LIST).write_text("[[exception]]".join([head, *kept]), encoding="utf-8")
+        """Write the list back without that entry."""
+        blocks, index = entry_blocks(tree, path)
+        del blocks[index]
+        (tree / LIST).write_text("[[exception]]".join(blocks), encoding="utf-8")
 
     return edit
+
+
+def end_entry(path: str):
+    """Move the last day of the one entry that names `path` to the day before it."""
+
+    def edit(tree: Path) -> None:
+        """Write the list back with that entry ending one day earlier."""
+        blocks, index = entry_blocks(tree, path)
+        match = EXPIRES.search(blocks[index])
+        if not match:
+            raise CheckError(f"selftest plant: the entry for {path} names no last day")
+        day = datetime.date.fromisoformat(match[1]) - datetime.timedelta(days=1)
+        blocks[index] = EXPIRES.sub(f'expires = "{day}"', blocks[index])
+        (tree / LIST).write_text("[[exception]]".join(blocks), encoding="utf-8")
+
+    return edit
+
+
+def every_call_runs_after_end(tree: Path) -> None:
+    """Leave the rule-set entry needed by no check, one day after its end."""
+    every_call_runs(tree)
+    end_entry(RULESET)(tree)
 
 
 def same_end(tree: Path, end: datetime.date) -> None:
@@ -583,6 +616,11 @@ PLANTS = {
     ),
     "rule-set exception left after the last calling job went": (
         every_call_runs,
+        0,
+        f"the entry for {RULESET} excuses nothing",
+    ),
+    "rule-set exception left after the last calling job went, past its end": (
+        every_call_runs_after_end,
         0,
         f"the entry for {RULESET} excuses nothing",
     ),
