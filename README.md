@@ -113,6 +113,11 @@ The gate needs the `wasm32-unknown-unknown` target of the pinned toolchain
 [cargo-deny](https://github.com/EmbarkStudios/cargo-deny), cargo-semver-checks,
 gitleaks, semgrep and trivy at the versions `.github/workflows/ci.yml` pins. It installs none of them,
 and fails when one is missing.
+The semgrep version pinned in `tools/semgrep/requirements.txt` has wheels for
+Linux x86_64/aarch64, macOS arm64 and Windows x86_64. On Intel macOS, pip installs
+a source archive without `semgrep-core`, so `make verify-semgrep` fails there.
+Intel macOS is not a supported gate host; run the gate on a Linux host (container
+or VM).
 
 `make fetch` is the only step that reaches a third-party host: `cargo fetch
 --locked` reads the crates.io registry for this tree and for the last release
