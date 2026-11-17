@@ -249,7 +249,7 @@ def run_comparator(
         str(built_target),
     ]
     try:
-        done = subprocess.run(
+        done = subprocess.run(  # noqa: S603 - fixed cargo argv without a shell; paths are the committed module and the build output
             cargo, cwd=root, env=env, capture_output=True, text=True, timeout=deadline, check=False
         )
     except (OSError, subprocess.TimeoutExpired) as error:

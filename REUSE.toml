@@ -22,6 +22,8 @@ path = [
     "renovate.json",
     "tools/semgrep/requirements.in",
     "tools/semgrep/requirements.txt",
+    "tools/ruff/requirements.in",
+    "tools/ruff/requirements.txt",
 ]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Lusoris <lusoris@pm.me>"

@@ -11,8 +11,9 @@ CARGO_SEMVER_CHECKS ?= cargo semver-checks
 SEMVER_BASELINE ?= $(shell git describe --tags --abbrev=0 --match 'v[0-9]*' --exclude '*-*' 2>/dev/null)
 GITLEAKS ?= gitleaks
 SEMGREP ?= semgrep
+RUFF ?= ruff
 TRIVY ?= trivy
-export SEMGREP TRIVY
+export SEMGREP TRIVY RUFF
 
 GO_BINDING := bindings/go
 GO_CONSUMER := examples/go-consumer
@@ -29,7 +30,7 @@ export npm_config_offline := true
 .PHONY: verify verify-settings verify-exceptions verify-origin verify-rust verify-package verify-wasm verify-regenerate verify-go
 .PHONY: verify-go-lint verify-readme
 .PHONY: verify-notices verify-licences verify-reuse verify-secrets verify-signoff fetch
-.PHONY: verify-semgrep verify-trivy verify-tools verify-semver
+.PHONY: verify-ruff verify-semgrep verify-trivy verify-tools verify-semver
 .PHONY: verify-engine-plants verify-api-plant verify-hook-scripts verify-codacy
 
 # The one gate is `make verify-all`: CI runs exactly that target, so a local
@@ -43,10 +44,10 @@ verify-all: verify verify-engine-plants
 # This workspace's own checks; they need no engine.
 verify: verify-settings verify-exceptions verify-origin verify-rust verify-package verify-wasm verify-regenerate verify-go \
 		verify-go-lint verify-readme verify-notices verify-licences verify-reuse verify-secrets verify-signoff \
-		verify-tools verify-semgrep verify-trivy verify-semver verify-codacy
+		verify-tools verify-ruff verify-semgrep verify-trivy verify-semver verify-codacy
 	@printf '%s\n' 'PASS: settings, exceptions, origin names, crate gate, packed crate, module, Go binding,' \
 		'Go linter, README Go blocks, third-party notices, dependency licences, licence headers, secrets,' \
-		'sign-off check, scanner tool tests, semgrep and trivy scanner checks, Rust API against the last release,' \
+		'sign-off check, scanner tool tests, ruff, semgrep and trivy scanner checks, Rust API against the last release,' \
 		'Codacy exclusions.'
 
 # The shared toolchain and lint settings equal the record in
@@ -259,6 +260,12 @@ verify-signoff:
 # Scanner tool unit tests verify cache handling and download safety.
 verify-tools:
 	python3 -B -m unittest discover -s tools -p 'test_*.py'
+
+# Ruff checks tracked Python with the shared rule configuration. The selftest
+# requires planted import-order and security findings before the tree scan.
+verify-ruff:
+	python3 -B tools/scanners.py selftest ruff
+	python3 -B tools/scanners.py check ruff
 
 # Semgrep checks the repository against its own HISS invariant rules. The
 # selftest plants one finding per rule in a scratch directory first, so a rule

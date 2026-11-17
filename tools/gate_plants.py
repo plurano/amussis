@@ -65,7 +65,7 @@ class PlantError(Exception):
 def run(argv: list[str], cwd: Path, env: dict[str, str] | None = None) -> tuple[int, str]:
     """Run argv in cwd under the deadline; the exit status and the joined output."""
     try:
-        done = subprocess.run(
+        done = subprocess.run(  # noqa: S603 - argv list without a shell; callers pass gate commands built from repository paths
             argv, cwd=cwd, env=env, capture_output=True, text=True, timeout=DEADLINE_SECONDS
         )
     except (OSError, subprocess.TimeoutExpired) as error:
