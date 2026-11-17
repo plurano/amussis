@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import datetime
 import importlib.util
+import io
 import json
 import os
 import stat
@@ -180,6 +181,24 @@ class TestScanners(unittest.TestCase):
             self.assertTrue((cache_dir / "data.bin").exists())
             leftovers = list(cache_dir.parent.glob(".fetch-*"))
             self.assertEqual(leftovers, [])
+
+    def test_output_survives_code_page_pipe(self) -> None:
+        """Trivy's box drawing reaches a cp1252 pipe (Windows CI) without UnicodeEncodeError."""
+        raw = io.BytesIO()
+        pipe = io.TextIOWrapper(raw, encoding="cp1252")
+        with patch.object(scanners.sys, "stdout", pipe), patch.object(scanners.sys, "stderr", pipe):
+            scanners.utf8_output()
+            print("\u2502 Target \u2502 Type \u2502")
+            pipe.flush()
+        self.assertEqual(raw.getvalue().decode("utf-8"), "\u2502 Target \u2502 Type \u2502\n")
+
+    def test_main_writes_utf8(self) -> None:
+        """main switches output to UTF-8 before a scanner prints."""
+        with patch.object(scanners, "utf8_output") as utf8, \
+                patch.object(scanners, "check_trivy", return_value=0), \
+                patch.object(scanners.sys, "argv", ["scanners.py", "check", "trivy"]):
+            self.assertEqual(scanners.main(), 0)
+        utf8.assert_called_once_with()
 
     def test_run_cmd_reads_utf8(self) -> None:
         """Scanner output is read as UTF-8, not the host code page (Trivy tables on Windows)."""

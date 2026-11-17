@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import io
 import json
 import os
 import re
@@ -432,7 +433,15 @@ def check_trivy(cache_dir: Path, trivy_bin: str) -> int:
     raise CheckError(f"trivy scan failed with exit {done.returncode}: {done.stderr.strip()}")
 
 
+def utf8_output() -> None:
+    """Write UTF-8 to piped output: Windows pipes default to the code page, which cannot hold Trivy's tables."""
+    for stream in (sys.stdout, sys.stderr):
+        if isinstance(stream, io.TextIOWrapper):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
+
 def main() -> int:
+    utf8_output()
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("action", choices=("fetch-db", "selftest", "check"))
     parser.add_argument("target", nargs="?", choices=("semgrep", "trivy"))
