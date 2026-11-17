@@ -67,7 +67,8 @@ import sys
 import tomllib
 from pathlib import Path
 
-from toolkit import CheckError, append_to, planted as toolkit_planted, replace_in
+from toolkit import CheckError, append_to, replace_in
+from toolkit import planted as toolkit_planted
 
 LIST = "exceptions.toml"
 MANIFEST = "Cargo.toml"
