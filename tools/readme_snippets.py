@@ -32,10 +32,12 @@ from pathlib import Path
 
 from toolkit import (
     CheckError,
-    planted as toolkit_planted,
     read_lines,
     replace_in,
     run_selftest,
+)
+from toolkit import (
+    planted as toolkit_planted,
 )
 
 README = "README.md"

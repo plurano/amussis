@@ -63,8 +63,8 @@ def package(tree: Path, target: Path) -> tuple[int, str]:
 def committed(root: Path, into: Path) -> None:
     """Unpack the committed tree of root into the empty directory into."""
     try:
-        done = subprocess.run(["git", "archive", "--format=tar", "HEAD"], cwd=root,
-                              capture_output=True, timeout=DEADLINE_SECONDS)
+        done = subprocess.run(["git", "archive", "--format=tar", "HEAD"],  # noqa: S607 - fixed git executable on PATH
+                              cwd=root, capture_output=True, timeout=DEADLINE_SECONDS)
     except (OSError, subprocess.TimeoutExpired) as error:
         raise CheckError(f"git archive: {error}") from error
     if done.returncode != 0:

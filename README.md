@@ -94,7 +94,9 @@ token planted at run time. It checks the repository against its own HISS rules
 with [semgrep](https://github.com/semgrep/semgrep) (`.config/semgrep/hiss.yml`),
 which has to find a planted finding per rule; its hash-locked install
 (`tools/semgrep/requirements.txt`, compiled from `requirements.in`) is refused
-when one pin breaks the bounds of another. It scans dependencies offline for
+when one pin breaks the bounds of another. Ruff checks tracked Python against
+`ruff.toml` after planted import-order and security findings are detected
+(`make verify-ruff`). It scans dependencies offline for
 vulnerabilities with [trivy](https://github.com/aquasecurity/trivy), which
 requires a database pinned by digest from `make fetch` and has to find planted Go
 and Rust advisories. It compares the public API of the published crates with
@@ -111,7 +113,7 @@ The gate needs the `wasm32-unknown-unknown` target of the pinned toolchain
 (`rustup target add wasm32-unknown-unknown`), Go at the version
 `bindings/go/go.mod` names, Node.js 22.12 or later with npm, and
 [cargo-deny](https://github.com/EmbarkStudios/cargo-deny), cargo-semver-checks,
-gitleaks, semgrep and trivy at the versions `.github/workflows/ci.yml` pins. It installs none of them,
+gitleaks, semgrep, ruff and trivy at the versions `.github/workflows/ci.yml` pins. It installs none of them,
 and fails when one is missing.
 The semgrep version pinned in `tools/semgrep/requirements.txt` has wheels for
 Linux x86_64/aarch64, macOS arm64 and Windows x86_64. On Intel macOS, pip installs

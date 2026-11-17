@@ -67,8 +67,8 @@ def check_declared(root: Path, commands: dict[str, list[str]] = GENERATED) -> li
 
 def run_git(args: list[str], root: Path, timeout: int = GIT_TIMEOUT_SECONDS) -> str:
     try:
-        proc = subprocess.run(
-            ["git", *args],
+        proc = subprocess.run(  # noqa: S603 - argv uses fixed git and repository-defined arguments without a shell
+            ["git", *args],  # noqa: S607 - fixed git executable on PATH
             cwd=root,
             capture_output=True,
             text=True,
@@ -86,7 +86,7 @@ def run_git(args: list[str], root: Path, timeout: int = GIT_TIMEOUT_SECONDS) -> 
 def git_status_bytes(root: Path, timeout: int = GIT_TIMEOUT_SECONDS) -> bytes:
     try:
         proc = subprocess.run(
-            ["git", "status", "--porcelain=v1", "-z"],
+            ["git", "status", "--porcelain=v1", "-z"],  # noqa: S607 - fixed git executable on PATH
             cwd=root,
             capture_output=True,
             timeout=timeout,

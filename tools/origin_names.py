@@ -31,10 +31,12 @@ from pathlib import Path
 from toolkit import (
     CheckError,
     append_to,
-    planted as toolkit_planted,
     read_lines,
     replace_in,
     run_selftest,
+)
+from toolkit import (
+    planted as toolkit_planted,
 )
 
 CRATES = "crates"

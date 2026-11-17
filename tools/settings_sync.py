@@ -33,7 +33,8 @@ import tempfile
 import tomllib
 from pathlib import Path
 
-from toolkit import CheckError, planted as toolkit_planted, replace_in
+from toolkit import CheckError, replace_in
+from toolkit import planted as toolkit_planted
 
 RECORD = "settings-source.json"
 MANIFEST = "Cargo.toml"
