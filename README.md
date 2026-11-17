@@ -107,6 +107,8 @@ refuse a public method made private on a scratch clone. Its second half is
 the Praetor standards audit, which needs `praetorctl`; CI builds it from the
 commit pinned in the workflow.
 
+`make verify-message-ids` tests the private plan ID check and checks reachable history; the pull request workflow also checks its title, body and commits without printing matches.
+
 Trivy findings are excused only by a dated `vulnerability` entry in `exceptions.toml`, valid for at most 90 days.
 
 The gate needs the `wasm32-unknown-unknown` target of the pinned toolchain
