@@ -30,7 +30,7 @@ export npm_config_offline := true
 .PHONY: verify-go-lint verify-readme
 .PHONY: verify-notices verify-licences verify-reuse verify-secrets verify-signoff fetch
 .PHONY: verify-semgrep verify-trivy verify-tools verify-semver
-.PHONY: verify-engine-plants verify-api-plant verify-hook-scripts
+.PHONY: verify-engine-plants verify-api-plant verify-hook-scripts verify-codacy
 
 # The one gate is `make verify-all`: CI runs exactly that target, so a local
 # green run and a green status check mean the same thing. Its recipe, at the
@@ -43,10 +43,11 @@ verify-all: verify verify-engine-plants
 # This workspace's own checks; they need no engine.
 verify: verify-settings verify-exceptions verify-origin verify-rust verify-package verify-wasm verify-regenerate verify-go \
 		verify-go-lint verify-readme verify-notices verify-licences verify-reuse verify-secrets verify-signoff \
-		verify-tools verify-semgrep verify-trivy verify-semver
+		verify-tools verify-semgrep verify-trivy verify-semver verify-codacy
 	@printf '%s\n' 'PASS: settings, exceptions, origin names, crate gate, packed crate, module, Go binding,' \
 		'Go linter, README Go blocks, third-party notices, dependency licences, licence headers, secrets,' \
-		'sign-off check, scanner tool tests, semgrep and trivy scanner checks, Rust API against the last release.'
+		'sign-off check, scanner tool tests, semgrep and trivy scanner checks, Rust API against the last release,' \
+		'Codacy exclusions.'
 
 # The shared toolchain and lint settings equal the record in
 # settings-source.json; the selftest plants one defect per setting first, so a
@@ -310,13 +311,24 @@ verify-api-plant:
 # engine checkout is removed; locally PRAETOR_SRC is a checkout of the commit
 # ci.yml pins. The planted case: a script that differs by one line has to
 # compare as different, and cmp exits 1 for a difference and 2 when it could
-# not read a file.
+# not read a file. The other files adoption renders from the engine have to
+# equal it too: RENDERED_FILES pairs each path here with its path in the engine
+# checkout (the agent hook is the adopter rendering, which the engine's tests
+# hold equal to its testdata/emitted fixture), and every tracked file under
+# RENDERED_TREES equals the engine's file at the same path.
 HOOK_SCRIPTS := checkpoint.py common.py
+RENDERED_FILES := \
+    .config/agent/hooks/block_evasion.py=internal/adopt/testdata/emitted/.config/agent/hooks/block_evasion.py \
+    tools/apicompat/gate/main.go=tools/apicompat/gate/main.go \
+    tools/figures/astro.mjs=tools/figures/astro.mjs
+RENDERED_TREES := tools/figures/third_party
 verify-hook-scripts:
 	test -d "$(PRAETOR_SRC)/.config/lefthook/scripts" \
 		|| { printf 'FAIL: PRAETOR_SRC names no engine checkout: %s\n' "$(PRAETOR_SRC)" >&2; exit 1; }
 	for f in $(HOOK_SCRIPTS); do cmp ".config/lefthook/scripts/$$f" \
 		"$(PRAETOR_SRC)/.config/lefthook/scripts/$$f" || exit 1; done
+	for p in $(RENDERED_FILES); do cmp "$${p%%=*}" "$(PRAETOR_SRC)/$${p#*=}" || exit 1; done
+	git ls-files -z -- $(RENDERED_TREES) | xargs -0 -I{} cmp {} "$(PRAETOR_SRC)/{}"
 	@dir=$$(mktemp -d) && { cat .config/lefthook/scripts/common.py; echo '# planted'; } \
 		> "$$dir/common.py" && status=0 && cmp -s "$$dir/common.py" \
 		"$(PRAETOR_SRC)/.config/lefthook/scripts/common.py" || status=$$?; rm -rf "$$dir"; \
@@ -327,6 +339,30 @@ verify-hook-scripts:
 		&& cp "$(PRAETOR_SRC)/.config/agent/hooks/checkpoint.py" "$$dir/.config/agent/hooks/" \
 		&& (cd "$$dir/.config/lefthook/scripts" && python3 -B -m unittest test_checkpoint); \
 		status=$$?; rm -rf "$$dir"; exit $$status
+
+# Codacy skips what .codacy.yml excludes, so the file may exclude only what
+# verify-hook-scripts holds to the engine. The check is an allow-list: every
+# line is blank, a comment, the document start, the exclude_paths key or one of
+# its items, and every item names a hook script, a rendered file or a rendered
+# tree as name/**. Two planted copies have to be refused: one that also
+# excludes src/lib.rs, and one that adds another key.
+CODACY_EXCLUDABLE := $(addprefix .config/lefthook/scripts/,$(HOOK_SCRIPTS)) \
+    $(foreach p,$(RENDERED_FILES),$(firstword $(subst =, ,$(p)))) $(addsuffix /**,$(RENDERED_TREES))
+verify-codacy:
+	@check() { test -f "$$1" || return 0; \
+		if grep -vE '^[[:space:]]*(#.*)?$$|^---$$|^exclude_paths:$$|^[[:space:]]+- ' "$$1" >&2; then \
+		printf 'FAIL: %s holds a line other than a comment, exclude_paths or one of its items\n' "$$1" >&2; \
+		return 1; fi; allowed=' $(CODACY_EXCLUDABLE) '; \
+		grep -E '^[[:space:]]+- ' "$$1" | sed -E 's/^[[:space:]]+-[[:space:]]+//; s/^"(.*)"$$/\1/' \
+		| { bad=0; while IFS= read -r p; do case "$$allowed" in *" $$p "*) ;; *) bad=1; \
+		printf 'FAIL: %s excludes %s, which no equality check here holds to the engine\n' "$$1" "$$p" >&2;; \
+		esac; done; exit $$bad; }; }; \
+	check .codacy.yml || exit 1; \
+	for plant in '  - "src/lib.rs"' 'engines: {}'; do dir=$$(mktemp -d) \
+		&& { cat .codacy.yml; printf '%s\n' "$$plant"; } > "$$dir/codacy.yml" \
+		&& status=0 && check "$$dir/codacy.yml" 2>/dev/null || status=$$?; rm -rf "$$dir"; \
+		test "$$status" -eq 1 || { printf 'FAIL: the planted line %s was not refused: the check exited %s, not 1\n' \
+		"$$plant" "$$status" >&2; exit 1; }; done
 
 # Praetor declared verification; existing project recipes remain unchanged.
 # Praetor ships one binary under two names; resolve whichever is installed.

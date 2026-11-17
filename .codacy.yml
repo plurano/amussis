@@ -7,18 +7,22 @@
 # https://docs.codacy.com/repositories-configure/codacy-configuration-file/
 # Patterns use Java glob syntax.
 exclude_paths:
-  # The Praetor engine renders these four files and verify-hook-scripts holds
-  # them byte-equal to it, so they cannot change here. Of Codacy's findings on
-  # them in pull request 97, the Bandit, Opengrep file-read, SSRF and regex ones
-  # are false positives; the Lizard file-length and parameter-count ones are
-  # true and owned by the engine as finding
-  # amussis-engine-pr97-review-findings-20261117. Entered 2026-11-17, MEL C,
-  # ends 2026-11-27; drop each line once the engine ships the file reworked.
+  # The Praetor engine renders these four files. Makefile target
+  # verify-hook-scripts, which CI runs on Linux, holds each of them byte-equal
+  # to the engine commit ci.yml pins, and verify-codacy refuses an exclusion of
+  # any file it does not hold. Of Codacy's findings on them in pull request 97,
+  # the Bandit, Opengrep file-read, SSRF and regex ones are false positives; the
+  # Lizard file-length and parameter-count ones are true and owned by the engine
+  # as finding amussis-engine-pr97-review-findings-20261117. Entered 2026-11-17,
+  # MEL C, ends 2026-11-27; drop each line once the engine ships the file
+  # reworked.
   - ".config/lefthook/scripts/common.py"
   - ".config/agent/hooks/block_evasion.py"
   - "tools/apicompat/gate/main.go"
   - "tools/figures/astro.mjs"
-  # Vendored upstream interfig source. Codacy's default pattern
-  # .*third[_-]?[Pp]arty/.* already ignores it; listIgnoredFiles named these
-  # files on 2026-11-17, so the line keeps them ignored once this file applies.
+  # Vendored upstream interfig source, which the engine ships as well:
+  # verify-hook-scripts holds every tracked file in it equal to the engine's
+  # copy. Codacy's default pattern .*third[_-]?[Pp]arty/.* already ignores it;
+  # listIgnoredFiles named these files on 2026-11-17, so the line keeps them
+  # ignored once this file applies.
   - "tools/figures/third_party/**"
