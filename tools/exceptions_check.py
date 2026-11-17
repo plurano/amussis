@@ -67,8 +67,8 @@ import sys
 import tomllib
 from pathlib import Path
 
+import toolkit
 from toolkit import CheckError, append_to, replace_in
-from toolkit import planted as toolkit_planted
 
 LIST = "exceptions.toml"
 MANIFEST = "Cargo.toml"
@@ -689,7 +689,7 @@ def copy_exceptions_tree(root: Path, tree: Path, end: datetime.date) -> None:
 
 def planted(root: Path, end: datetime.date, edit) -> Path:
     """A throwaway copy of the manifests, the list, the rule set, the workflows and the member sources."""
-    return toolkit_planted(
+    return toolkit.planted(
         root, "exceptions-check-", lambda r, c: copy_exceptions_tree(r, c, end), edit
     )
 
