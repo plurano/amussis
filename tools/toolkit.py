@@ -109,5 +109,5 @@ def run_command(
     except (OSError, subprocess.TimeoutExpired) as error:
         raise CheckError(f"{' '.join(args)} could not run: {error}") from error
     if done.returncode != 0:
-        raise CheckError(f"{' '.join(args)} exited {done.returncode}:\n{done.stderr.strip()}")
+        raise CheckError(f"{' '.join(args)} exited {done.returncode}:\n{done.stderr.strip() or done.stdout.strip()}")
     return done

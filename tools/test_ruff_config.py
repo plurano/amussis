@@ -4,15 +4,16 @@
 """Verify Ruff's rule source and dated exceptions."""
 
 import datetime
-import subprocess
 import tempfile
 import tomllib
+import types
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 import exceptions_check
 import scanners
+import toolkit
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -36,9 +37,8 @@ class RuffConfigTests(unittest.TestCase):
         self.config = tomllib.loads((ROOT / "ruff.toml").read_text(encoding="utf-8"))
         self.codes = [line for line in (ROOT / "tools/ruff/codacy-patterns.txt").read_text(encoding="utf-8").splitlines()
                       if line and not line.startswith("#")]
-        result = subprocess.run(["git", "ls-files", "-z", "*.py"], cwd=ROOT, capture_output=True,  # noqa: S607 - fixed git executable on PATH
-                                text=True, timeout=60, check=True)
-        self.tracked = set(result.stdout.split("\0"))
+        result = toolkit.run_command(["git", "ls-files", "-z", "*.py"], ROOT, 60).stdout
+        self.tracked = set(result.split("\0"))
 
     def test_committed_config(self):
         self.assertEqual(config_problems(self.config, self.codes, self.tracked), [])
@@ -77,8 +77,8 @@ class RuffConfigTests(unittest.TestCase):
             scanners.write_ruff_plants(path)
             self.assertIn("import tomllib", (path / "imports.py").read_text(encoding="utf-8"))
         with patch.object(scanners, "print_tool_version"), patch.object(scanners, "run_cmd") as run:
-            run.return_value = subprocess.CompletedProcess([], 1, '[{"filename":"imports.py","code":"I001"},'
-                                                   '{"filename":"security.py","code":"S101"}]', '')
+            run.return_value = types.SimpleNamespace(returncode=1, stdout='[{"filename":"imports.py","code":"I001"},'
+                                                     '{"filename":"security.py","code":"S101"}]', stderr='')
             self.assertEqual(scanners.selftest_ruff(ROOT / "ruff.toml", "ruff"), 0)
             run.return_value.stdout = '[]'
             self.assertEqual(scanners.selftest_ruff(ROOT / "ruff.toml", "ruff"), 1)
@@ -102,8 +102,8 @@ class RuffConfigTests(unittest.TestCase):
 
     def test_scanner_check_propagates_findings(self):
         with patch.object(scanners, "print_tool_version"), patch.object(scanners, "run_cmd") as run:
-            run.side_effect = [subprocess.CompletedProcess([], 0, "a.py\0", ""),
-                               subprocess.CompletedProcess([], 1, "finding", "")]
+            run.side_effect = [types.SimpleNamespace(returncode=0, stdout="a.py\0", stderr=""),
+                               types.SimpleNamespace(returncode=1, stdout="finding", stderr="")]
             self.assertEqual(scanners.check_ruff(ROOT / "ruff.toml", "ruff"), 1)
             self.assertIn("a.py", run.call_args.args[0])
 

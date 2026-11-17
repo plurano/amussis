@@ -32,7 +32,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from toolkit import CheckError
+from toolkit import CheckError, run_command
 
 WASM_PATH = "bindings/go/decision/amussis_decision.wasm"
 NOTICES_PATH = "bindings/go/decision/THIRD-PARTY-NOTICES.txt"
@@ -66,21 +66,7 @@ def check_declared(root: Path, commands: dict[str, list[str]] = GENERATED) -> li
 
 
 def run_git(args: list[str], root: Path, timeout: int = GIT_TIMEOUT_SECONDS) -> str:
-    try:
-        proc = subprocess.run(  # noqa: S603 - argv uses fixed git and repository-defined arguments without a shell
-            ["git", *args],  # noqa: S607 - fixed git executable on PATH
-            cwd=root,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired) as error:
-        raise CheckError(f"git {' '.join(args)} could not run: {error}") from error
-    if proc.returncode != 0:
-        err = proc.stderr.strip()
-        raise CheckError(f"git {' '.join(args)} exited {proc.returncode}: {err}")
-    return proc.stdout
+    return run_command(["git", *args], root, timeout).stdout
 
 
 def git_status_bytes(root: Path, timeout: int = GIT_TIMEOUT_SECONDS) -> bytes:
@@ -148,22 +134,7 @@ def evaluate_changes(
 
 
 def run_update_command(cmd: list[str], root: Path, timeout: int) -> None:
-    try:
-        proc = subprocess.run(  # noqa: S603 - argv list without a shell; commands come from the GENERATED table and the running interpreter
-            cmd,
-            cwd=root,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
-    except subprocess.TimeoutExpired as error:
-        raise CheckError(f"{' '.join(cmd)} timed out after {timeout} s") from error
-    except OSError as error:
-        raise CheckError(f"{' '.join(cmd)} could not run: {error}") from error
-    if proc.returncode != 0:
-        err = proc.stderr.strip() or proc.stdout.strip()
-        raise CheckError(f"{' '.join(cmd)} exited {proc.returncode}:\n{err}")
+    run_command(cmd, root, timeout)
 
 
 def command_timeout(path: str, cmd: list[str]) -> int:
