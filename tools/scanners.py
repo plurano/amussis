@@ -78,7 +78,7 @@ def run_cmd(
 ) -> subprocess.CompletedProcess[str]:
     """Execute a subprocess command with bounded execution time; output is read as UTF-8 on every host."""
     try:
-        return subprocess.run(
+        return subprocess.run(  # noqa: S603 - argv list without a shell; callers pass the scanner the Makefile names and repository paths
             argv,
             capture_output=True,
             text=True,
@@ -256,7 +256,6 @@ def selftest_semgrep(config_path: Path, semgrep_bin: str) -> int:
         return 0
 
 
-
 def write_ruff_plants(scratch: Path) -> None:
     """Plant import order and security findings plus a clean file."""
     (scratch / "imports.py").write_text("import thirdparty\nimport tomllib\n", encoding="utf-8")
@@ -306,6 +305,7 @@ def check_ruff(config: Path, ruff_bin: str) -> int:
     if done.returncode not in (0, 1):
         raise CheckError(f"ruff check exited {done.returncode}: {done.stderr}")
     return done.returncode
+
 
 def write_trivy_plants(scratch: Path) -> None:
     """Write synthetic manifest files containing known vulnerable dependencies."""
@@ -503,7 +503,7 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.action in ("selftest", "check") and not args.target:
-        parser.error(f"{args.action} requires a target (semgrep or trivy)")
+        parser.error(f"{args.action} requires a target (semgrep, trivy or ruff)")
     if args.action == "fetch-db" and args.target:
         parser.error("fetch-db takes no target")
 
@@ -512,8 +512,6 @@ def main() -> int:
     ruff_bin = os.environ.get("RUFF", "ruff")
 
     try:
-        if args.target == "ruff":
-            return selftest_ruff(Path("ruff.toml"), ruff_bin) if args.action == "selftest" else check_ruff(Path("ruff.toml"), ruff_bin)
         if args.action == "fetch-db":
             return fetch_db(args.cache_dir, trivy_bin)
         if args.action == "selftest" and args.target == "semgrep":
@@ -524,6 +522,10 @@ def main() -> int:
             return check_semgrep(args.config, semgrep_bin)
         if args.action == "check" and args.target == "trivy":
             return check_trivy(args.cache_dir, trivy_bin)
+        if args.action == "selftest" and args.target == "ruff":
+            return selftest_ruff(Path("ruff.toml"), ruff_bin)
+        if args.action == "check" and args.target == "ruff":
+            return check_ruff(Path("ruff.toml"), ruff_bin)
     except CheckError as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 2

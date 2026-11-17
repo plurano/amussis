@@ -149,7 +149,7 @@ def evaluate_changes(
 
 def run_update_command(cmd: list[str], root: Path, timeout: int) -> None:
     try:
-        proc = subprocess.run(
+        proc = subprocess.run(  # noqa: S603 - argv list without a shell; commands come from the GENERATED table and the running interpreter
             cmd,
             cwd=root,
             capture_output=True,

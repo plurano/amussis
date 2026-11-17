@@ -110,8 +110,8 @@ def differences(root: Path, record: dict, label: str) -> list[str]:
 
 def git(repo: Path, *args: str) -> str:
     try:
-        done = subprocess.run(
-            ["git", "-C", str(repo), *args],
+        done = subprocess.run(  # noqa: S603 - argv list without a shell; revisions come from CI event SHAs or the operator command line
+            ["git", "-C", str(repo), *args],  # noqa: S607 - fixed git executable on PATH
             capture_output=True,
             text=True,
             timeout=GIT_DEADLINE_SECONDS,

@@ -36,7 +36,7 @@ SIGN_OFF = "Signed-off-by: Plant <plant@example.invalid>"
 def git(repo: Path, *args: str) -> str:
     argv = ["git", "-C", str(repo), *args]
     try:
-        done = subprocess.run(argv, capture_output=True, text=True, timeout=DEADLINE_SECONDS)
+        done = subprocess.run(argv, capture_output=True, text=True, timeout=DEADLINE_SECONDS)  # noqa: S603 - argv list without a shell; revisions come from CI event SHAs or the operator command line
     except (OSError, subprocess.TimeoutExpired) as error:
         raise CheckError(f"{' '.join(argv)}: {error}") from error
     if done.returncode != 0:

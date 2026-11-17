@@ -53,7 +53,7 @@ def package(tree: Path, target: Path) -> tuple[int, str]:
             "--target-dir", str(target)]
     env = dict(os.environ, RUSTFLAGS="-D warnings")
     try:
-        done = subprocess.run(argv, cwd=tree, env=env, capture_output=True, text=True,
+        done = subprocess.run(argv, cwd=tree, env=env, capture_output=True, text=True,  # noqa: S603 - fixed cargo argv without a shell; the target dir is the gate scratch path
                               timeout=DEADLINE_SECONDS)
     except (OSError, subprocess.TimeoutExpired) as error:
         raise CheckError(f"{' '.join(argv)}: {error}") from error

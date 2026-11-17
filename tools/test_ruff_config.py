@@ -85,6 +85,21 @@ class RuffConfigTests(unittest.TestCase):
             run.return_value.returncode = 2
             self.assertEqual(scanners.selftest_ruff(ROOT / "ruff.toml", "ruff"), 1)
 
+    def test_scanner_main_ruff_dispatch(self):
+        with patch.object(scanners, "check_ruff", return_value=11) as check, \
+             patch.object(scanners, "selftest_ruff", return_value=12) as selftest:
+            with patch("sys.argv", ["scanners.py", "check", "ruff"]):
+                self.assertEqual(scanners.main(), 11)
+            check.assert_called_once()
+            selftest.assert_not_called()
+            with patch("sys.argv", ["scanners.py", "selftest", "ruff"]):
+                self.assertEqual(scanners.main(), 12)
+            selftest.assert_called_once()
+            with patch("sys.argv", ["scanners.py", "fetch-db", "ruff"]):
+                with self.assertRaises(SystemExit) as error:
+                    scanners.main()
+            self.assertEqual(error.exception.code, 2)
+
     def test_scanner_check_propagates_findings(self):
         with patch.object(scanners, "print_tool_version"), patch.object(scanners, "run_cmd") as run:
             run.side_effect = [subprocess.CompletedProcess([], 0, "a.py\0", ""),

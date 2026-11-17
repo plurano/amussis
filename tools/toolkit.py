@@ -97,7 +97,7 @@ def run_command(
 ) -> subprocess.CompletedProcess[str]:
     """Execute a command with timeout, raising CheckError on failure or non-zero exit."""
     try:
-        done = subprocess.run(
+        done = subprocess.run(  # noqa: S603 - argv list without a shell; every caller is a gate tool in this directory
             args,
             cwd=cwd,
             env=env,
