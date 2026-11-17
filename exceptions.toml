@@ -5,6 +5,7 @@
 # engine's list in .standards.yaml does not read. The shape is the engine's:
 # one rule, one file, a reason, and the day the exception ends, at most 90 days
 # ahead. An entry past its day excuses nothing. tools/exceptions_check.py
+# accepts an advisories list only for the vulnerability rule and
 # reads this list in `make verify`. The list moves into .standards.yaml once
 # the engine accepts repository-declared rules (cordanaLLM/praetor#1206).
 
@@ -13,3 +14,10 @@ rule = "unsafe_code"
 path = "crates/amussis-decision-wasm/src/abi.rs"
 reason = "a WebAssembly module declares its imports in an unsafe extern block and names its exports with #[unsafe(no_mangle)]; Rust has no safe spelling for either, and the file holds no unsafe block and dereferences no raw pointer"
 expires = "2027-01-09"
+
+[[exception]]
+rule = "vulnerability"
+path = "tools/semgrep/requirements.txt"
+advisories = ["CVE-2026-116684", "CVE-2026-116685", "CVE-2026-116686", "CVE-2026-59951", "CVE-2026-114603", "CVE-2026-126360"]
+reason = "semgrep 1.182.1 and 1.185.0 pin mcp==1.29.0 and opentelemetry-api~=1.37.0, preventing a lockable fix; the gate runs only offline semgrep scan, with no MCP server, inbound HTTP or traceparent parsing, so the vulnerable code is not in the execution path; MEL C, 10 days"
+expires = "2026-11-27"

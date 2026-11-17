@@ -99,3 +99,12 @@ rules:
     message: "[HISS-07] unwrap or expect outside tests risks unhandled panic. fix: handle the error or return Result."
     languages: [rust]
     severity: ERROR
+
+  # HISS-21: platform neutrality. A text stream built without newline= writes os.linesep, "\r\n" on Windows only.
+  - id: hiss-21-python-textiowrapper-newline
+    patterns:
+      - pattern: io.TextIOWrapper(...)
+      - pattern-not: io.TextIOWrapper(..., newline=$NL, ...)
+    message: "[HISS-21] TextIOWrapper without newline= writes \"\\r\\n\" on Windows and \"\\n\" elsewhere. fix: pass newline explicitly."
+    languages: [python]
+    severity: ERROR
