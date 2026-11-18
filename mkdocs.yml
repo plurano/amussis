@@ -1,0 +1,106 @@
+# SPDX-FileCopyrightText: 2026 Lusoris <lusoris@pm.me>
+# SPDX-License-Identifier: EUPL-1.2
+---
+# The documentation site of the workspace, published to GitHub Pages by
+# .github/workflows/pages.yml. It publishes the pages under docs/ and nothing
+# else; the README stays the front page on the forge. Build from the
+# repository root:
+#
+#   python -m mkdocs build --strict
+
+site_name: Amussis
+site_url: https://plurano.github.io/amussis/
+site_description: >-
+  Shared Rust crates of the Plurano framework family: a decision engine with
+  risk levels, second-person approval, a tamper-evident log and a kill switch,
+  its WebAssembly module and the Go binding that runs it without cgo.
+site_author: Lusoris
+repo_url: https://github.com/plurano/amussis
+repo_name: plurano/amussis
+edit_uri: blob/main/docs/
+copyright: Copyright &copy; 2026 Lusoris, EUPL-1.2
+
+docs_dir: docs
+site_dir: site
+
+# Build inputs that are not pages: the pinned requirements of this build and
+# the figure specs, which the figure hook renders.
+exclude_docs: |
+  requirements.in
+  requirements.txt
+  /figures/
+
+hooks:
+  - tools/figures/mkdocs_hook.py
+
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn
+
+theme:
+  name: material
+  language: en
+  palette:
+    - scheme: slate
+      primary: indigo
+      accent: cyan
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+    - scheme: default
+      primary: indigo
+      accent: cyan
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.action.edit
+    - content.code.copy
+    - toc.follow
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.inlinehilite
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/plurano/amussis
+      name: Amussis on GitHub
+
+nav:
+  - Home: index.md
+  - Verification gate: verification.md
+  - Exceptions: exceptions.md
+  - Shared settings: shared-settings.md
+  - Releases: releases.md
+  - Handover:
+      - Conversation schemas: handover/aegis-os-schemas.md
+      - Service unit: handover/aegis-os-service-unit.md
+  - Decision records:
+      - Index: adr/README.md
+      - Template: adr/0000-template.md

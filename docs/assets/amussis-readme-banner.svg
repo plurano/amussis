@@ -1,0 +1,43 @@
+<!-- SPDX-FileCopyrightText: 2026 Lusoris <lusoris@pm.me> -->
+<!-- SPDX-License-Identifier: EUPL-1.2 -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 120" width="1200" height="120" role="img" aria-label="Amussis: shared Rust crates of the Plurano framework family">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0b1020"/>
+      <stop offset="55%" stop-color="#111a35"/>
+      <stop offset="100%" stop-color="#0b1020"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#06b6d4"/>
+      <stop offset="50%" stop-color="#3b82f6"/>
+      <stop offset="100%" stop-color="#8b5cf6"/>
+    </linearGradient>
+    <linearGradient id="beam" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#06b6d4" stop-opacity="0.15"/>
+      <stop offset="50%" stop-color="#3b82f6" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#8b5cf6" stop-opacity="0.15"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="120" rx="12" fill="url(#bg)"/>
+
+  <!-- mason's leveling board / alignment beam: precision reference ticks and laser line -->
+  <g fill="none" stroke-linecap="round">
+    <path d="M780 60 L 1150 60"
+          stroke="url(#beam)" stroke-width="14"/>
+    <path d="M780 60 L 1150 60"
+          stroke="url(#accent)" stroke-width="2.5" opacity="0.95"/>
+    <path d="M780 68 L 1150 68"
+          stroke="#06b6d4" stroke-width="1.6" stroke-dasharray="6 8" opacity="0.6"/>
+    <!-- graduation tick marks for ad amussim leveling -->
+    <path d="M800 52 L 800 68 M 850 50 L 850 70 M 900 54 L 900 66 M 950 48 L 950 72 M 1000 54 L 1000 66 M 1050 50 L 1050 70 M 1100 54 L 1100 66"
+          stroke="url(#accent)" stroke-width="1.8" opacity="0.8"/>
+  </g>
+
+  <text x="44" y="74" font-family="ui-sans-serif,Segoe UI,Helvetica,Arial,sans-serif"
+        font-size="64" font-weight="700" fill="#e2e8f0" letter-spacing="-1">Amussis</text>
+  <g font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="15" fill="#94a3b8">
+    <text x="340" y="52">Shared Rust crates · Plurano framework</text>
+    <text x="340" y="76">Decision engine · WebAssembly · Go binding</text>
+  </g>
+</svg>
