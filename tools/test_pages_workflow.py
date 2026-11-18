@@ -16,6 +16,8 @@ WORKFLOW = Path(__file__).resolve().parent.parent / ".github/workflows/pages.yml
 SHARED_GROUP = "workflow concurrency must give every run outside a pull request a group of its own"
 NO_QUEUE = "deploy job must queue its runs with queue: max"
 CANCELS = "deploy job must not cancel a run in progress"
+# The only workflow-level group accepted; one group per pull request, one per run otherwise.
+RUN_GROUP = "pages-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}"
 
 
 def deploy_job(text: str) -> list[str]:
@@ -63,7 +65,7 @@ def concurrency_problems(text: str) -> list[str]:
     workflow = mapping(text.splitlines(), "concurrency:")
     deploy = mapping(deploy_job(text), "    concurrency:")
     problems = []
-    if workflow and "github.run_id" not in workflow.get("group", ""):
+    if workflow and workflow.get("group", "") != RUN_GROUP:
         problems.append(SHARED_GROUP)
     if deploy.get("queue") != "max":
         problems.append(NO_QUEUE)
@@ -182,8 +184,17 @@ class PagesWorkflowTests(unittest.TestCase):
     def test_shared_workflow_group(self):
         """A shared workflow concurrency group is rejected."""
         changed = self.text.replace(
-            "  group: pages-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}\n",
+            "  group: " + RUN_GROUP + "\n",
             "  group: pages-${{ github.ref }}\n",
+        )
+        self.assertNotEqual(changed, self.text)
+        self.assertEqual(concurrency_problems(changed), [SHARED_GROUP])
+
+    def test_reversed_workflow_group(self):
+        """A group that gives main pushes one shared group is rejected."""
+        changed = self.text.replace(
+            "  group: " + RUN_GROUP + "\n",
+            "  group: pages-${{ github.event_name == 'pull_request' && github.run_id || github.ref }}\n",
         )
         self.assertNotEqual(changed, self.text)
         self.assertEqual(concurrency_problems(changed), [SHARED_GROUP])
