@@ -62,8 +62,9 @@ Vesta) stay the operating system's names for its components.
 - Every Go block in the README is compiled and run: each stands line for line
   in `examples/go-consumer/example_test.go`, whose examples check their output.
 - `tools/wasm_module.py check` rebuilds the WebAssembly module from source and
-  compares it byte for byte with the committed module that `bindings/go`
-  embeds.
+  compares it with the committed module that `bindings/go` embeds: byte for
+  byte first, and on a Windows or macOS host whose bytes differ, up to function
+  order (see [Exceptions](https://plurano.github.io/amussis/exceptions/)).
 - `tools/third_party_notices.py` writes the third-party licence notices of the
   WebAssembly module from the lock file and the pinned toolchain, and holds the
   committed notices to them.
@@ -124,7 +125,7 @@ flowchart TD
 | `bindings/go/` | The Go module that embeds the WebAssembly module and runs it without cgo; package `decision`. |
 | `examples/go-consumer/`, `tools/readme_snippets.py` | A Go module that requires the binding as a program outside this repository does, holding every Go block of this README in examples that run; and the check that each block stands there line for line. |
 | `exceptions.toml`, `tools/exceptions_check.py` | The workspace's exceptions to its own rules, each with one rule, one file, a reason and an end date, and the check that holds every entry to what it names. |
-| `tools/wasm_module.py` | Builds the WebAssembly module and compares it byte for byte with the one `bindings/go` embeds. |
+| `tools/wasm_module.py` | Builds the WebAssembly module and compares it with the one `bindings/go` embeds: byte for byte first, up to function order on a Windows or macOS host whose bytes differ. |
 | `tools/settings_sync.py` | Holds the shared toolchain and lint settings to their recorded source. |
 | `tools/third_party_notices.py`, `tools/notices/` | Writes the notices of the WebAssembly module from the lock file and holds the committed ones to it; the standard library part per toolchain, and the planted crate of the licence check. See [Licence](#licence). |
 | `deny.toml` | The licences a crate of the locked graph may carry. |

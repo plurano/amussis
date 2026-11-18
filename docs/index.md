@@ -32,8 +32,9 @@ Vesta) stay the operating system's names for its components.
 - Every Go block in the README is compiled and run: each stands line for line
   in `examples/go-consumer/example_test.go`, whose examples check their output.
 - `tools/wasm_module.py check` rebuilds the WebAssembly module from source and
-  compares it byte for byte with the committed module that `bindings/go`
-  embeds.
+  compares it with the committed module that `bindings/go` embeds: byte for
+  byte first, and on a Windows or macOS host whose bytes differ, up to function
+  order (see [Exceptions](exceptions.md)).
 - `tools/third_party_notices.py` writes the third-party licence notices of the
   WebAssembly module from the lock file and the pinned toolchain, and holds the
   committed notices to them.

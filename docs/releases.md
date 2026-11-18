@@ -33,13 +33,14 @@ of every file name that workflow, so a file built anywhere else does not pass.
 A tag that names another version than the manifest finds no crate file of its
 name, and the run stops before anything is signed.
 
-A tag with a hyphen after the version (`v0.1.0-rc.1`) runs the same path to
+A tag with a hyphen after the version (`v0.2.0-rc.1`) runs the same path to
 prove it. Its files carry the manifest version and its draft is marked as a
 pre-release. A person publishes that draft as a pre-release, so the checks
 below can be run on it the way a consumer runs them; it stays visible and
 marked as a pre-release.
 
-To check a release after downloading its files:
+To check a release after downloading its files, name its tag in the signer
+identity and the manifest version in the crate file. For release `v0.2.0`:
 
 ```sh
 sha256sum --check --strict checksums.txt
@@ -50,6 +51,10 @@ cosign verify-blob \
 gh attestation verify amussis-decision-0.2.0.crate --repo plurano/amussis \
   --signer-workflow plurano/amussis/.github/workflows/release-build.yml
 ```
+
+For pre-release `v0.2.0-rc.1` the identity ends in `@refs/tags/v0.2.0-rc.1`,
+and the crate file is still `amussis-decision-0.2.0.crate`, because its files
+carry the manifest version.
 
 The run does the same before it stores the files (job `Read the release files
 back`). It calls the shared read-back of plurano/horistes (`tools/readback.py`,

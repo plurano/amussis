@@ -29,8 +29,11 @@ They stay in step in three places:
 A change therefore starts in the source repository and arrives here with:
 
 ```sh
-python3 tools/settings_sync.py update --source <checkout of the source repository>
+python3 tools/settings_sync.py update --source "/path/to/source-checkout"
 ```
+
+with `/path/to/source-checkout` replaced by the path of a checkout of the
+source repository.
 
 `selftest` plants one defect per setting and requires each to be refused. It
 also requires `changed` to name a changed setting and nothing else. The gate
