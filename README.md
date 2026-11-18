@@ -341,9 +341,11 @@ Limits as of this state:
   operating system or architecture has run it.
 
 The committed module is the build of the source beside it: `tools/wasm_module.py
-check` rebuilds it with the machine's paths rewritten and fails on one differing
-byte. After a change to the engine or the export crate, run
-`python3 tools/wasm_module.py update` and commit the module with the change.
+check` rebuilds it with the machine's paths rewritten. On a Linux x86_64 host
+one differing byte fails the check; a Windows or macOS host is held to the
+comparison described below. After a change to the engine or the export crate,
+run `python3 tools/wasm_module.py update` and commit the module with the
+change.
 Renovate heads receive the regenerated files as artifact `regenerated-<sha>`
 from `.github/workflows/regenerate.yml`.
 The module is the build of a Linux x86_64 host, and only such a host is held
