@@ -73,6 +73,18 @@ class MarkerTests(unittest.TestCase):
                 self.assertEqual(self.found(line(word, tail + " -- two words")), [f"f:1: {word} reason under 3 words"])
                 self.assertEqual(self.found(line(word, tail + " -- three plain words")), [])
 
+    def test_marker_later_in_comment(self):
+        """A Semgrep marker after comment prose still needs an ID and reason."""
+        self.assertEqual(self.found(f"x = 1  # explanation: {SEMGREP}"), [f"f:1: {SEMGREP} without rule id"])
+        self.assertEqual(self.found(f"x = 1  # explanation: {SEMGREP}: a.b -- {REASON}"), [])
+
+    def test_semgrep_id_separators(self):
+        """ID separators can include spaces; a dangling comma is not a reason."""
+        for ids in ("a.b,c.d", "a.b, c.d", "a.b c.d", "a.b,\tc.d"):
+            with self.subTest(ids=ids):
+                self.assertEqual(self.found(line(SEMGREP, f": {ids} -- {REASON}")), [])
+        self.assertEqual(self.found(line(SEMGREP, f": a.b, -- {REASON}")), [f"f:1: {SEMGREP} without reason"])
+
     def test_one_finding_per_marker_with_line_number(self):
         """Each refused marker gives one finding at its own line, and the text is never printed."""
         found = subject.findings("f", ["clean", line(SEC, ""), line(SEMGREP, ": a.b")])
@@ -141,12 +153,12 @@ class RepoTests(unittest.TestCase):
         stdout = io.StringIO()
         with mock.patch.object(sys, "argv", ["suppression_check", "selftest"]), contextlib.redirect_stdout(stdout):
             self.assertEqual(subject.main(), 0)
-        self.assertEqual(stdout.getvalue().strip(), "PASS: suppression selftest (4 plants refused, 2 clean cases held)")
+        self.assertEqual(stdout.getvalue().strip(), "PASS: suppression selftest (6 plants refused, 5 clean cases held)")
 
     def test_selftest_fails_when_a_plant_passes(self):
         """The selftest reports a plant the rule no longer refuses."""
         with mock.patch.object(subject, "marker_problem", return_value=None):
-            self.assertEqual(len(subject.selftest()), 4)
+            self.assertEqual(len(subject.selftest()), 6)
 
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@
 
     check [--repo DIR]   scan tracked *.py, *.sh, *.yml, *.yaml, *.toml, *.go, *.rs,
                          *.mjs, *.js files and Makefile under DIR (default: current directory)
-    selftest             plant 4 refused and 2 clean markers in a scratch repository
+    selftest             plant refused and clean markers in a scratch repository
 
 A Bandit or gosec marker (the word nosec after a comment opener) names one or more
 ids (B or G and three digits), then " -- " and a reason of at least 3 words.
@@ -36,8 +36,8 @@ OPENER = r"(?:#|//|/\*)[ \t]*"
 # Bandit ends the id list at the next comment opener, so the nosec tail does too.
 NOSEC = re.compile(OPENER + r"nosec\b(?P<tail>[^#]*)", re.IGNORECASE)
 NOSEC_IDS = re.compile(r":?[ \t]*[BG]\d{3}\b(?:[, \t]+[BG]\d{3}\b)*(?P<rest>.*)")
-NOSEMGREP = re.compile(OPENER + r"nosem(?:grep)?\b(?P<tail>.*)", re.IGNORECASE)
-SEMGREP_IDS = re.compile(r":[ \t]?[A-Za-z0-9_][\w.-]*(?:,[A-Za-z0-9_][\w.-]*)*(?P<rest>.*)")
+NOSEMGREP = re.compile(OPENER + r".*?\bnosem(?:grep)?\b(?P<tail>.*)", re.IGNORECASE)
+SEMGREP_IDS = re.compile(r":[ \t]?[A-Za-z0-9_][\w.-]*(?:[, \t]+[A-Za-z0-9_][\w.-]*)*(?P<rest>.*)")
 REASON = re.compile(r"[ \t]+--[ \t]+(?P<reason>\S.*)")
 MARKERS = (("nosec", NOSEC, NOSEC_IDS), ("nosemgrep", NOSEMGREP, SEMGREP_IDS))
 
@@ -97,9 +97,14 @@ def planted_cases() -> dict[str, tuple[str, str | None]]:
         "bare_sec": (f"x = 1  # {sec}", f"{sec} without rule id"),
         "sec_id_only": (f"x = 1  # {sec} B404", f"{sec} without reason"),
         "bare_semgrep": (f"x = 1  # {semgrep}", f"{semgrep} without rule id"),
+        "later_semgrep": (f"x = 1  # explanation: {semgrep}", f"{semgrep} without rule id"),
         "semgrep_id_only": (f"x = 1  # {semgrep}: example.rule-id", f"{semgrep} without reason"),
         "full_sec": (f"x = 1  # {sec} B404 -- fixed executable, no shell", None),
         "full_semgrep": (f"x = 1  # {semgrep}: example.rule-id -- fixed executable, no shell", None),
+        "later_full": (f"x = 1  # explanation: {semgrep}: a.b -- fixed executable, no shell", None),
+        "id_list": (f"x = 1  # {semgrep}: a.b, c.d -- fixed executable, no shell", None),
+        "id_list_compact": (f"x = 1  # {semgrep}: a.b,c.d -- fixed executable, no shell", None),
+        "id_list_dangling": (f"x = 1  # {semgrep}: a.b, -- fixed executable, no shell", f"{semgrep} without reason"),
     }
 
 
