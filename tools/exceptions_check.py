@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: EUPL-1.2
 """Hold every exception of this workspace to one named, dated entry.
 
-Three rules are read. The first is `unsafe_code`:
+Rules include `unsafe_code`:
 
 The workspace forbids unsafe code. A WebAssembly export crate cannot live under
 a forbid, so it carries its own lint tables with `unsafe_code = "deny"` and one
@@ -42,6 +42,9 @@ a non-empty list of unique CVE, GHSA or PYSEC advisory IDs. The reason and
 live entries to generate a Trivy YAML ignore file scoped to those paths.
 The `advisories` key is refused on every other rule.
 
+The `private-id` rule lists full commit hashes for tools/message_ids.py; that
+check verifies live entries against reachable history and refuses stale entries.
+
 A rule that is no longer read, such as `module-byte-comparison` (retired when
 every host came to build the module's data section, issue #2), is refused like
 any unknown rule, so its entry cannot return.
@@ -76,10 +79,11 @@ RULE = "unsafe_code"
 REPORTED = "required-check-is-reported"
 VULNERABILITY = "vulnerability"
 RUFF = "ruff"
-RULES = (RULE, REPORTED, VULNERABILITY, RUFF)
+PRIVATE_ID = "private-id"
+RULES = (RULE, REPORTED, VULNERABILITY, RUFF, PRIVATE_ID)
 RULESET = ".github/rulesets/main.json"
 # The one file each of these rules excuses.
-ONLY_FILE = {REPORTED: RULESET}
+ONLY_FILE = {REPORTED: RULESET, PRIVATE_ID: "tools/message_ids.py"}
 WORKFLOWS = ".github/workflows"
 MAX_WORKFLOWS = 64
 ENTRY_KEYS = {"rule", "path", "reason", "expires"}
@@ -126,36 +130,59 @@ def advisory_problem(advisories: object) -> str:
     return ""
 
 
+def vulnerability_fields(entry: dict) -> str:
+    """Validate vulnerability-specific fields."""
+    if not SCANNED_PATH.fullmatch(entry["path"]):
+        return "vulnerability path must contain only letters, digits, dots, underscores, hyphens and slashes"
+    return advisory_problem(entry["advisories"])
+
+
+def ruff_fields(entry: dict) -> str:
+    """Validate the Ruff code list."""
+    codes = entry["codes"]
+    if not isinstance(codes, list) or not codes:
+        return "codes must be a non-empty list"
+    if any(not isinstance(code, str) or not re.fullmatch(r"[A-Z]+[0-9]+", code) for code in codes):
+        return "every code must be a Ruff rule code"
+    if len(set(codes)) != len(codes):
+        return "codes must be unique"
+    return ""
+
+
+def private_id_fields(entry: dict) -> str:
+    """Validate the exact commit hashes in a private ID exception."""
+    commits = entry["commits"]
+    if not isinstance(commits, list) or not commits:
+        return "commits must be a non-empty list"
+    if any(not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha) for sha in commits):
+        return "every commit must be a 40-character lowercase hex hash"
+    if len(set(commits)) != len(commits):
+        return "commits must be unique"
+    return ""
+
+
+EXTRA_FIELDS = {VULNERABILITY: ("advisories", vulnerability_fields), RUFF: ("codes", ruff_fields),
+                PRIVATE_ID: ("commits", private_id_fields)}
+
+
 def entry_problem(root: Path, entry: object, today: datetime.date) -> str:
     """Why one entry cannot be applied as written, or the empty string."""
     if not isinstance(entry, dict):
         return "must be an exception table"
-    keys = ENTRY_KEYS | {"advisories"} if entry.get("rule") == VULNERABILITY else ENTRY_KEYS
-    if entry.get("rule") == RUFF:
-        keys = ENTRY_KEYS | {"codes"}
+    if any(key in entry and not isinstance(entry[key], str) for key in ENTRY_KEYS):
+        return "rule, path, reason and expires must be strings"
+    extra = EXTRA_FIELDS.get(entry.get("rule"))
+    keys = ENTRY_KEYS | {extra[0]} if extra else ENTRY_KEYS
     if set(entry) != keys:
         return f"must hold exactly the keys {sorted(keys)}"
-    if any(not isinstance(entry[key], str) for key in ENTRY_KEYS):
-        return "rule, path, reason and expires must be strings"
     if entry["rule"] not in RULES:
         return f"rule {entry['rule']!r} is not a rule this check reads (known: {list(RULES)})"
     path = Path(entry["path"])
     if path.is_absolute() or ".." in path.parts or path.as_posix() != entry["path"]:
         return f"path {entry['path']!r} must be one clean path below the repository root"
-    if entry["rule"] == VULNERABILITY:
-        if not SCANNED_PATH.fullmatch(entry["path"]):
-            return "vulnerability path must contain only letters, digits, dots, underscores, hyphens and slashes"
-        problem = advisory_problem(entry["advisories"])
-        if problem:
-            return problem
-    if entry["rule"] == RUFF:
-        codes = entry["codes"]
-        if not isinstance(codes, list) or not codes:
-            return "codes must be a non-empty list"
-        if any(not isinstance(code, str) or not re.fullmatch(r"[A-Z]+[0-9]+", code) for code in codes):
-            return "every code must be a Ruff rule code"
-        if len(set(codes)) != len(codes):
-            return "codes must be unique"
+    problem = extra[1](entry) if extra else ""
+    if problem:
+        return problem
     if not (root / path).is_file():
         return f"path {entry['path']!r} names no file"
     only = ONLY_FILE.get(entry["rule"], entry["path"])
@@ -716,7 +743,7 @@ def copy_exceptions_tree(root: Path, tree: Path, end: datetime.date) -> None:
         shutil.copytree(root / top, tree / top, ignore=shutil.ignore_patterns("target"))
     by_key, _ = load_entries(root, end)
     for (rule, name) in by_key:
-        if rule in (VULNERABILITY, RUFF) and not (tree / name).is_file():
+        if rule in (VULNERABILITY, RUFF, PRIVATE_ID) and not (tree / name).is_file():
             (tree / name).parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(root / name, tree / name)
     plant_caller(tree, end)
@@ -786,6 +813,11 @@ def vulnerability_selftest(root: Path, today: datetime.date) -> list[str]:
 def selftest(root: Path, today: datetime.date) -> list[str]:
     """Each plant must be refused, and for the reason it was planted for."""
     failures = vulnerability_selftest(root, today)
+    entry = {"rule": PRIVATE_ID, "path": "tools/message_ids.py", "reason": "plant",
+             "expires": str(today), "commits": ["a" * 40]}
+    for value in ("a" * 40, ["a" * 7], ["a" * 40, "a" * 40]):
+        if not entry_problem(root, entry | {"commits": value}, today):
+            failures.append("private-id invalid commits accepted")
     failures.extend(f"the unplanted tree is refused: {line}" for line in check(root, today))
     ends = sorted(set(EXPIRES.findall(read_text(root / LIST))))
     if not ends:

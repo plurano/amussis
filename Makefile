@@ -29,7 +29,7 @@ export npm_config_offline := true
 
 .PHONY: verify verify-settings verify-exceptions verify-origin verify-rust verify-package verify-wasm verify-regenerate verify-go
 .PHONY: verify-go-lint verify-readme
-.PHONY: verify-notices verify-licences verify-reuse verify-secrets verify-signoff fetch
+.PHONY: verify-notices verify-licences verify-reuse verify-secrets verify-signoff verify-message-ids fetch
 .PHONY: verify-ruff verify-semgrep verify-trivy verify-tools verify-semver
 .PHONY: verify-engine-plants verify-api-plant verify-hook-scripts verify-codacy
 
@@ -43,7 +43,7 @@ verify-all: verify verify-engine-plants
 
 # This workspace's own checks; they need no engine.
 verify: verify-settings verify-exceptions verify-origin verify-rust verify-package verify-wasm verify-regenerate verify-go \
-		verify-go-lint verify-readme verify-notices verify-licences verify-reuse verify-secrets verify-signoff \
+		verify-go-lint verify-readme verify-notices verify-licences verify-reuse verify-secrets verify-signoff verify-message-ids \
 		verify-tools verify-ruff verify-semgrep verify-trivy verify-semver verify-codacy
 	@printf '%s\n' 'PASS: settings, exceptions, origin names, crate gate, packed crate, module, Go binding,' \
 		'Go linter, README Go blocks, third-party notices, dependency licences, licence headers, secrets,' \
@@ -256,6 +256,15 @@ verify-secrets:
 # range to pass.
 verify-signoff:
 	python3 -B tools/signoff_check.py selftest
+
+# Private plan identifiers must stay out of public messages and history.
+# The selftest plants synthetic identifiers before checking history.
+# The suppression check refuses an analyser excuse without a rule id and a reason.
+verify-message-ids:
+	python3 -B tools/message_ids.py selftest
+	python3 -B tools/message_ids.py check-history
+	python3 -B tools/suppression_check.py selftest
+	python3 -B tools/suppression_check.py check
 
 # Scanner tool unit tests verify cache handling and download safety.
 verify-tools:

@@ -1,0 +1,39 @@
+# SPDX-FileCopyrightText: 2026 Lusoris <lusoris@pm.me>
+# SPDX-License-Identifier: EUPL-1.2
+name: Pull request text
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+permissions:
+  contents: read
+jobs:
+  pr-text:
+    name: Pull request text
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Stop on a draft pull request
+        if: github.event.pull_request.draft == true
+        env:
+          TITLE: Gate not run on a draft
+          MESSAGE: The gate did not run because the pull request is a draft.
+        run: |
+          echo "::error title=$TITLE::$MESSAGE"
+          echo "$MESSAGE" >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+          update-environment: false
+      - name: Check pull request text and commits
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python3 -B tools/message_ids.py check-event "$GITHUB_EVENT_PATH"
+          python3 -B tools/message_ids.py check-range --base "$BASE_SHA" --head "$HEAD_SHA"

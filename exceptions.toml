@@ -28,3 +28,10 @@ path = ".config/lefthook/scripts/common.py"
 codes = ["S603", "S607"]
 reason = "engine-rendered hook runner held byte-equal to the pinned engine source; it starts argv lists without a shell from fixed executable names; the finding goes to the engine; MEL C, 10 days"
 expires = "2026-11-27"
+
+[[exception]]
+rule = "private-id"
+path = "tools/message_ids.py"
+commits = ["00f77393a3a49f0fe79420067b86481324f55866", "7de163a9c0971926771197c8fde0d2ff069740a7"]
+expires = "2027-02-15"
+reason = "two squash bodies on main name plan ids; rewriting main history would force-push the protected branch, so they stay; MEL D (120 days), held to this list's 90-day cap"
