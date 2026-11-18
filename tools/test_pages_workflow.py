@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: 2026 Lusoris <lusoris@pm.me>
 # SPDX-License-Identifier: EUPL-1.2
-"""Verify that Pages deploys only the current main commit."""
+"""Verify the current main commit deploys and no run replaces another pending deploy."""
 
 import re
 import sys
@@ -13,6 +13,15 @@ from exceptions_check import scalar
 from toolkit import CheckError
 
 WORKFLOW = Path(__file__).resolve().parent.parent / ".github/workflows/pages.yml"
+SHARED_GROUP = "workflow concurrency must give every run outside a pull request a group of its own"
+NO_QUEUE = "deploy job must queue its runs with queue: max"
+CANCELS = "deploy job must not cancel a run in progress"
+# The only workflow-level group accepted; one group per pull request, one per run otherwise.
+RUN_GROUP = "pages-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}"
+# The one concurrency group every deploy job run waits in.
+DEPLOY_GROUP = "pages-deploy"
+# Problem text reported when the deploy job uses any other concurrency group.
+SPLIT_QUEUE = "deploy job must wait in the one group pages-deploy"
 
 
 def deploy_job(text: str) -> list[str]:
@@ -34,6 +43,41 @@ def deploy_job(text: str) -> list[str]:
     if not found:
         raise CheckError("workflow has no deploy job")
     return lines
+
+
+def mapping(lines: list[str], header: str) -> dict[str, str]:
+    """Read the first flat mapping at the given exact header."""
+    result = {}
+    found = False
+    indent = len(header) - len(header.lstrip()) + 2
+    for line in lines:
+        if not found:
+            found = line.rstrip() == header
+            continue
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        match = re.match(r"^ {" + str(indent) + r"}([\w-]+):(?:\s+(.*))?$", line)
+        if not match:
+            break
+        key, value = match.groups()
+        result[key] = scalar(value) if value else ""
+    return result
+
+
+def concurrency_problems(text: str) -> list[str]:
+    """Report concurrency that lets one run replace the pending deploy of another."""
+    workflow = mapping(text.splitlines(), "concurrency:")
+    deploy = mapping(deploy_job(text), "    concurrency:")
+    problems = []
+    if workflow.get("group", "") != RUN_GROUP:
+        problems.append(SHARED_GROUP)
+    if deploy.get("group") != DEPLOY_GROUP:
+        problems.append(SPLIT_QUEUE)
+    if deploy.get("queue") != "max":
+        problems.append(NO_QUEUE)
+    if "cancel-in-progress" in deploy and deploy["cancel-in-progress"] != "false":
+        problems.append(CANCELS)
+    return problems
 
 
 def step_values(lines: list[str]) -> list[dict[str, str]]:
@@ -141,6 +185,77 @@ class PagesWorkflowTests(unittest.TestCase):
         """The committed workflow has no deployment guard problems."""
         self.assertEqual(deploy_problems(self.text), [])
         self.assertEqual(push_problems(self.text), [])
+        self.assertEqual(concurrency_problems(self.text), [])
+
+    def test_shared_workflow_group(self):
+        """A shared workflow concurrency group is rejected."""
+        changed = self.text.replace(
+            "  group: " + RUN_GROUP + "\n",
+            "  group: pages-${{ github.ref }}\n",
+        )
+        self.assertNotEqual(changed, self.text)
+        self.assertEqual(concurrency_problems(changed), [SHARED_GROUP])
+
+    def test_reversed_workflow_group(self):
+        """A group that gives main pushes one shared group is rejected."""
+        changed = self.text.replace(
+            "  group: " + RUN_GROUP + "\n",
+            "  group: pages-${{ github.event_name == 'pull_request' && github.run_id || github.ref }}\n",
+        )
+        self.assertNotEqual(changed, self.text)
+        self.assertEqual(concurrency_problems(changed), [SHARED_GROUP])
+
+    def test_scalar_workflow_group(self):
+        """A scalar workflow group shared by main pushes is rejected."""
+        changed = self.text.replace(
+            "concurrency:\n  group: " + RUN_GROUP + "\n",
+            "concurrency: pages-${{ github.ref }}\n",
+        )
+        self.assertNotEqual(changed, self.text)
+        self.assertEqual(concurrency_problems(changed), [SHARED_GROUP])
+
+    def test_workflow_concurrency_missing(self):
+        """A workflow without its concurrency block is rejected."""
+        changed = self.text.replace(
+            "concurrency:\n  group: " + RUN_GROUP + "\n"
+            "  cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n",
+            "",
+        )
+        self.assertNotEqual(changed, self.text)
+        self.assertEqual(concurrency_problems(changed), [SHARED_GROUP])
+
+    def test_deploy_group_per_run(self):
+        """A deploy group of its own per run is rejected."""
+        changed = self.text.replace(
+            "      group: pages-deploy\n",
+            "      group: pages-${{ github.run_id }}\n",
+        )
+        self.assertNotEqual(changed, self.text)
+        self.assertEqual(concurrency_problems(changed), [SPLIT_QUEUE])
+
+    def test_deploy_queue_missing(self):
+        """A deploy concurrency group without a queue is rejected."""
+        changed = self.text.replace("      queue: max\n", "")
+        self.assertNotEqual(changed, self.text)
+        self.assertEqual(concurrency_problems(changed), [NO_QUEUE])
+
+    def test_deploy_queue_single(self):
+        """A deploy queue that replaces pending runs is rejected."""
+        changed = self.text.replace("      queue: max\n", "      queue: single\n")
+        self.assertNotEqual(changed, self.text)
+        self.assertEqual(concurrency_problems(changed), [NO_QUEUE])
+
+    def test_deploy_concurrency_missing(self):
+        """A deploy job without concurrency is rejected."""
+        changed = self.text.replace("    concurrency:\n      group: pages-deploy\n      queue: max\n", "")
+        self.assertNotEqual(changed, self.text)
+        self.assertEqual(concurrency_problems(changed), [SPLIT_QUEUE, NO_QUEUE])
+
+    def test_deploy_cancels(self):
+        """A deploy job that cancels runs in progress is rejected."""
+        changed = self.text.replace("      queue: max\n", "      queue: max\n      cancel-in-progress: true\n")
+        self.assertNotEqual(changed, self.text)
+        self.assertEqual(concurrency_problems(changed), [CANCELS])
 
     def test_push_paths(self):
         """A push path filter is rejected."""

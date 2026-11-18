@@ -24,8 +24,11 @@ on:
 permissions:
   contents: read
 
+# A pull request keeps only its newest build. Every other run gets a group of
+# its own here so no build replaces another, and the deploy job below queues
+# the deploys on main.
 concurrency:
-  group: pages-${{ github.ref }}
+  group: pages-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -81,6 +84,13 @@ jobs:
     needs: build
     runs-on: ubuntu-26.04
     timeout-minutes: 10
+    # Deploys wait in first-in-first-out order and none replaces another, so a
+    # run that reaches the queue late cannot cancel the pending run of the
+    # current main commit; "Stop when main has moved on" then skips every run
+    # whose commit is no longer the head of main.
+    concurrency:
+      group: pages-deploy
+      queue: max
     permissions:
       contents: read
       pages: write
