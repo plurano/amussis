@@ -92,6 +92,42 @@ def deploy_problems(text: str) -> list[str]:
     return problems
 
 
+def push_trigger(text: str) -> list[str]:
+    """Return the stripped lines of the push trigger inside the on block."""
+    in_on, in_push, found = False, False, False
+    lines = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip())
+        if indent == 0:
+            if in_on:
+                break
+            in_on = line == "on:"
+        elif in_on and indent <= 2:
+            if in_push:
+                break
+            in_push = line == "  push:"
+            found = found or in_push
+        elif in_push:
+            lines.append(stripped)
+    if not found:
+        raise CheckError("workflow has no push trigger in on block")
+    return lines
+
+
+def push_problems(text: str) -> list[str]:
+    """Report deviations from the required push trigger."""
+    lines = push_trigger(text)
+    problems = []
+    if any(line.startswith(("paths:", "paths-ignore:")) for line in lines):
+        problems.append("push trigger must not filter paths")
+    if "branches: [main]" not in lines:
+        problems.append("push trigger must name the main branch")
+    return problems
+
+
 class PagesWorkflowTests(unittest.TestCase):
     """Check the Pages deployment workflow and its guards."""
 
@@ -104,6 +140,26 @@ class PagesWorkflowTests(unittest.TestCase):
     def test_committed_workflow(self):
         """The committed workflow has no deployment guard problems."""
         self.assertEqual(deploy_problems(self.text), [])
+        self.assertEqual(push_problems(self.text), [])
+
+    def test_push_paths(self):
+        """A push path filter is rejected."""
+        changed = self.text.replace("    branches: [main]\n", "    branches: [main]\n    paths:\n      - \"docs/**\"\n")
+        self.assertTrue(push_problems(changed))
+
+    def test_push_paths_ignore(self):
+        """A push paths-ignore filter is rejected."""
+        changed = self.text.replace("    branches: [main]\n", "    branches: [main]\n    paths-ignore:\n      - \"src/**\"\n")
+        self.assertTrue(push_problems(changed))
+
+    def test_push_branch_missing(self):
+        """A push trigger without the main branch is rejected."""
+        self.assertTrue(push_problems(self.text.replace("    branches: [main]\n", "")))
+
+    def test_push_missing(self):
+        """A workflow without a push trigger raises an error."""
+        with self.assertRaises(CheckError):
+            push_problems("on:\n  workflow_dispatch:\njobs:\n")
 
     def test_missing_if(self):
         """A deploy step without its condition is rejected."""

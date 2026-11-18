@@ -12,13 +12,12 @@ on:
   # in a page shows up before the merge and not on the next deploy.
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+  # Every push to main builds and deploys, whatever it touches. The deploy
+  # job publishes a run only while its commit is still the head of main, so
+  # with a path filter a later push that changes no page would stop the run
+  # of an earlier page change from deploying and start no run of its own.
   push:
     branches: [main]
-    paths:
-      - "docs/**"
-      - "mkdocs.yml"
-      - "tools/figures/**"
-      - ".github/workflows/pages.yml"
   workflow_dispatch:
 
 # Read-only by default; the deploy job raises exactly what Pages needs.
