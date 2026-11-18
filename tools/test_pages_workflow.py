@@ -93,42 +93,54 @@ def deploy_problems(text: str) -> list[str]:
 
 
 class PagesWorkflowTests(unittest.TestCase):
+    """Check the Pages deployment workflow and its guards."""
+
     def setUp(self):
+        """Load the workflow and locate its head and deploy steps."""
         self.text = WORKFLOW.read_text(encoding="utf-8")
         self.head = self.text.index("      - name: Stop when main has moved on")
         self.deploy = self.text.index("      - name: Deploy\n", self.head)
 
     def test_committed_workflow(self):
+        """The committed workflow has no deployment guard problems."""
         self.assertEqual(deploy_problems(self.text), [])
 
     def test_missing_if(self):
+        """A deploy step without its condition is rejected."""
         self.assertTrue(deploy_problems(self.text.replace("        if: steps.head.outputs.current == 'true'\n", "")))
 
     def test_widened_if(self):
+        """A deploy condition widened with always is rejected."""
         self.assertTrue(deploy_problems(self.text.replace("steps.head.outputs.current == 'true'\n",
                                                           "steps.head.outputs.current == 'true' || always()\n")))
 
     def test_head_after_deploy(self):
+        """A head check after deployment is rejected."""
         changed = self.text[:self.head] + self.text[self.deploy:] + "\n" + self.text[self.head:self.deploy]
         self.assertTrue(deploy_problems(changed))
 
     def test_head_missing(self):
+        """A missing head check is rejected."""
         self.assertTrue(deploy_problems(self.text[:self.head] + self.text[self.deploy:]))
 
     def test_timeout_missing(self):
+        """A head check without a remote query timeout is rejected."""
         self.assertTrue(deploy_problems(self.text.replace("timeout 60 git ls-remote", "git ls-remote")))
 
     def test_duplicate_steps(self):
+        """Duplicate head or deploy steps are rejected."""
         head = self.text[self.head:self.deploy]
         deploy = self.text[self.deploy:]
         self.assertTrue(deploy_problems(self.text[:self.deploy] + head + deploy))
         self.assertTrue(deploy_problems(self.text + "\n" + deploy))
 
     def test_steps_missing(self):
+        """A deploy job without steps raises an error."""
         with self.assertRaises(CheckError):
             deploy_steps("jobs:\n  deploy:\n    runs-on: ubuntu\n")
 
     def test_deploy_job_missing(self):
+        """A workflow without a deploy job raises an error."""
         with self.assertRaises(CheckError):
             deploy_steps("jobs:\n  build:\n    steps:\n")
 
