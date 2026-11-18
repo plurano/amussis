@@ -90,6 +90,29 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      # An older run can reach the group late; it must not replace a site
+      # already deployed by a newer run.
+      - name: Stop when main has moved on
+        id: head
+        shell: bash
+        env:
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          remote=$(timeout 60 git ls-remote "https://github.com/${REPO}.git" refs/heads/main)
+          head=${remote%%[[:space:]]*}
+          if [[ -z "$head" ]]; then
+            echo "::error::Could not read the head of main"
+            exit 1
+          fi
+          if [[ "$head" == "$SHA" ]]; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "current=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Run commit $SHA is not the current main commit $head"
+          fi
+
       - name: Deploy
+        if: steps.head.outputs.current == 'true'
         id: deployment
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

@@ -8,8 +8,8 @@ SPDX-License-Identifier: EUPL-1.2
 Shared Rust crates of the Plurano framework family, kept in one workspace.
 `crates/amussis-decision` is the decision engine, imported with its history
 from the operating-system repository (`aegis-justitia`).
-`crates/amussis-decision-wasm` is the WebAssembly module (five exports,
-three host functions: clock, signer, sink), and `bindings/go`
+`crates/amussis-decision-wasm` is the WebAssembly module (eight exported
+functions, three host functions: clock, signer, sink), and `bindings/go`
 (`package decision`) runs it without cgo.
 
 ## Name
@@ -48,7 +48,7 @@ flowchart TD
 
   rust["Rust program"]:::input
   engine["amussis-decision<br/>decision engine"]:::decide
-  wasm["amussis-decision-wasm<br/>wasm32 module, five exports"]:::step
+  wasm["amussis-decision-wasm<br/>wasm32 module, eight exported functions"]:::step
   host["Host supplies<br/>Clock, Signer, Sink"]:::input
   gobind["bindings/go<br/>package decision, embedded module"]:::step
   wazero["wazero runtime<br/>runs in process, no cgo"]:::step

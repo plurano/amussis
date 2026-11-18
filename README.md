@@ -36,8 +36,8 @@
 Shared Rust crates of the Plurano framework family, kept in one workspace.
 `crates/amussis-decision` is the decision engine, imported with its history
 from the operating-system repository (`aegis-justitia`).
-`crates/amussis-decision-wasm` is the WebAssembly module (five exports,
-three host functions: clock, signer, sink), and `bindings/go`
+`crates/amussis-decision-wasm` is the WebAssembly module (eight exported
+functions, three host functions: clock, signer, sink), and `bindings/go`
 (`package decision`) runs it without cgo.
 
 **[Documentation](https://plurano.github.io/amussis/)** · [Documentation source](docs/index.md)
@@ -101,7 +101,7 @@ flowchart TD
 
   rust["Rust program"]:::input
   engine["amussis-decision<br/>decision engine"]:::decide
-  wasm["amussis-decision-wasm<br/>wasm32 module, five exports"]:::step
+  wasm["amussis-decision-wasm<br/>wasm32 module, eight exported functions"]:::step
   host["Host supplies<br/>Clock, Signer, Sink"]:::input
   gobind["bindings/go<br/>package decision, embedded module"]:::step
   wazero["wazero runtime<br/>runs in process, no cgo"]:::step
@@ -121,7 +121,7 @@ flowchart TD
 | :--- | :--- |
 | `crates/` | One directory per library crate; each joins the workspace by a written-out line in `Cargo.toml`. |
 | `crates/amussis-decision/` | The decision engine, imported with its history from the operating-system repository, where it is the crate `aegis-justitia`. |
-| `crates/amussis-decision-wasm/` | The decision engine as a WebAssembly module: five exports, three host functions (clock, signer, sink). |
+| `crates/amussis-decision-wasm/` | The decision engine as a WebAssembly module: eight exported functions, three host functions (clock, signer, sink). |
 | `bindings/go/` | The Go module that embeds the WebAssembly module and runs it without cgo; package `decision`. |
 | `examples/go-consumer/`, `tools/readme_snippets.py` | A Go module that requires the binding as a program outside this repository does, holding every Go block of this README in examples that run; and the check that each block stands there line for line. |
 | `exceptions.toml`, `tools/exceptions_check.py` | The workspace's exceptions to its own rules, each with one rule, one file, a reason and an end date, and the check that holds every entry to what it names. |
