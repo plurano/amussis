@@ -24,6 +24,8 @@ path = [
     "tools/semgrep/requirements.txt",
     "tools/ruff/requirements.in",
     "tools/ruff/requirements.txt",
+    "docs/requirements.in",
+    "docs/requirements.txt",
     ".node-version",
 ]
 precedence = "aggregate"

@@ -1,34 +1,46 @@
-# Amussis
+<!-- markdownlint-disable MD013 MD023 MD033 MD036 MD041 -->
+<!-- A centred header needs inline HTML, a banner image, indented headings and
+     badge lines past 80 columns, so those five rules are off for this file.
+     The prose below still wraps at 80. -->
+<div align="center">
 
-<!-- praetor:readme-governance:start -->
-[![HISS Adopted][praetor-hiss-badge]][praetor-hiss-agents]
-[![Documentation Governance][praetor-docs-badge]][praetor-docs-runs]
+  <img src="docs/assets/amussis-readme-banner.svg" alt="Amussis: shared Rust crates of the Plurano framework family" height="120" />
 
-Praetor manages this repository's declared governance policy. This managed
-block records adoption state; it is not a verification certificate.
+  <!-- badge block: one group, fixed order -->
+  <!-- 1 release/version -->
+  [![Release](https://img.shields.io/github/v/release/plurano/amussis?style=for-the-badge&labelColor=111a35&color=3b82f6&label=release)](https://github.com/plurano/amussis/releases)
+  <!-- 2 CI/build -->
+  [![Verification gate](https://img.shields.io/github/actions/workflow/status/plurano/amussis/ci.yml?branch=main&event=push&style=for-the-badge&labelColor=111a35&label=Verification%20gate)](https://github.com/plurano/amussis/actions/workflows/ci.yml)
+  [![Praetor API Compatibility](https://img.shields.io/github/actions/workflow/status/plurano/amussis/praetor-api.yml?branch=main&event=push&style=for-the-badge&labelColor=111a35&label=API%20compatibility)](https://github.com/plurano/amussis/actions/workflows/praetor-api.yml)
+  [![REUSE](https://img.shields.io/github/actions/workflow/status/plurano/amussis/reuse.yml?branch=main&event=push&style=for-the-badge&labelColor=111a35&label=REUSE)](https://github.com/plurano/amussis/actions/workflows/reuse.yml)
+  [![Documentation site](https://img.shields.io/github/actions/workflow/status/plurano/amussis/pages.yml?branch=main&event=push&style=for-the-badge&labelColor=111a35&label=Documentation%20site)](https://github.com/plurano/amussis/actions/workflows/pages.yml)
+  <!-- 3 security/scorecard -->
+  [![Codacy](https://img.shields.io/badge/Analysis-Codacy-8b5cf6?style=for-the-badge&logo=codacy&logoColor=white&labelColor=111a35)](https://app.codacy.com/gh/plurano/amussis/dashboard)
+  [![CodeRabbit](https://img.shields.io/badge/Reviews-CodeRabbit-8b5cf6?style=for-the-badge&logo=coderabbit&logoColor=white&labelColor=111a35)](https://coderabbit.ai)
+  <!-- 4 standards -->
+  [![HISS-21](https://img.shields.io/badge/Standards-HISS--21-06b6d4?style=for-the-badge&logo=nasa&labelColor=111a35)](AGENTS.md)
+  [![Power of 10](https://img.shields.io/badge/NASA_JPL-Power_of_10-3b82f6?style=for-the-badge&logo=nasa&labelColor=111a35)](CONTRIBUTING.md#modernized-nasa-jpl-power-of-10-rules)
+  [![Conventional Commits](https://img.shields.io/badge/Commits-Conventional-8b5cf6?style=for-the-badge&logo=conventionalcommits&logoColor=white&labelColor=111a35)](CONTRIBUTING.md#commit-messages)
+  <!-- 5 licence -->
+  [![Licence](https://img.shields.io/badge/Licence-EUPL--1.2_·_module_MIT_·_Unicode--3.0-3b82f6?style=for-the-badge&labelColor=111a35)](#licence)
+  <!-- 6 support -->
+  [![GitHub Sponsors](https://img.shields.io/badge/Sponsor-GitHub-8b5cf6?style=for-the-badge&logo=githubsponsors&logoColor=white&labelColor=111a35)](https://github.com/sponsors/lusoris)
+  [![Ko-fi](https://img.shields.io/badge/Support-Ko--fi-8b5cf6?style=for-the-badge&logo=kofi&logoColor=white&labelColor=111a35)](https://ko-fi.com/lusoris)
 
-**Verification**: `make verify-all` runs the repository's configured
-verification cascade.
+  **One decision engine for Rust and Go programs**
 
-**HISS Audit**: `praetorctl audit` enforces policy, generated-surface
-integrity, and the debt ratchet.
+  *Risk levels, second-person approval, a tamper-evident log and a kill switch*
 
-**Context Sync**: `praetorctl compile-context --verify` verifies every
-generated agent context against `AGENTS.md`.
-
-**Documentation**: `make docs-lint` enforces locked Markdown style and the
-private scratch-link policy.
-
-**Debt Baseline**: `.standards-baseline.json` anchors the debt ratchet at
-1 recorded infraction; audit forbids growth.
-
-[praetor-hiss-badge]: https://img.shields.io/badge/Standards-HISS%20Adopted%20(1%20baselined)-yellow
-[praetor-hiss-agents]: https://github.com/plurano/amussis/blob/HEAD/AGENTS.md
-[praetor-docs-badge]: https://github.com/plurano/amussis/actions/workflows/praetor-docs.yml/badge.svg
-[praetor-docs-runs]: https://github.com/plurano/amussis/actions/workflows/praetor-docs.yml
-<!-- praetor:readme-governance:end -->
+</div>
 
 Shared Rust crates of the Plurano framework family, kept in one workspace.
+`crates/amussis-decision` is the decision engine, imported with its history
+from the operating-system repository (`aegis-justitia`).
+`crates/amussis-decision-wasm` is the WebAssembly module (eight exported
+functions, three host functions: clock, signer, sink), and `bindings/go`
+(`package decision`) runs it without cgo.
+
+**[Documentation](https://plurano.github.io/amussis/)** · [Documentation source](docs/index.md)
 
 ## Name
 
@@ -39,27 +51,81 @@ A crate is named after what it does, with the family name in front:
 `amussis-decision` is the decision engine. The deity names (Justitia, Minerva,
 Vesta) stay the operating system's names for its components.
 
-## Status
+## Why Amussis
 
-Public since 2026-10-11. The first release,
-[`v0.1.0`](https://github.com/plurano/amussis/releases/tag/v0.1.0), brought a
-decision engine (risk levels, second-person approval, tamper-evident log, kill
-switch) here from the operating-system repository; its files are on the forge
-only. From [`v0.2.0`](https://github.com/plurano/amussis/releases/tag/v0.2.0)
-on, publishing a release also publishes both crates to crates.io and tags the
-Go module; see [Releases](#releases).
+- The same decision engine serves Rust (`amussis-decision`) and Go
+  (`bindings/go`), where the WebAssembly module is embedded and run in the
+  process with wazero: no cgo, no shared library and no Rust toolchain for the
+  consumer.
+- The WebAssembly module has no access to the operating system and asks the
+  host for three effects only: `Clock`, `Signer` and `Sink`.
+- Every Go block in the README is compiled and run: each stands line for line
+  in `examples/go-consumer/example_test.go`, whose examples check their output.
+- `tools/wasm_module.py check` rebuilds the WebAssembly module from source and
+  compares it with the committed module that `bindings/go` embeds: byte for
+  byte first, and on a Windows or macOS host whose bytes differ, up to function
+  order (see [Exceptions](https://plurano.github.io/amussis/exceptions/)).
+- `tools/third_party_notices.py` writes the third-party licence notices of the
+  WebAssembly module from the lock file and the pinned toolchain, and holds the
+  committed notices to them.
 
-## Layout
+## Get started
+
+### Rust
+
+From `v0.2.0` on, `amussis-decision` is published to crates.io:
+
+```sh
+cargo add amussis-decision
+```
+
+### Go
+
+Publishing a release tags `bindings/go/v<version>` for the Go module:
+
+```sh
+go get github.com/plurano/amussis/bindings/go@v0.2.0
+```
+
+See [Go binding](#go-binding) below for configuration, continuation,
+adjudication and halt handling.
+
+## At a glance
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {'fontFamily': 'ui-sans-serif, Segoe UI, Helvetica, Arial, sans-serif', 'fontSize': '15px', 'primaryColor': '#111a35', 'primaryTextColor': '#e2e8f0', 'primaryBorderColor': '#3b82f6', 'lineColor': '#3b82f6', 'edgeLabelBackground': '#111a35', 'tertiaryColor': '#0b1020'}}}%%
+flowchart TD
+  classDef input fill:#0b1020,stroke:#06b6d4,stroke-width:2px,color:#e2e8f0
+  classDef step fill:#111a35,stroke:#3b82f6,stroke-width:2px,color:#e2e8f0
+  classDef decide fill:#111a35,stroke:#8b5cf6,stroke-width:2px,color:#e2e8f0
+
+  rust["Rust program"]:::input
+  engine["amussis-decision<br/>decision engine"]:::decide
+  wasm["amussis-decision-wasm<br/>wasm32 module, eight exported functions"]:::step
+  host["Host supplies<br/>Clock, Signer, Sink"]:::input
+  gobind["bindings/go<br/>package decision, embedded module"]:::step
+  wazero["wazero runtime<br/>runs in process, no cgo"]:::step
+  goprog["Go program"]:::input
+  sink["Sink<br/>signed records, audit chain"]:::decide
+
+  rust --> engine
+  engine --> wasm
+  host --> wasm
+  wasm --> gobind
+  gobind --> wazero
+  wazero --> goprog
+  wasm -->|signed records| sink
+```
 
 | Path | Holds |
 | :--- | :--- |
 | `crates/` | One directory per library crate; each joins the workspace by a written-out line in `Cargo.toml`. |
 | `crates/amussis-decision/` | The decision engine, imported with its history from the operating-system repository, where it is the crate `aegis-justitia`. |
-| `crates/amussis-decision-wasm/` | The decision engine as a WebAssembly module: five exports, three host functions (clock, signer, sink). |
+| `crates/amussis-decision-wasm/` | The decision engine as a WebAssembly module: eight exported functions, three host functions (clock, signer, sink). |
 | `bindings/go/` | The Go module that embeds the WebAssembly module and runs it without cgo; package `decision`. |
 | `examples/go-consumer/`, `tools/readme_snippets.py` | A Go module that requires the binding as a program outside this repository does, holding every Go block of this README in examples that run; and the check that each block stands there line for line. |
 | `exceptions.toml`, `tools/exceptions_check.py` | The workspace's exceptions to its own rules, each with one rule, one file, a reason and an end date, and the check that holds every entry to what it names. |
-| `tools/wasm_module.py` | Builds the WebAssembly module and compares it byte for byte with the one `bindings/go` embeds. |
+| `tools/wasm_module.py` | Builds the WebAssembly module and compares it with the one `bindings/go` embeds: byte for byte first, up to function order on a Windows or macOS host whose bytes differ. |
 | `tools/settings_sync.py` | Holds the shared toolchain and lint settings to their recorded source. |
 | `tools/third_party_notices.py`, `tools/notices/` | Writes the notices of the WebAssembly module from the lock file and holds the committed ones to it; the standard library part per toolchain, and the planted crate of the licence check. See [Licence](#licence). |
 | `deny.toml` | The licences a crate of the locked graph may carry. |
@@ -67,72 +133,13 @@ Go module; see [Releases](#releases).
 | `docs/handover/` | What left this repository for the operating-system repository, each with paths, hashes and the steps to switch: the service unit, and the conversation schemas with the subsystem graph. |
 | `tools/apicompat/`, `.github/workflows/praetor-api.yml` | Written by the Praetor engine: on a pull request, compares the exported API of the Go module with the base commit. |
 | `settings-source.json` | The record: source repository, commit, file hashes and manifest settings. |
-| `.github/workflows/release.yml`, `release-build.yml` | The release: a version tag builds, signs and attests the release files and stores them in a draft release. See [Releases](#releases). |
+| `.github/workflows/release.yml`, `release-build.yml` | The release: a version tag builds, signs and attests the release files and stores them in a draft release. See [Releases](https://plurano.github.io/amussis/releases/). |
 | `LICENSES/`, `REUSE.toml` | Licence text and the annotations for files that cannot carry a header. |
 | `.standards.yaml`, `.standards.lock`, `.standards-baseline.json` | The Praetor adoption: profile, pinned policy and the recorded debt the audit lets shrink, never grow. |
 
-## Verification gate
+## Guides and reference
 
-```sh
-make verify-all
-```
-
-One target, the same one CI runs: three jobs, on Linux, macOS and Windows,
-share one step list in `.github/workflows/ci.yml`, and the rule set in
-`.github/rulesets/main.json` requires all three. Its first half, `make verify`, needs no
-engine: it checks the shared settings and the exception list, then formats,
-builds, tests (default and all features), lints with warnings refused and
-builds the documentation on the toolchain `rust-toolchain.toml` pins. It then
-lints the export crate for `wasm32-unknown-unknown`, builds the WebAssembly
-module and compares it with the committed one, formats, vets and tests the Go
-binding and the examples in `examples/go-consumer`, checks that every Go block
-of this README stands line for line in those examples, holds the third-party notices of the module to the lock file, holds
-every locked crate to the licences `deny.toml` allows, checks the licence
-headers with `reuse lint` and scans every commit of the clone for credentials
-with [gitleaks](https://github.com/gitleaks/gitleaks), which has to find a
-token planted at run time. It checks the repository against its own HISS rules
-with [semgrep](https://github.com/semgrep/semgrep) (`.config/semgrep/hiss.yml`),
-which has to find a planted finding per rule; its hash-locked install
-(`tools/semgrep/requirements.txt`, compiled from `requirements.in`) is refused
-when one pin breaks the bounds of another. Ruff checks tracked Python against
-`ruff.toml` after planted import-order and security findings are detected
-(`make verify-ruff`). It scans dependencies offline for
-vulnerabilities with [trivy](https://github.com/aquasecurity/trivy), which
-requires a database pinned by digest from `make fetch` and has to find planted Go
-and Rust advisories. It compares the public API of the published crates with
-the last release tag using
-[cargo-semver-checks](https://github.com/obi1kenobi/cargo-semver-checks), which
-fails on a breaking change the workspace version does not announce and has to
-refuse a public method made private on a scratch clone. Its second half is
-the Praetor standards audit, which needs `praetorctl`; CI builds it from the
-commit pinned in the workflow.
-
-`make verify-message-ids` tests the private plan ID check and checks reachable history; the pull request workflow also checks its title, body and commits without printing matches. The same target refuses an analyser excuse in tracked source that names no rule id or gives no reason of at least three words.
-
-Trivy findings are excused only by a dated `vulnerability` entry in `exceptions.toml`, valid for at most 90 days.
-
-The gate needs the `wasm32-unknown-unknown` target of the pinned toolchain
-(`rustup target add wasm32-unknown-unknown`), Go at the version
-`bindings/go/go.mod` names, Node.js 22.12 or later with npm, and
-[cargo-deny](https://github.com/EmbarkStudios/cargo-deny), cargo-semver-checks,
-gitleaks, semgrep, ruff and trivy at the versions `.github/workflows/ci.yml` pins. It installs none of them,
-and fails when one is missing.
-The semgrep version pinned in `tools/semgrep/requirements.txt` has wheels for
-Linux x86_64/aarch64, macOS arm64 and Windows x86_64. On Intel macOS, pip installs
-a source archive without `semgrep-core`, so `make verify-semgrep` fails there.
-Intel macOS is not a supported gate host; run the gate on a Linux host (container
-or VM).
-
-`make fetch` is the only step that reaches a third-party host: `cargo fetch
---locked` reads the crates.io registry for this tree and for the last release
-tag, `go mod download` the Go module proxy,
-a locked `npm ci` the npm registry for the packages of the documentation
-gate, and `tools/scanners.py fetch-db` downloads the vulnerability database from
-`ghcr.io` for trivy. Everything after it runs with `--offline`, `GOPROXY=off`,
-npm's offline mode or trivy's offline scan. Builds
-follow `CARGO_BUILD_JOBS`; set it when other work shares the machine.
-
-## Go binding
+### Go binding
 
 The Go blocks of this README are compiled and run: each stands line for line
 in [`examples/go-consumer/example_test.go`](examples/go-consumer/example_test.go),
@@ -334,9 +341,11 @@ Limits as of this state:
   operating system or architecture has run it.
 
 The committed module is the build of the source beside it: `tools/wasm_module.py
-check` rebuilds it with the machine's paths rewritten and fails on one differing
-byte. After a change to the engine or the export crate, run
-`python3 tools/wasm_module.py update` and commit the module with the change.
+check` rebuilds it with the machine's paths rewritten. On a Linux x86_64 host
+one differing byte fails the check; a Windows or macOS host is held to the
+comparison described below. After a change to the engine or the export crate,
+run `python3 tools/wasm_module.py update` and commit the module with the
+change.
 Renovate heads receive the regenerated files as artifact `regenerated-<sha>`
 from `.github/workflows/regenerate.yml`.
 The module is the build of a Linux x86_64 host, and only such a host is held
@@ -351,7 +360,7 @@ its forward-slash name with `--remap-path-prefix`. `rustc` replaces only a
 prefix, so without that the rest of an embedded source path keeps a Windows
 host's backslashes and the data section differs (issue #2, run 38863474754).
 
-## Identities in the audit chain
+### Identities in the audit chain
 
 A record that is about a person names that person, and the store keeps those
 bytes for as long as it keeps the chain. What a host passes in as the maker of
@@ -407,158 +416,61 @@ vote of two checkers with every identity at 64 bytes, has a content of 454
 bytes of the 512 a record may have
 (`the_largest_record_fits_the_preimage_bound`).
 
-## Exceptions
+### On the documentation site
 
-The workspace forbids `unsafe` code. The export file
-`crates/amussis-decision-wasm/src/abi.rs` needs the allowance for linkage alone
-(`unsafe extern` for the imports, `#[unsafe(no_mangle)]` for the exports) and
-is named in `exceptions.toml` with one file, one rule, a reason and an end date
-at most 90 days ahead. `tools/exceptions_check.py` fails on any other file that
-lowers the lint, on an entry whose file lowers nothing, and on an entry past its
-date: a lapsed exception excuses nothing.
+- [Verification gate](https://plurano.github.io/amussis/verification/): one
+  target (`make verify-all`), the same one CI runs on Linux, macOS and Windows.
+- [Exceptions](https://plurano.github.io/amussis/exceptions/): dated rule
+  exceptions in `exceptions.toml` and the checks that hold them.
+- [Shared settings](https://plurano.github.io/amussis/shared-settings/): the
+  toolchain pin, formatter and lint tables taken from the operating-system
+  repository (`settings-source.json`).
+- [Releases](https://plurano.github.io/amussis/releases/): what the release
+  workflow files do from `v0.1.0` on.
+- [Handover records](docs/handover/) and
+  [Decision records](docs/adr/README.md).
 
-The same check holds `.github/rulesets/main.json` to the workflows. The Praetor
-engine writes that file, and for a job that calls another workflow it requires
-the calling job's own name. A run reports such a job as
-`<calling job> / <called job>`, so the required name is never reported
-(cordanaLLM/praetor#1212). The check reads every workflow's job names and the
-rule set: a required name that is the bare name of a calling job needs a live
-entry for the rule-set file, a required name no job carries is refused with or
-without one, and an entry is refused once no such name is left. No job here
-calls another workflow today, so the list holds no such entry; the selftest
-plants a calling job to keep the rule proven.
-
-Functions come out in another order on Windows and on macOS: the order
-follows the `-C metadata` values cargo passes to the compiler, which differ
-from host to host and which no stable setting fixes (issue #2).
-
-`tools/module-compare` removes the order from the comparison. It labels every
-function by its type, locals and instructions, with call targets replaced by
-the labels of the called functions over twelve rounds, and compares the two
-sets of labels. Element segments, exports and the start function are compared
-through those labels. Every other section is compared byte for byte, and the
-data section is reported as its own class. The tool refuses a module it cannot
-fully read, such as one with a duplicate data or start section or element
-items in expression form, instead of passing it.
-
-On a Windows or macOS host whose build differs from the committed bytes,
-`tools/wasm_module.py check` fails on any code or data difference and passes an
-order-only difference with a notice. It still refuses a build that is no module
-or holds a machine path, and a missing module. Every other host is held to the
-bytes. An entry of the retired rule `module-byte-comparison` is refused by
-`tools/exceptions_check.py` like any unknown rule.
-
-## Shared settings
-
-The toolchain pin, the formatter and lint configuration and the workspace lint
-tables are not written here. They are taken from the operating-system
-repository at the commit recorded in `settings-source.json`:
-
-- `rust-toolchain.toml`, `clippy.toml` and `rustfmt.toml` are byte copies, held
-  by their SHA-256 hashes.
-- `resolver`, `edition`, `rust-version` and the lint tables of `Cargo.toml` are
-  compared as parsed values.
-
-They stay in step in three places:
-
-- The gate runs `tools/settings_sync.py check`, which needs no network and
-  refuses any local edit of a shared setting.
-- On a pull request that changes one of those files or the record, the Linux
-  job of the *Verification gate* workflow clones the source repository and
-  runs `check --source`. That check refuses a record that no longer equals
-  the source, so such a pull request cannot merge out of step with it.
-  `changed --base --head` names the files that decide whether the check runs.
-- The weekly *Settings drift* workflow runs the same `check --source`, for
-  changes made in the source repository.
-
-A change therefore starts in the source repository and arrives here with:
+## Contribute
 
 ```sh
-python3 tools/settings_sync.py update --source <checkout of the source repository>
+make verify-all
 ```
 
-`selftest` plants one defect per setting and requires each to be refused. It
-also requires `changed` to name a changed setting and nothing else. The gate
-runs it before the check.
+One target, the same one CI runs: three jobs, on Linux, macOS and Windows,
+share one step list in `.github/workflows/ci.yml`, and the rule set in
+`.github/rulesets/main.json` requires all three. What the gate needs and checks
+is on the [Verification gate](https://plurano.github.io/amussis/verification/)
+page.
 
-## Releases
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
 
-`v0.1.0` is the first release. The path below was proven first on the
-pre-release tag `v0.1.0-rc.1`
-([run 38148288612](https://github.com/plurano/amussis/actions/runs/38148288612)),
-and `v0.1.0` was set after that run had ended green
-([run 38149459081](https://github.com/plurano/amussis/actions/runs/38149459081)).
-This section says what the workflow files do.
+## Support
 
-A version tag, `v` and the version in `Cargo.toml` (`v0.2.0`), starts
-`.github/workflows/release.yml`. It builds the release files and stores them
-in a draft release on the forge. When a maintainer publishes that draft (not
-a pre-release), `.github/workflows/publish.yml` publishes `amussis-decision`
-and `amussis-decision-wasm` to crates.io and tags `bindings/go/v<version>`.
+Questions and ideas go to
+[Discussions](https://github.com/plurano/amussis/discussions), defects to
+[issues](https://github.com/plurano/amussis/issues), and security reports to
+a [private advisory](https://github.com/plurano/amussis/security/advisories/new),
+as [SECURITY.md](SECURITY.md) asks.
 
-| File of a release | What it is |
-| :--- | :--- |
-| `amussis-decision-<version>.crate` | The library as `cargo package` packs it, compiled once more from the packed sources. |
-| `amussis-decision-<version>.wasm` | The module the Go binding embeds, rebuilt from the tag and compared byte for byte (`tools/wasm_module.py check`). |
-| `amussis-decision-<version>.wasm.third-party-notices.txt` | The notices that travel with the module: every crate it links and the Rust standard library, each with its licence text. See [Licence](#licence). |
-| `amussis-decision-<version>.cyclonedx.json`, `.spdx.json` | The dependencies of the packed crate, read from its lock file. |
-| `checksums.txt` | The SHA-256 of the five files above. |
-| `checksums.txt.sigstore.json` | The signature over `checksums.txt`. |
+The maintainer's work on the Plurano crates can be sponsored on
+[GitHub Sponsors](https://github.com/sponsors/lusoris),
+[Ko-fi](https://ko-fi.com/lusoris) or
+[Patreon](https://www.patreon.com/Lusoris), any amount; sponsors are thanked,
+and no support or priority is sold.
 
-The files are built in `.github/workflows/release-build.yml`, which only the
-release workflow calls and which only builds. The signature and the provenance
-of every file name that workflow, so a file built anywhere else does not pass.
-A tag that names another version than the manifest finds no crate file of its
-name, and the run stops before anything is signed.
+## Roadmap and releases
 
-A tag with a hyphen after the version (`v0.1.0-rc.1`) runs the same path to
-prove it. Its files carry the manifest version and its draft is marked as a
-pre-release. A person publishes that draft as a pre-release, so the checks
-below can be run on it the way a consumer runs them; it stays visible and
-marked as a pre-release.
+Public since 2026-10-11. The first release,
+[`v0.1.0`](https://github.com/plurano/amussis/releases/tag/v0.1.0), brought a
+decision engine (risk levels, second-person approval, tamper-evident log, kill
+switch) here from the operating-system repository; its files are on the forge
+only. From [`v0.2.0`](https://github.com/plurano/amussis/releases/tag/v0.2.0)
+on, publishing a release also publishes both crates to crates.io and tags the
+Go module; see [Releases](https://plurano.github.io/amussis/releases/).
 
-To check a release after downloading its files:
-
-```sh
-sha256sum --check --strict checksums.txt
-cosign verify-blob \
-  --certificate-identity https://github.com/plurano/amussis/.github/workflows/release-build.yml@refs/tags/v0.2.0 \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --bundle checksums.txt.sigstore.json checksums.txt
-gh attestation verify amussis-decision-0.2.0.crate --repo plurano/amussis \
-  --signer-workflow plurano/amussis/.github/workflows/release-build.yml
-```
-
-The run does the same before it stores the files (job `Read the release files
-back`). It calls the shared read-back of plurano/horistes (`tools/readback.py`,
-pinned by commit) on the built files with the parameters in
-`.github/release-readback.toml`, without credentials. Each check runs once as
-built and once with one expectation changed, which has to be refused. A last
-step changes one file and requires the read-back to fail on it.
-
-Limits as of this state:
-
-- `praetorctl audit` measures the declared supply chain (build level 3, signed
-  checksums, a dependency inventory) from the release workflow files; it reads
-  no published signature. The signatures and attestations of a published release
-  are checked by the commands above, not by the gate.
-- Package publishing runs only when the draft release is published:
-  `publish.yml` publishes `amussis-decision` and `amussis-decision-wasm` to
-  crates.io and tags `bindings/go/v<version>` at the release commit. A
-  pre-release does not publish to crates.io.
-- Publishing to crates.io uses trusted publishing: each crate's settings on
-  crates.io trust workflow `publish.yml` in environment `crates-io` of
-  plurano/amussis, and the job takes a short-lived token through
-  `rust-lang/crates-io-auth-action`. No registry token is stored in the
-  repository. A new crate in the workspace needs one first publish with an
-  API token before crates.io accepts its trusted-publisher entry.
-
-## Dependencies
-
-`Cargo.lock` is committed and every cargo step runs with `--locked`;
-`bindings/go/go.sum` is committed and every Go step runs with `-mod=readonly`.
-A release of an outside dependency is taken up three days after its publication
-at the earliest; releases of this workspace's own crates are taken up at once.
+A version tag builds, signs and attests the release files; the Releases page
+says how to check them. Planned work is tracked in the
+[milestones](https://github.com/plurano/amussis/milestones).
 
 ## Licence
 
@@ -597,3 +509,41 @@ A second check covers the whole locked graph, build-time crates included:
 `cargo deny check licenses` on the list in `deny.toml`. The gate runs it once
 more on `tools/notices/refused/`, a crate under a licence the list does not
 name, and fails when that crate passes.
+
+### Dependencies
+
+`Cargo.lock` is committed and every cargo step runs with `--locked`;
+`bindings/go/go.sum` is committed and every Go step runs with `-mod=readonly`.
+A release of an outside dependency is taken up three days after its publication
+at the earliest; releases of this workspace's own crates are taken up at once.
+
+## Standards and governance
+
+This repository follows the High-Integrity Systems Standards (HISS-21) and the
+NASA/JPL Power of 10 rules; see [AGENTS.md](AGENTS.md) and
+[CONTRIBUTING.md](CONTRIBUTING.md).
+
+<!-- praetor:readme-governance:start -->
+[![Documentation Governance][praetor-docs-badge]][praetor-docs-runs]
+
+Praetor manages this repository's declared governance policy. This managed
+block records adoption state; it is not a verification certificate.
+
+**Verification**: `make verify-all` runs the repository's configured
+verification cascade.
+
+**HISS Audit**: `praetorctl audit` enforces policy, generated-surface
+integrity, and the debt ratchet.
+
+**Context Sync**: `praetorctl compile-context --verify` verifies every
+generated agent context against `AGENTS.md`.
+
+**Documentation**: `make docs-lint` enforces locked Markdown style and the
+private scratch-link policy.
+
+**Debt Baseline**: `.standards-baseline.json` anchors the debt ratchet at
+1 recorded infraction; audit forbids growth.
+
+[praetor-docs-badge]: https://github.com/plurano/amussis/actions/workflows/praetor-docs.yml/badge.svg
+[praetor-docs-runs]: https://github.com/plurano/amussis/actions/workflows/praetor-docs.yml
+<!-- praetor:readme-governance:end -->

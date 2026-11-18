@@ -1,0 +1,117 @@
+# SPDX-FileCopyrightText: 2026 Lusoris <lusoris@pm.me>
+# SPDX-License-Identifier: EUPL-1.2
+---
+# Documentation site: builds the pages under docs/ with MkDocs, configured by
+# mkdocs.yml, and publishes them to GitHub Pages at
+# https://plurano.github.io/amussis/. It builds no crate, module or release
+# file, and a green run says nothing about the verification gate.
+name: Documentation site
+
+on:
+  # Every pull request builds the site, whatever it touches, so a broken link
+  # in a page shows up before the merge and not on the next deploy.
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  # Every push to main builds and deploys, whatever it touches. The deploy
+  # job publishes a run only while its commit is still the head of main, so
+  # with a path filter a later push that changes no page would stop the run
+  # of an earlier page change from deploying and start no run of its own.
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Read-only by default; the deploy job raises exactly what Pages needs.
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: Build documentation site
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    steps:
+      # HISS-18: a draft stops here, before any work, and fails, so a check
+      # never reports a skipped draft as a pass. Marking the pull request
+      # ready for review starts the run that replaces it.
+      - name: Stop on a draft pull request
+        if: github.event.pull_request.draft == true
+        shell: bash
+        env:
+          TITLE: Gate not run on a draft
+          MESSAGE: >-
+            The gate did not run because the pull request is a draft.
+            It runs when the pull request is marked ready for review.
+        run: |
+          echo "::error title=$TITLE::$MESSAGE"
+          echo "$MESSAGE" >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+
+      # docs/requirements.txt is compiled with hashes from docs/requirements.in;
+      # the command that made it is in its header.
+      - name: Install the pinned documentation dependencies
+        run: python -m pip install --disable-pip-version-check --require-hashes -r docs/requirements.txt
+
+      - name: Build the site in strict mode
+        run: python -m mkdocs build --strict
+
+      - name: Upload the Pages artifact
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+
+  deploy:
+    name: Deploy to GitHub Pages
+    # Only main publishes: a manual run on another branch builds and stops.
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      # An older run can reach the group late; it must not replace a site
+      # already deployed by a newer run.
+      - name: Stop when main has moved on
+        id: head
+        shell: bash
+        env:
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          remote=$(timeout 60 git ls-remote "https://github.com/${REPO}.git" refs/heads/main)
+          head=${remote%%[[:space:]]*}
+          if [[ -z "$head" ]]; then
+            echo "::error::Could not read the head of main"
+            exit 1
+          fi
+          if [[ "$head" == "$SHA" ]]; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "current=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Run commit $SHA is not the current main commit $head"
+          fi
+
+      - name: Deploy
+        if: steps.head.outputs.current == 'true'
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
