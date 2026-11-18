@@ -4,6 +4,7 @@
 """Refuse private plan identifiers in text and commit messages.
 
     check-text FILE...             check each line of each file
+    check-event FILE               check title and body of a GitHub pull request event JSON
     check-range --base B --head H  check all commits in B..H, including merges
     check-history [--ref REF]      check reachable history and live exceptions
     selftest                       exercise synthetic plants in a scratch repo
@@ -15,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import json
 import os
 import re
 import subprocess
@@ -44,7 +46,9 @@ def git(repo: Path, *args: str, env: dict[str, str] | None = None) -> str:
     """Run Git with a deadline and report operational failures."""
     argv = ["git", "-C", str(repo), *args]
     try:
-        result = subprocess.run(argv, capture_output=True, text=True, timeout=DEADLINE_SECONDS, env=env)  # noqa: S603 - fixed executable and argv list without a shell
+        # Git emits UTF-8; text=True alone would decode with the Windows locale code page. Patterns are ASCII.
+        result = subprocess.run(  # noqa: S603 - fixed executable and argv list without a shell
+            argv, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=DEADLINE_SECONDS, env=env)
     except (OSError, subprocess.TimeoutExpired) as error:
         raise CheckError(f"git could not run: {error}") from error
     if result.returncode:
@@ -62,7 +66,7 @@ def commits(repo: Path, ref: str, limit: int, base: str | None = None,
     """Read at most limit commits, rejecting a larger reachable set."""
     head = revision(repo, ref, env)
     selection = f"{revision(repo, base, env)}..{head}" if base is not None else head
-    output = git(repo, "log", "-z", f"--max-count={limit + 1}", "--format=%H%x00%B", selection, "--", env=env)
+    output = git(repo, "log", "-z", "--no-show-signature", f"--max-count={limit + 1}", "--format=%H%x00%B", selection, "--", env=env)
     fields = output.split("\0")
     if fields[-1] == "":
         fields.pop()
@@ -72,6 +76,29 @@ def commits(repo: Path, ref: str, limit: int, base: str | None = None,
     if len(records) > limit:
         raise CheckError(f"more than {limit} commits; raise the bound knowingly")
     return records
+
+
+def event_text(event: object, field: str) -> str:
+    """Return a pull request text field, treating a null body as empty."""
+    if not isinstance(event, dict) or not isinstance(event.get("pull_request"), dict):
+        raise CheckError("event has no pull_request object")
+    value = event["pull_request"].get(field)
+    if value is None and field == "body":
+        return ""
+    if not isinstance(value, str):
+        raise CheckError(f"event pull_request.{field} is not a string")
+    return value
+
+
+def check_event(path: Path) -> list[str]:
+    """Find private identifiers in the title and body of a GitHub event file."""
+    try:
+        event = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError) as error:
+        raise CheckError(f"cannot read {path}: {error}") from error
+    except ValueError as error:
+        raise CheckError(f"cannot parse {path}: {error}") from error
+    return [hit for field in ("title", "body") for hit in findings(field, event_text(event, field))]
 
 
 def check_range(repo: Path, base: str, head: str, env: dict[str, str] | None = None) -> list[str]:
@@ -121,6 +148,21 @@ def fixture_exception(repo: Path, sha: str, expiry: datetime.date) -> None:
         f'reason = "synthetic"\nexpires = "{expiry}"\n', encoding="utf-8")
 
 
+def event_failures(scratch: Path) -> list[str]:
+    """Refuse a planted pull request title and body; accept a clean event with a null body."""
+    plant = "example-planted-check-20260101"
+    cases = (({"pull_request": {"title": plant, "body": None}}, ["title:1: dated"]),
+             ({"pull_request": {"title": "clean", "body": f"clean\n{plant}"}}, ["body:2: dated"]),
+             ({"pull_request": {"title": "clean", "body": None}}, []))
+    failures = []
+    for number, (event, expected) in enumerate(cases):
+        path = scratch / f"event-{number}.json"
+        path.write_text(json.dumps(event), encoding="utf-8")
+        if check_event(path) != expected:
+            failures.append("event case failed")
+    return failures
+
+
 def selftest() -> list[str]:
     """Refuse synthetic plants and accept clean and excepted cases."""
     plants = ["example-planted-check-20260101", "example-planted-unit-0123456789ab", "Order: x"]
@@ -146,6 +188,7 @@ def selftest() -> list[str]:
         fixture_exception(repo, hit, today - datetime.timedelta(days=1))
         cases.append((bool(check_history(repo, hit, today, fixture_env())), True))
         failures += ["scratch history case failed" for actual, expected in cases if actual != expected]
+        failures += event_failures(repo)
     return failures
 
 
@@ -154,6 +197,7 @@ def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     commands = result.add_subparsers(dest="command", required=True)
     commands.add_parser("check-text").add_argument("files", nargs="+", type=Path)
+    commands.add_parser("check-event").add_argument("file", type=Path)
     branch = commands.add_parser("check-range")
     branch.add_argument("--base", required=True)
     branch.add_argument("--head", required=True)
@@ -162,18 +206,24 @@ def parser() -> argparse.ArgumentParser:
     return result
 
 
+def run(args: argparse.Namespace) -> list[str]:
+    """Run the requested check and return its findings."""
+    if args.command == "check-text":
+        return [hit for path in args.files for hit in findings(str(path), "\n".join(read_lines(path)))]
+    if args.command == "check-event":
+        return check_event(args.file)
+    if args.command == "check-range":
+        return check_range(Path.cwd(), args.base, args.head)
+    if args.command == "check-history":
+        return check_history(Path.cwd(), args.ref, datetime.datetime.now(datetime.UTC).date())
+    return selftest()
+
+
 def main() -> int:
     """Run the requested check and map findings and errors to exit codes."""
     args = parser().parse_args()
     try:
-        if args.command == "check-text":
-            found = [hit for path in args.files for hit in findings(str(path), "\n".join(read_lines(path)))]
-        elif args.command == "check-range":
-            found = check_range(Path.cwd(), args.base, args.head)
-        elif args.command == "check-history":
-            found = check_history(Path.cwd(), args.ref, datetime.datetime.now(datetime.UTC).date())
-        else:
-            found = selftest()
+        found = run(args)
     except CheckError as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 2
@@ -181,7 +231,7 @@ def main() -> int:
         print(f"FAIL: {line}", file=sys.stderr)
     if found:
         return 1
-    detail = " (7 plants refused, 8 clean cases held)" if args.command == "selftest" else ""
+    detail = " (9 plants refused, 9 clean cases held)" if args.command == "selftest" else ""
     print(f"PASS: message IDs {args.command}{detail}")
     return 0
 

@@ -5,7 +5,11 @@
 import contextlib
 import datetime
 import io
+import json
+import re
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -38,6 +42,40 @@ class PatternTests(unittest.TestCase):
         self.assertNotIn(plant, str(subject.findings("file", plant)))
 
 
+class GitTests(unittest.TestCase):
+    """Exercise Git reading against a scratch repository and stubs."""
+
+    def scratch_repo(self, message):
+        """Create an isolated scratch repository holding one commit."""
+        scratch = tempfile.TemporaryDirectory(prefix="message-ids-test-")
+        self.addCleanup(scratch.cleanup)
+        repo = Path(scratch.name)
+        subject.git(repo, "init", "--quiet", env=subject.fixture_env())
+        subject.fixture_commit(repo, message)
+        return repo
+
+    def test_git_decodes_utf8(self):
+        """A non-cp1252 character in a commit message is read as UTF-8 without error."""
+        repo = self.scratch_repo("quote \u201d end")
+        with mock.patch.object(subject.subprocess, "run", wraps=subprocess.run) as run:
+            output = subject.git(repo, "log", "-1", "--format=%B", env=subject.fixture_env())
+        self.assertIn("\u201d", output)
+        self.assertEqual(run.call_args.kwargs["encoding"], "utf-8")
+        self.assertEqual(run.call_args.kwargs["errors"], "replace")
+
+    def test_commits_ignores_show_signature(self):
+        """Log is run with --no-show-signature, and hashes stay 40 hex under log.showSignature."""
+        with mock.patch.object(subject, "revision", return_value="a" * 40), mock.patch.object(subject, "git") as git:
+            git.return_value = "a" * 40 + "\0clean\0"
+            subject.commits(Path(), "HEAD", 1)
+        self.assertIn("--no-show-signature", git.call_args.args)
+        repo = self.scratch_repo("clean")
+        subject.git(repo, "config", "log.showSignature", "true", env=subject.fixture_env())
+        records = subject.commits(repo, "HEAD", 10, env=subject.fixture_env())
+        self.assertEqual(len(records), 1)
+        self.assertRegex(records[0][0], re.compile(r"[0-9a-f]{40}"))
+
+
 class CommandTests(unittest.TestCase):
     """Exercise commands through their entry point using stubs."""
 
@@ -60,6 +98,45 @@ class CommandTests(unittest.TestCase):
             self.assertEqual(self.invoke(["check-text", "fixture"])[0], 0)
         with mock.patch.object(subject, "read_lines", side_effect=CheckError("missing")):
             self.assertEqual(self.invoke(["check-text", "fixture"])[0], 2)
+
+    def event(self, pull_request):
+        """Write an event file and return the command result and the planted-file output."""
+        with tempfile.TemporaryDirectory(prefix="event-") as scratch:
+            path = Path(scratch) / "event.json"
+            path.write_text(json.dumps({"pull_request": pull_request}), encoding="utf-8")
+            return self.invoke(["check-event", str(path)])
+
+    def test_event_command(self):
+        """Event passes clean text and null body; refuses ids in title or body without printing them."""
+        plant = "example-planted-check-20260101"
+        self.assertEqual(self.event({"title": "clean", "body": "clean"})[0], 0)
+        self.assertEqual(self.event({"title": "clean", "body": None})[0], 0)
+        for field, pull_request, expected in (
+                ("title", {"title": plant, "body": "clean"}, "title:1: dated"),
+                ("body", {"title": "clean", "body": f"clean\n{plant}"}, "body:2: dated")):
+            with self.subTest(field=field):
+                code, output = self.event(pull_request)
+                self.assertEqual(code, 1)
+                self.assertIn(expected, output)
+                self.assertNotIn(plant, output)
+
+    def test_event_operational_errors(self):
+        """Missing file, bad JSON, missing pull_request and non-string title exit 2."""
+        plant = "example-planted-check-20260101"
+        for pull_request in (None, [], {"title": 7, "body": ""}, {"body": plant}, {"title": "clean", "body": 7}):
+            with self.subTest(pull_request=pull_request):
+                code, output = self.event(pull_request)
+                self.assertEqual(code, 2)
+                self.assertNotIn(plant, output)
+        with tempfile.TemporaryDirectory(prefix="event-") as scratch:
+            missing, broken, bare = (Path(scratch) / name for name in ("missing.json", "broken.json", "bare.json"))
+            broken.write_text("{" + plant, encoding="utf-8")
+            bare.write_text(json.dumps({"action": plant}), encoding="utf-8")
+            for path in (missing, broken, bare):
+                with self.subTest(path=path.name):
+                    code, output = self.invoke(["check-event", str(path)])
+                    self.assertEqual(code, 2)
+                    self.assertNotIn(plant, output)
 
     def test_range_command(self):
         """Range handles a finding, an empty range and a Git failure."""

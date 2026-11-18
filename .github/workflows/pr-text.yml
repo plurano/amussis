@@ -32,11 +32,8 @@ jobs:
           update-environment: false
       - name: Check pull request text and commits
         env:
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_BODY: ${{ github.event.pull_request.body }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          printf '%s\n%s\n' "$PR_TITLE" "$PR_BODY" > "$RUNNER_TEMP/pr-text.txt"
-          python3 -B tools/message_ids.py check-text "$RUNNER_TEMP/pr-text.txt"
+          python3 -B tools/message_ids.py check-event "$GITHUB_EVENT_PATH"
           python3 -B tools/message_ids.py check-range --base "$BASE_SHA" --head "$HEAD_SHA"
