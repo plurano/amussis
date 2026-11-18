@@ -7,7 +7,7 @@ import datetime
 import io
 import json
 import re
-import subprocess
+import subprocess  # nosec B404 -- fixed executable git, argv list built by this file, no shell
 import sys
 import tempfile
 import unittest

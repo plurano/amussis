@@ -19,7 +19,7 @@ import datetime
 import json
 import os
 import re
-import subprocess
+import subprocess  # nosec B404 -- fixed executable git, argv list built by this file, no shell
 import sys
 import tempfile
 from pathlib import Path
@@ -47,7 +47,7 @@ def git(repo: Path, *args: str, env: dict[str, str] | None = None) -> str:
     argv = ["git", "-C", str(repo), *args]
     try:
         # Git emits UTF-8; text=True alone would decode with the Windows locale code page. Patterns are ASCII.
-        result = subprocess.run(  # noqa: S603 - fixed executable and argv list without a shell
+        result = subprocess.run(  # noqa: S603 - fixed executable and argv list without a shell  # nosec B603 -- fixed executable git, argv list built by this file, no shell  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit.dangerous-subprocess-use-audit -- fixed executable git, argv list built by this file, no shell
             argv, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=DEADLINE_SECONDS, env=env)
     except (OSError, subprocess.TimeoutExpired) as error:
         raise CheckError(f"git could not run: {error}") from error

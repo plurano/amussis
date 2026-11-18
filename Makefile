@@ -259,9 +259,12 @@ verify-signoff:
 
 # Private plan identifiers must stay out of public messages and history.
 # The selftest plants synthetic identifiers before checking history.
+# The suppression check refuses an analyser excuse without a rule id and a reason.
 verify-message-ids:
 	python3 -B tools/message_ids.py selftest
 	python3 -B tools/message_ids.py check-history
+	python3 -B tools/suppression_check.py selftest
+	python3 -B tools/suppression_check.py check
 
 # Scanner tool unit tests verify cache handling and download safety.
 verify-tools:
