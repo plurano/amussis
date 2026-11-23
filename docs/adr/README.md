@@ -8,3 +8,4 @@ record that supersedes it.
 | Number | Date | Title | Status |
 | :--- | :--- | :--- | :--- |
 | [0000](0000-template.md) | 2026-09-11 | ADR template | Accepted |
+| [0001](0001-asset-revision-on-repair-records.md) | 2026-11-23 | Asset revision on repair records | Proposed |
