@@ -59,7 +59,7 @@ env:
   # Published Praetor commit that builds the praetorctl this gate pins. The
   # Git hooks read the same declaration (.config/lefthook/engine.sh), so a
   # commit is judged locally by the engine that judges it here.
-  PRAETOR_REF: "a60326a18b15c0755ba801c6e99e3bac415336df"
+  PRAETOR_REF: "6184d42850e892b4c66d4181ffff14c355222fbe"
   # cargo-mutants tests the tests: it changes the code a pull request
   # touches and expects a test to fail. The digest is the one its release
   # publishes for the Linux archive of this version.
@@ -102,7 +102,7 @@ jobs:
       - name: Check out pinned Praetor source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: cordanaLLM/praetor
+          repository: tekmora/praetor
           ref: ${{ env.PRAETOR_REF }}
           path: praetor-src
           persist-credentials: false
