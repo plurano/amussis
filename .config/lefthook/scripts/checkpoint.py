@@ -1148,28 +1148,41 @@ def _detached_job_deferral(root, cfg):
     )
 
 
-def _validate_remote(url, repository):
+def _validate_remote(url, repository, remote="origin"):
     """Require the remote URL to identify the configured repository."""
-    owner, name = repository.split("/", 1)
-    path = f"/{owner}/{name}"
+    mismatch = "configured remote does not match repository"
     if url.startswith("git@github.com:"):
-        actual = url.removeprefix("git@github.com:").removesuffix(".git")
-        if actual != f"{owner}/{name}":
-            raise CheckpointError("configured remote does not match repository")
-        return
-    parsed = urlsplit(url)
+        actual = url.removeprefix("git@github.com:")
+        if actual.removesuffix(".git") == repository:
+            return
+    else:
+        parsed = urlsplit(url)
+        if (
+            parsed.scheme not in {"https", "ssh"}
+            or parsed.hostname != "github.com"
+            or (parsed.scheme == "https" and parsed.username is not None)
+            or parsed.password is not None
+            or parsed.port is not None
+            or parsed.query
+            or parsed.fragment
+            or (parsed.scheme == "ssh" and parsed.username != "git")
+        ):
+            raise CheckpointError(mismatch)
+        if parsed.path in {f"/{repository}", f"/{repository}.git"}:
+            return
+        actual = parsed.path.removeprefix("/")
+    owner, _, name = actual.partition("/")
+    expected_owner, expected_name = repository.split("/", 1)
     if (
-        parsed.scheme not in {"https", "ssh"}
-        or parsed.hostname != "github.com"
-        or (parsed.scheme == "https" and parsed.username is not None)
-        or parsed.password is not None
-        or parsed.port is not None
-        or parsed.query
-        or parsed.fragment
-        or parsed.path not in {path, path + ".git"}
-        or (parsed.scheme == "ssh" and parsed.username != "git")
+        owner not in {expected_owner, ".", ".."}
+        and REPO_PART.fullmatch(owner)
+        and name in {expected_name, f"{expected_name}.git"}
     ):
-        raise CheckpointError("configured remote does not match repository")
+        mismatch += (
+            f"; update {remote} with: git remote set-url {remote} "
+            f"git@github.com:{repository}.git"
+        )
+    raise CheckpointError(mismatch)
 
 
 def _remote_refs(root, cfg, branch):
@@ -1241,7 +1254,7 @@ def _branch_publication(root, head, remote_oid):
 
 def _publication(root, cfg, branch, head, observation=None):
     """Observe remote references and the branch's pull request publication state."""
-    _validate_remote(_remote_url(root, cfg["remote"]), cfg["repository"])
+    _validate_remote(_remote_url(root, cfg["remote"]), cfg["repository"], cfg["remote"])
     refs, branch_ref, base_ref = _remote_refs(root, cfg, branch)
     base_oid = refs.get(base_ref)
     if not base_oid:
@@ -1651,7 +1664,7 @@ def _observe_publication(root, cfg, event, result):
 
 def _observe_base(root, cfg, result):
     """Observe whether the checkpoint head matches the configured remote base."""
-    _validate_remote(_remote_url(root, cfg["remote"]), cfg["repository"])
+    _validate_remote(_remote_url(root, cfg["remote"]), cfg["repository"], cfg["remote"])
     refs, _, base_ref = _remote_refs(root, cfg, cfg["base"])
     if base_ref not in refs:
         raise CheckpointError("configured remote base branch is missing")

@@ -312,6 +312,13 @@ def _drain(stream, key, bound):
         bound.finish()
 
 
+def _command_timeout(args, timeout):
+    """Name the original limit and bounded command words, excluding directory paths."""
+    words = [str(word).replace("\\", "/").rsplit("/", 1)[-1][:80] for word in args[:4]]
+    command = " ".join(words)[:240]
+    return HookError(f"checkpoint command timed out after {timeout:g} s: {command}")
+
+
 def _bounded_output_threaded(process, timeout, maximum):
     """Collect bounded output where select() cannot wait on pipes.
 
@@ -333,7 +340,7 @@ def _bounded_output_threaded(process, timeout, maximum):
         if bound.exceeded:
             raise HookError("checkpoint command output exceeded its byte limit")
         if not done:
-            raise HookError("checkpoint command timed out")
+            raise _command_timeout(process.args, timeout)
     process.wait(timeout=max(0.001, deadline - time.monotonic()))
     return bytes(bound.output["stdout"])
 
@@ -355,10 +362,10 @@ def _bounded_output(process, timeout, maximum):
                 return bytes(output["stdout"])
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise HookError("checkpoint command timed out")
+                raise _command_timeout(process.args, timeout)
             events = selector.select(remaining)
             if not events:
-                raise HookError("checkpoint command timed out")
+                raise _command_timeout(process.args, timeout)
             for key, _mask in events:
                 chunk = os.read(key.fileobj.fileno(), min(65536, maximum - total + 1))
                 if not chunk:
@@ -414,11 +421,16 @@ def run_bounded(
                 )
             return stdout
     except (OSError, subprocess.TimeoutExpired) as error:
-        if isinstance(error, FileNotFoundError) and error.filename == "lefthook":
-            raise HookError(missing_tool_line("lefthook")) from error
-        raise HookError(
-            f"{args[0]} checkpoint process failed ({type(error).__name__})"
-        ) from error
+        raise _process_error(args, timeout, error) from error
+
+
+def _process_error(args, timeout, error):
+    """The HookError run_bounded raises for a spawn or wait failure of args."""
+    if isinstance(error, subprocess.TimeoutExpired):
+        return _command_timeout(args, timeout)
+    if isinstance(error, FileNotFoundError) and error.filename == "lefthook":
+        return HookError(missing_tool_line("lefthook"))
+    return HookError(f"{args[0]} checkpoint process failed ({type(error).__name__})")
 
 
 def run(
