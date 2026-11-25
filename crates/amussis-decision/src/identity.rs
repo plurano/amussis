@@ -65,41 +65,48 @@ pub struct Identity {
     len: u8,
 }
 
-impl Identity {
-    /// Parses `raw` into an identity.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`IdentityError`] when `raw` is empty, longer than
-    /// [`MAX_IDENTITY_LEN`] bytes, or contains a byte outside the permitted
-    /// character set. The input is never truncated or sanitised.
-    pub fn parse(raw: &str) -> Result<Self, IdentityError> {
-        let (bytes, len) = validate::<MAX_IDENTITY_LEN>(raw)?;
-        let len = u8::try_from(len).map_err(|_| IdentityError::TooLong {
-            max: MAX_IDENTITY_LEN,
-            actual: len,
-        })?;
-        Ok(Self { bytes, len })
-    }
+/// Implements bounded, validated text stored inline.
+macro_rules! bounded_text {
+    ($target:ident, $max:ident, $len:ty, $noun:literal) => {
+        impl $target {
+            #[doc = concat!("Parses `raw` into ", $noun, ".")]
+            ///
+            /// # Errors
+            ///
+            /// Returns [`IdentityError`] when `raw` is empty, longer than
+            #[doc = concat!("[`", stringify!($max), "`] bytes, or contains a byte outside the")]
+            /// permitted character set. The input is never truncated or sanitised.
+            pub fn parse(raw: &str) -> Result<Self, IdentityError> {
+                let (bytes, len) = validate::<$max>(raw)?;
+                let len = <$len>::try_from(len).map_err(|_| IdentityError::TooLong {
+                    max: $max,
+                    actual: len,
+                })?;
+                Ok(Self { bytes, len })
+            }
 
-    /// Returns the validated bytes, without the trailing padding.
-    #[must_use]
-    pub fn as_bytes(&self) -> &[u8] {
-        self.bytes.get(..usize::from(self.len)).unwrap_or(&[])
-    }
+            /// Returns the validated bytes, without the trailing padding.
+            #[must_use]
+            pub fn as_bytes(&self) -> &[u8] {
+                self.bytes.get(..usize::from(self.len)).unwrap_or(&[])
+            }
 
-    /// Returns the length in bytes.
-    #[must_use]
-    pub const fn len(&self) -> usize {
-        self.len as usize
-    }
+            /// Returns the length in bytes.
+            #[must_use]
+            pub const fn len(&self) -> usize {
+                self.len as usize
+            }
 
-    /// Returns `false`; an identity is never empty by construction.
-    #[must_use]
-    pub const fn is_empty(&self) -> bool {
-        false
-    }
+            #[doc = concat!("Returns `false`; ", $noun, " is never empty by construction.")]
+            #[must_use]
+            pub const fn is_empty(&self) -> bool {
+                false
+            }
+        }
+    };
 }
+
+bounded_text!(Identity, MAX_IDENTITY_LEN, u8, "an identity");
 
 /// Implements [`fmt::Display`] so validated UTF-8 bytes format directly.
 macro_rules! utf8_display {
@@ -192,39 +199,6 @@ pub struct TargetResource {
     len: u16,
 }
 
-impl TargetResource {
-    /// Parses `raw` into a target resource.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`IdentityError`] when `raw` is empty, longer than
-    /// [`MAX_TARGET_LEN`] bytes, or outside the permitted character set.
-    pub fn parse(raw: &str) -> Result<Self, IdentityError> {
-        let (bytes, len) = validate::<MAX_TARGET_LEN>(raw)?;
-        let len = u16::try_from(len).map_err(|_| IdentityError::TooLong {
-            max: MAX_TARGET_LEN,
-            actual: len,
-        })?;
-        Ok(Self { bytes, len })
-    }
-
-    /// Returns the validated bytes, without the trailing padding.
-    #[must_use]
-    pub fn as_bytes(&self) -> &[u8] {
-        self.bytes.get(..usize::from(self.len)).unwrap_or(&[])
-    }
-
-    /// Returns the length in bytes.
-    #[must_use]
-    pub const fn len(&self) -> usize {
-        self.len as usize
-    }
-
-    /// Returns `false`; a target resource is never empty by construction.
-    #[must_use]
-    pub const fn is_empty(&self) -> bool {
-        false
-    }
-}
+bounded_text!(TargetResource, MAX_TARGET_LEN, u16, "a target resource");
 
 utf8_display!(TargetResource);

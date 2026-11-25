@@ -527,8 +527,11 @@ fn the_crate_source_names_no_md5_implementation() {
     );
 }
 
-/// The library uses `unwrap_or` in exactly the six places the crate
+/// The library source uses `unwrap_or` in exactly the five places the crate
 /// documentation inventories.
+///
+/// The `identity` site is one macro body that expands for two types, so the
+/// count is of source text, not of expanded call sites.
 ///
 /// HISS-07 bans `unwrap` and `expect` outright, which clippy enforces. This
 /// catches the looser failure: an inventory in the documentation that has
@@ -536,7 +539,7 @@ fn the_crate_source_names_no_md5_implementation() {
 #[test]
 fn the_unwrap_or_inventory_is_exact() {
     let expected = [
-        ("identity.rs", 2usize),
+        ("identity.rs", 1usize),
         ("ledger/hash.rs", 1),
         ("ledger/signer.rs", 1),
         ("engine.rs", 1),
@@ -551,7 +554,7 @@ fn the_unwrap_or_inventory_is_exact() {
             total = total.saturating_add(count);
         }
     }
-    assert_eq!(total, 6, "the inventory claims six sites, found {found:?}");
+    assert_eq!(total, 5, "the inventory claims five sites, found {found:?}");
     for (suffix, count) in expected {
         let hit = found
             .iter()

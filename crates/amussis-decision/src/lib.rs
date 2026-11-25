@@ -70,19 +70,18 @@
 //!
 //! HISS-07 bans `unwrap` and `expect`; `unwrap_or` is permitted because it names
 //! the fallback, but every use still has to be justified rather than counted
-//! loosely. There are **six**, and `tests/manifest_hygiene.rs` fails if that
-//! ever stops being the exact set:
+//! loosely. There are **five** in the source, and `tests/manifest_hygiene.rs`
+//! fails if that ever stops being the exact set:
 //!
 //! | site | fallback | why it is unreachable or correct |
 //! | :-- | :-- | :-- |
-//! | `identity::Identity::as_bytes` | `&[]` | `len <= MAX_IDENTITY_LEN` by construction, so the slice always exists |
-//! | `identity::TargetResource::as_bytes` | `&[]` | `len <= MAX_TARGET_LEN` by construction |
+//! | `as_bytes` in `identity`'s `bounded_text!`, expanded for `Identity` and `TargetResource` | `&[]` | `len <= MAX_IDENTITY_LEN` or `MAX_TARGET_LEN` by construction, so the slice always exists |
 //! | `ledger::hash::CanonicalBuffer::as_slice` | `&[]` | `len <= MAX_PREIMAGE_BYTES`, enforced on every write |
 //! | `ledger::signer::Signature::as_bytes` | `&[]` | `len <= MAX_SIGNATURE_BYTES`, enforced in `Signature::new` |
 //! | `engine::EngineConfig::default` | one-second window | `DEFAULT_APPROVAL_TTL_SECS` is a non-zero constant |
 //! | `ledger::default_service_time` | one-millisecond deadline | `DEFAULT_SINK_SERVICE_MILLIS` is a non-zero constant |
 //!
-//! The first four are the same shape: a bounded inline buffer returning a slice
+//! The first three are the same shape: a bounded inline buffer returning a slice
 //! of its own validated prefix. The last two convert a non-zero constant into a
 //! non-zero-typed value, where the only alternative would be `expect`.
 //!
