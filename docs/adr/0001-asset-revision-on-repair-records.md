@@ -13,12 +13,13 @@ action type (`ledger/mod.rs:341-348`). Halt-latch records have no subject
 to repair proposals, tickets, votes and action records. Existing sealed
 heads keep their binary layout (`ledger/mod.rs:635-652`).
 
-Three projects share the asset lifecycle. amussis (Latin *amussis*, the mason's
-levelling board; pronounced ah-MOOS-sis) is this repository. Tornus (Latin for a
-lathe; pronounced TOR-noos) owns asset design. Rhizomorph (Greek *rhiza* (root)
-and *morphe* (form), a root-like fungal cord; pronounced RY-zo-morf) owns
-commissioning and operation. amussis owns repair approval and audit. An audit
-reader must be able to tie a decision to the plant item and its revision.
+amussis (Latin for the mason's levelling board, pronounced ah-MOOS-sis)
+houses the decision engine, its Wasm module and its Go binding
+(`docs/index.md:8-18`). This ADR puts repair approval and audit there.
+In the upstream projects' terms, Tornus (Latin for a lathe, pronounced
+TOR-noos) owns asset design. Rhizomorph (Greek *rhiza*, root, and *morphe*,
+form, pronounced RY-zo-morf) owns commissioning and operation. Its kernel
+records the identities at that boundary.
 
 **Rhizomorph side.** `crates/kernel/src/lib.rs` in lusoris/rhizomorph (merged
 in its pull request 38 on 2026-11-23, read at commit 555363e1b4a0) defines
@@ -75,15 +76,19 @@ tag 6, minimum tier A, because a repair touches physical plant.
 
 - One function in D1's `revision.rs` checks that a revision is present
   exactly when the action is `AssetRepair`. Proposal decoding, intent
-  construction, ticket revision assignment and record sealing use this rule.
-- `Proposal` gains `asset_revision: Option<AssetRevision>`. The JSON key is
-  `asset-revision`, following `proposal.rs:95`. A missing key or explicit
-  `null` decodes to `None`. The writer omits the key for `None` and never
-  writes `null`. Every existing V1 proposal text still decodes. Canonical
-  texts re-encode to the same bytes. Escaped spellings may normalise
-  (`tests/proposal_text.rs:77-83`, `tests/proposal_text.rs:115-119`).
-  Decode refuses a failed fit through a new, append-only variant of the
-  `#[non_exhaustive]` `ProposalError` (`proposal.rs:69-70,138-148`).
+  construction, ticket construction, registry insertion and record sealing
+  use this rule (`proposal.rs:138-148`, `intent.rs:63`, `oversight.rs:189-204`,
+  `registry.rs:147-159`, `ledger/mod.rs:635-638`).
+- `Proposal` gains `asset_revision: Option<AssetRevision>`. Its private
+  `ProposalWire` keeps the kebab-case keys and rejects unknown fields. A
+  missing or null `asset-revision` means `None`. The writer omits `None`,
+  preserving canonical V1 bytes and decode of escaped spellings
+  (`proposal.rs:93-96`, `tests/proposal_text.rs:77-83,115-119`).
+  Derive `Deserialize` with `#[serde(try_from = "ProposalWire")]`. The
+  conversion checks the fit, so `serde_json::from_str::<Proposal>` refuses
+  a revisionless repair. `Proposal::decode` parses the wire struct after its
+  size check and calls the same conversion, preserving the typed fit error
+  as a new `ProposalError` variant (`proposal.rs:69-70,138-148,194-206`).
 - `IntentSpec` gains the same field (`intent.rs:27`). `Proposal::spec()`
   copies it into the spec and `Proposal::from_spec()` copies it back
   (`proposal.rs:153-163,118-129`). `Proposal::intent()` calls
@@ -92,32 +97,47 @@ tag 6, minimum tier A, because a repair touches physical plant.
   `IntentError::AssetRevisionMismatch` on failure. `IntentError` becomes
   `#[non_exhaustive]` (`intent.rs:11`).
   `ActionIntent::asset_revision()` exposes the validated value.
-- `ApprovalTicket` stores its action and has a public constructor
-  (`oversight.rs:177-196`). It gains a private revision field and an
-  `asset_revision() -> Option<AssetRevision>` accessor. Its public
-  `with_asset_revision(self, AssetRevision)` returns a `Result` and checks
-  the supplied value against the stored action using the shared fit rule.
-  Assigning a revision to a `FileDeletion` ticket fails. The engine copies
-  the intent's revision onto the repair ticket before registry insertion
-  (`engine.rs:682-693`) and copies the intent or ticket revision into each
-  action record it drafts (`engine.rs:797-801,870-874`).
-- The request ID comes from the caller's intent ID (`engine.rs:682`).
-  A retry can reuse it after a decision or expiry (`registry.rs:13-29`).
-  `Engine::adjudicate` looks up the held ticket by request ID alone
-  (`engine.rs:733-738,755-760`). It must refuse a held `AssetRepair` with a
-  new `OversightError::ReviewedRevisionRequired` variant. `OversightError`
-  is exhaustive today (`oversight.rs:16-18`) and already travels through
-  `DecisionError::Oversight` (`error.rs:23-32`). D4 makes `OversightError`
-  `#[non_exhaustive]` so later variants are append-only.
-- `Engine::adjudicate_repair(request, panel, vote, reviewed: AssetRevision)`
-  requires a held repair and compares both reviewed numbers with the ticket.
-  A mismatch leaves the hold pending and seals no vote. A match proceeds
-  through the usual deadline, panel and recording checks
-  (`engine.rs:755-760,788-801`). Add matching `AdjudicateRepair` in Go and
-  `amussis_adjudicate_repair` in Wasm. Both carry the asset number and
-  revision supplied by the checker alongside the existing vote fields
-  (`bindings/go/decision/decision.go:187-199,581-590`,
-  `crates/amussis-decision-wasm/src/abi.rs:222-229`).
+- `ApprovalTicket::new` takes an additional `Option<AssetRevision>` and
+  returns `Result<Self, OversightError>` (`oversight.rs:189-204`). It refuses
+  a repair without a revision and a non-repair with one, both with
+  `OversightError::AssetRevisionMismatch`. The revision stays private and
+  `asset_revision()` reads it (`oversight.rs:177-184`). The engine passes the
+  intent's revision into construction and copies the intent or ticket value
+  into action records (`engine.rs:682-694,797-801,870-874`).
+- `PendingRegistry::insert` independently checks the fit before insertion.
+  Either mismatch returns `RegistryError::AssetRevisionMismatch`, even for a
+  ticket built another way (`registry.rs:43-59,147-160`). On success, insert
+  assigns every held ticket a `HoldId`, a `u64` serial from a per-registry
+  counter. A checked increment that would overflow refuses the insert with
+  `RegistryError::HoldIdExhausted`. The counter never wraps or resets on
+  reclamation (`registry.rs:72-89,129-160`).
+- Insert returns the assigned `HoldId` and stores it with the pending ticket.
+  `DecisionEngine::decide` returns `InterceptorOutcome::RequireApproval`
+  carrying that ID alongside the ticket and its request ID
+  (`engine.rs:572,661-666,682-694`, `outcome.rs:127-128`,
+  `oversight.rs:219-223`). Reopening an expired request for the same asset
+  and revision gets a new `HoldId` (`registry.rs:13-29`).
+- Rust exports `DecisionEngine` (`engine.rs:191`, `lib.rs:188`).
+  `DecisionEngine::adjudicate` keeps the request-ID vote for non-repairs.
+  On a held repair it returns `OversightError::ReviewedRevisionRequired`
+  through `DecisionError::Oversight` (`engine.rs:733-738,755-760`,
+  `error.rs:30-32`).
+- `DecisionEngine::adjudicate_repair` takes the request ID, `HoldId`, panel,
+  vote and reviewed `AssetRevision`. It looks up the live repair by request
+  ID and checks the hold ID first. A late vote for the expired hold returns
+  `OversightError::StaleVote`, even if both asset and revision still match.
+  A wrong hold ID or either wrong reviewed number leaves the live hold
+  pending and seals no vote. A match proceeds through the deadline, panel
+  and recording checks (`engine.rs:755-760,788-801`).
+- Go's `Engine.AdjudicateRepair` and Wasm's `amussis_adjudicate_repair`
+  carry the hold ID and both reviewed numbers alongside the existing vote
+  fields (`bindings/go/decision/decision.go:187-199,325,581-590`,
+  `crates/amussis-decision-wasm/src/abi.rs:222-229`). The Wasm binding's
+  `Engine` is an alias for the Rust receiver (`binding.rs:17-19`). Today its
+  held outcome code discards the ticket (`binding.rs:167-172`). In v7 a
+  held result also writes the request ID and full `HoldId` to the shared
+  buffer. Go returns both in the held `Outcome` (`abi.rs:114-126,215-220`,
+  `bindings/go/decision/outcome.go:102-110`).
 - `RecordSubject` gains `asset_revision: Option<AssetRevision>`
   (`ledger/mod.rs:341-348`). `RecordDraft::is_well_formed()` checks the fit
   for every subject, so a missing repair revision or a revision on another
@@ -135,7 +155,11 @@ tag 6, minimum tier A, because a repair touches physical plant.
   (`ledger/anchor.rs:153-156`) and checks its conversion to `u32`, refusing
   either value above `u32::MAX` and revision zero. Tag 6 requires a status
   that carries a subject (status tags 1 through 5, `ledger/mod.rs:305-314`).
-  `HaltEngaged` and `HaltReleased` carry none (`ledger/mod.rs:541-557`).
+  The framed intent and agent must both be nonempty UTF-8 and pass
+  `IntentId::parse` and `AgentId::parse`, respectively
+  (`ledger/mod.rs:341-348`, `identity.rs:72-77,132-134,165-169`). Today the
+  reader skips both fields (`ledger/anchor.rs:178-183`). A subjectless record
+  writes two empty fields (`ledger/mod.rs:676-690`).
   Every other action ends at the principals. Both layouts require end of
   input (`ledger/anchor.rs:188`) and use the existing `CONTRACT_VERSION`.
 - `LedgerLine` gains an optional `asset_revision`, defaulted and omitted
@@ -149,39 +173,66 @@ tag 6, minimum tier A, because a repair touches physical plant.
 **D4. Version 0.3.0.** The new public field breaks Rust struct literals for
 `RecordSubject`, `Proposal`, `IntentSpec` and `LedgerLine`
 (`ledger/mod.rs:341`, `proposal.rs:96`, `intent.rs:27`, `ledger/jsonl.rs:20`).
-New variants break exhaustive matches on `ActionType`, `IntentError` and
-`OversightError` (`risk.rs:43`, `intent.rs:11`, `oversight.rs:18`).
-This release marks both error enums `#[non_exhaustive]`.
-The change ships as 0.3.0 with a `!` subject and a `Migration:` footer. It
-also marks `ActionType` and `RecordSubject` `#[non_exhaustive]` and adds
-`RecordSubject::new`, so a later field or action there is append-only.
+New variants break exhaustive matches on `ActionType`, `IntentError`,
+`OversightError` and `RegistryError` (`risk.rs:43`, `intent.rs:11`,
+`oversight.rs:18`, `registry.rs:43`). Mark the intent and oversight errors
+`#[non_exhaustive]`. Ticket construction gains a parameter, becomes fallible
+and ceases to be a `const fn` (`oversight.rs:189-204`). Registry insertion
+returns a hold ID and the held outcome gains that ID (`registry.rs:147-160`,
+`outcome.rs:127-128`). Ship with a `!` subject and a `Migration:` footer.
+Mark `ActionType` and `RecordSubject` `#[non_exhaustive]` and add
+`RecordSubject::new` so later additions are append-only.
 
-**D5. Model revisions are out of scope.** No amussis flow approves a Tornus
-design release today. Revisit when a proposal approves a design-model change;
-the Rhizomorph `ModelRevision` alias would then be mirrored the same way.
+Ship the ninth Wasm function export with the Go loader. Raise the module's
+`ABI_VERSION` and Go's `abiVersion` from 6 to 7
+(`crates/amussis-decision-wasm/src/lib.rs:177`,
+`bindings/go/decision/surface.go:15`). Add `amussis_adjudicate_repair`
+with signature `(i32) -> i32` to `moduleExports` (`surface.go:38-49`).
+Rebuild `bindings/go/decision/amussis_decision.wasm` for v7. The package
+embeds those bytes, loads them, checks the exact export table and checks the
+reported version (`decision.go:65-66,374,432-437,477-484`,
+`surface.go:101-114`). A v7 loader refuses a v6 module and a v6 loader
+refuses a v7 module.
+
+**D5. Model revisions are out of scope.** The exhaustive action set has no
+Tornus design-release action (`risk.rs:43-54`). Revisit the upstream
+`ModelRevision` alias when a proposal approves a design-model change.
 
 **D6. Sequencing and tests.** The Rhizomorph type landed first. amussis then
-implements D1 to D4 with these tests, to be added under
-`crates/amussis-decision`:
+implements D1 to D4 with these tests:
 
-- Boundary: revision 1 and `u32::MAX` accepted, 0 refused (constructor and
-  serde decode).
-- Negative: a repair proposal without a revision is refused; a repair record
-  without one is refused by `canonical_preimage()`; a non-repair record or
-  proposal with one is refused.
-- Compatibility: an existing non-repair record fixture keeps its pre-image
-  digest, and `ChainAnchor` still continues a chain whose last record was
-  sealed before this change.
-- Ticket and vote tests extend `tests/registry_lifecycle.rs:38-64`. Refuse a
-  revision on a `FileDeletion` ticket and a revision-free vote on a held
-  repair. Decide a hold for revision 3, then reuse its request ID for the
-  same asset at revision 4. A delayed vote naming revision 3 must fail
-  without deciding the new hold. A vote naming revision 4 can still succeed.
+- Boundary: revision 1 and `u32::MAX` accepted, 0 refused (D1 constructor
+  and serde decode).
+- Give both `Proposal::decode` and `serde_json::from_str::<Proposal>` a
+  revisionless repair and a non-repair with a revision. Both refuse each
+  input (`proposal.rs:93-96,138-148`). Sealing refuses both record shapes
+  (`ledger/mod.rs:635-638`).
+- Retain an existing non-repair fixture's pre-image digest and continue its
+  chain with `ChainAnchor` (`tests/chain_continuation.rs:329-343`).
+  Through the bundled v7 module, Go's `Continue` opens a chain head written
+  before tag 6 and appends the next linked record
+  (`bindings/go/decision/continue_test.go:184-198`).
+- At `ApprovalTicket::new` and independently at `PendingRegistry::insert`,
+  refuse a repair with no revision and `FileDeletion` with one. Supply the
+  malformed tickets directly to the insertion tests. At serial exhaustion
+  assert the named error and no insertion (`oversight.rs:189-204`,
+  `registry.rs:147-160`).
+- Extend `tests/registry_lifecycle.rs:38-64,70-88`. Refuse a plain vote on
+  a repair. Decide a hold at revision 3, reopen its request at revision 4
+  and refuse the delayed revision-3 vote. Separately, expire a hold and
+  reopen the same request ID for the same asset and
+  revision. Assert distinct hold IDs. Voting with the expired ID must
+  return `StaleVote`, leave the new hold pending and append no record. With
+  the live ID, refuse a wrong asset or revision independently, then accept
+  the matching vote (`engine.rs:755-760,792-801`).
 - Anchor tests extend `tests/chain_continuation.rs:511-513,528-532`. Accept a
   tag-6 head with both words. Give each malformed head its own digest. Test
   each refusal separately for a missing word, an extra byte, revision zero,
   asset above `u32::MAX`, revision above `u32::MAX`, status `HaltEngaged`,
-  status `HaltReleased`, and a trailing byte on a legacy action.
+  status `HaltReleased`, and a trailing byte on a legacy action. Refuse an
+  `Approved` tag-6 head with valid words, its own digest and empty intent
+  and agent. Also refuse each malformed identifier with the other valid
+  (`ledger/anchor.rs:178-183`, `identity.rs:72-77`).
 
 ## Consequences
 
@@ -191,9 +242,12 @@ implements D1 to D4 with these tests, to be added under
   Existing V1 texts still decode and their canonical forms keep their bytes
   (`tests/proposal_text.rs:77-83,115-119`). Omitting an absent revision
   preserves existing JSONL output (`ledger/jsonl.rs:142-145`).
-- **Positive**: The checker supplies the reviewed asset and revision with
-  the vote. Only a match with the held repair ticket can reach the sealed
-  decision, even after request ID reuse (`engine.rs:755-760,792-801`,
+- **Positive**: Only a vote naming the live hold and its reviewed asset and
+  revision can decide a repair after request ID reuse
+  (`engine.rs:755-760,792-801`, `registry.rs:13-29`).
+- **Negative**: Plain adjudication for non-repairs still votes by request ID.
+  A delayed vote can decide a reopened request. Track that existing reuse
+  window in a follow-up issue outside this ADR (`engine.rs:733-738,755-760`,
   `registry.rs:13-29`).
 - **Positive**: A shape rule in `is_well_formed()` makes a planted or
   stripped revision a `PreimageError::Shape` failure, not a silent mismatch.
@@ -202,8 +256,8 @@ implements D1 to D4 with these tests, to be added under
 - **Negative**: Rust callers must migrate struct literals for `RecordSubject`,
   `Proposal`, `IntentSpec` and the public JSONL projection `LedgerLine`
   (`ledger/jsonl.rs:20-52`). D4 also requires callers to update exhaustive
-  matches on `ActionType`, `IntentError` and `OversightError` (see the
-  `Migration:` footer).
+  matches on the action and errors, held outcomes, constructor calls and
+  registry insertions.
 - **Negative**: The mirror of Rhizomorph's numbers is by convention; no
   compile-time check ties the two types together, so host mapping code carries
   the risk of drift.
@@ -241,6 +295,9 @@ implements D1 to D4 with these tests, to be added under
 ## Open questions
 
 - Must a repair approval also check that the revision is the asset's current
-  one? That needs a host query; the decision crate holds no plant state.
+  one? The host would need to query it. The engine stores configuration,
+  halt state, pending tickets, ledger and clock state. It holds no plant
+  state (`engine.rs:191-208`), and the Wasm host effects are clock, signer
+  and sink (`docs/index.md:30-31`).
 - Is Tier A the right floor, or should the class come from the plant's own
   hazard rating?
