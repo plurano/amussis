@@ -76,9 +76,20 @@ tag 6, minimum tier A, because a repair touches physical plant.
   re-encodes byte-identically. Decode refuses `asset-repair` without it and
   any other action with it, through a new `ProposalError` variant (append-only
   because the enum is `#[non_exhaustive]`).
+- `IntentSpec` (`intent.rs`) gains the same field, and `ActionIntent` keeps
+  it, read by `ActionIntent::asset_revision()`. `ActionIntent::new` refuses
+  a spec whose action and revision do not fit, through a new
+  `IntentError::AssetRevisionMismatch` variant. `IntentError` becomes
+  `#[non_exhaustive]`. `Proposal::intent()` carries the proposal's revision
+  into the spec.
 - `ApprovalTicket` gains a private field, set by
   `with_asset_revision(self, AssetRevision) -> Self` and read by
-  `asset_revision() -> Option<AssetRevision>`.
+  `asset_revision() -> Option<AssetRevision>`. The engine (`engine.rs`) sets
+  it from the intent when it opens the hold, and copies the revision of the
+  intent or the ticket into every record subject it drafts.
+- One fit rule, one function in `revision.rs`: an `AssetRepair` action has a
+  revision and every other action has none. The proposal decode,
+  `ActionIntent::new` and `RecordDraft::is_well_formed()` all call it.
 - `RecordSubject` gains `asset_revision: Option<AssetRevision>`.
   `is_well_formed()` requires it exactly when `action_type` is `AssetRepair`.
   A repair record without it, or any other record with it, fails
@@ -92,9 +103,9 @@ tag 6, minimum tier A, because a repair touches physical plant.
 - `LedgerLine` gains `asset_revision`, defaulted and skipped when none, so
   existing JSONL lines read and render unchanged.
 
-**D4. Version 0.3.0.** A new public field on `RecordSubject` and `Proposal`
-and a new variant on exhaustive `ActionType` break Rust callers (struct
-literals, exhaustive matches). They break no stored record or proposal text.
+**D4. Version 0.3.0.** A new public field on `RecordSubject`, `Proposal`
+and `IntentSpec`, and a new variant on the exhaustive `ActionType` and
+`IntentError`, break Rust callers (struct literals, exhaustive matches). They break no stored record or proposal text.
 The change ships as 0.3.0 with a `!` subject and a `Migration:` footer. It
 also marks `ActionType` and `RecordSubject` `#[non_exhaustive]` and adds
 `RecordSubject::new`, so a later field or action there is append-only.
@@ -133,8 +144,9 @@ implements D1 to D4 with these tests, to be added under
 - **Positive**: With `#[non_exhaustive]` on `ActionType` and `RecordSubject`,
   later additions pass `cargo-semver-checks` and HISS-14 as append-only.
 - **Negative**: 0.3.0 is a breaking release for Rust callers. Every struct
-  literal of `RecordSubject` or `Proposal` and every exhaustive `match` on
-  `ActionType` must change (see the `Migration:` footer).
+  literal of `RecordSubject`, `Proposal` or `IntentSpec` and every
+  exhaustive `match` on `ActionType` or `IntentError` must change (see the
+  `Migration:` footer).
 - **Negative**: The mirror of Rhizomorph's numbers is by convention; no
   compile-time check ties the two types together, so host mapping code carries
   the risk of drift.
