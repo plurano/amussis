@@ -104,3 +104,4 @@ nav:
   - Decision records:
       - Index: adr/README.md
       - Template: adr/0000-template.md
+      - Asset revision on repair records: adr/0001-asset-revision-on-repair-records.md
