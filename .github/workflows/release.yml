@@ -99,4 +99,4 @@ jobs:
     needs: [build, verify]
     permissions:
       contents: write
-    uses: plurano/horistes/.github/workflows/draft-release.yml@e82d9bd7ab2c1d76ac4126550cd106bf32816bc5  # main
+    uses: plurano/horistes/.github/workflows/draft-release.yml@a82adb5f0cc7cbf3a26d3cdf1b62bfbd8f30e02d  # main
